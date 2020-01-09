@@ -1,0 +1,38 @@
+--- xulrunner-16.0.2/mozilla-release/xulrunner/installer/Makefile.in.orig	2012-11-05 11:17:57.000000000 +0100
++++ xulrunner-16.0.2/mozilla-release/xulrunner/installer/Makefile.in	2012-11-05 11:56:22.513385775 +0100
+@@ -46,6 +46,7 @@
+ 
+ pkg_config_files = \
+ 	libxul.pc \
++	libxul-embedding-lib.pc \
+ 	libxul-embedding.pc \
+ 	mozilla-js.pc \
+ 	mozilla-plugin.pc \
+--- xulrunner-16.0.2/mozilla-release/xulrunner/installer/libxul-embedding-lib.pc.in.orig	2012-11-05 11:59:31.493626458 +0100
++++ xulrunner-16.0.2/mozilla-release/xulrunner/installer/libxul-embedding-lib.pc.in	2012-11-05 12:01:03.547230893 +0100
+@@ -0,0 +1,11 @@
++prefix=%prefix%
++sdkdir=%sdkdir%
++includedir=%includedir%
++idldir=%idldir%
++
++Name: libxul-embedding-lib
++Description: Static library for version-independent embedding of the Mozilla runtime for libraries
++Version: %MOZILLA_VERSION%
++Requires: %NSPR_NAME% >= %NSPR_VERSION%
++Libs: -L${sdkdir}/lib -lxpcomglue -ldl
++Cflags: -DXPCOM_GLUE -I${includedir} %WCHAR_CFLAGS%
+--- xulrunner-16.0.2/mozilla-release/xulrunner/installer/libxul-embedding.pc.in.fixembed	2012-11-05 11:17:57.227491778 +0100
++++ xulrunner-16.0.2/mozilla-release/xulrunner/installer/libxul-embedding.pc.in	2012-11-05 12:01:56.140574788 +0100
+@@ -4,8 +4,8 @@
+ idldir=%idldir%
+ 
+ Name: libxul-embedding
+-Description: Static library for version-independent embedding of the Mozilla runtime
++Description: Static library for version-independent embedding of the Mozilla runtime for applications
+ Version: %MOZILLA_VERSION%
+-Requires: %NSPR_NAME% >= %NSPR_VERSION%
+-Libs: -L${sdkdir}/lib -lxpcomglue -ldl
++Requires: %NSPR_NAME% >= %NSPR_VERSION% , libxul-embedding-lib = %MOZILLA_VERSION%
++Libs: -L${sdkdir}/lib -Wl,--whole-archive -lmozglue -lmemory -Wl,--no-whole-archive -ldl -rdynamic
+ Cflags: -DXPCOM_GLUE -I${includedir} %WCHAR_CFLAGS%

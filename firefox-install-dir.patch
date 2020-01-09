@@ -1,0 +1,12 @@
+diff -up mozilla-aurora/config/baseconfig.mk.orig mozilla-aurora/config/baseconfig.mk
+--- mozilla-aurora/config/baseconfig.mk.orig	2014-05-06 13:17:17.000000000 +0200
++++ mozilla-aurora/config/baseconfig.mk	2014-05-27 17:13:05.215503107 +0200
+@@ -4,7 +4,7 @@
+ # whether a normal build is happening or whether the check is running.
+ includedir := $(includedir)/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
+ idldir = $(datadir)/idl/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
+-installdir = $(libdir)/$(MOZ_APP_NAME)-$(MOZ_APP_VERSION)
++installdir = $(libdir)/$(MOZ_APP_NAME)
+ sdkdir = $(libdir)/$(MOZ_APP_NAME)-devel-$(MOZ_APP_VERSION)
+ ifndef TOP_DIST
+ TOP_DIST = dist

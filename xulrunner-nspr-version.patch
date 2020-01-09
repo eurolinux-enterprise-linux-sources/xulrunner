@@ -1,0 +1,12 @@
+diff -up xulrunner-17.0.8/mozilla-esr17/xulrunner/installer/Makefile.in.nspr xulrunner-17.0.8/mozilla-esr17/xulrunner/installer/Makefile.in
+--- xulrunner-17.0.8/mozilla-esr17/xulrunner/installer/Makefile.in.nspr	2013-08-01 13:59:21.000000000 +0200
++++ xulrunner-17.0.8/mozilla-esr17/xulrunner/installer/Makefile.in	2013-08-01 15:20:51.311864276 +0200
+@@ -91,7 +91,7 @@ endif
+ 	-e "s|%FULL_NSPR_LIBS%|$(FULL_NSPR_LIBS)|" \
+ 	-e "s|%FULL_NSPR_CFLAGS%|$(FULL_NSPR_CFLAGS)|" \
+ 	-e "s|%NSPR_NAME%|$(NSPR_NAME)|" \
+-	-e "s|%NSPR_VERSION%|$(NSPR_VERSION)|" \
++	-e "s|%NSPR_VERSION%|__RH_NSPR_VERSION__|" \
+ 	-e "s|%MOZ_XUL_LINK%|$(MOZ_XUL_LINK)|" \
+ 	-e "s|%MOZ_JS_LINK%|$(MOZ_JS_LINK)|" > $@
+ 	chmod 644 $@

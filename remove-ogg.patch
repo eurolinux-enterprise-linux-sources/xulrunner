@@ -1,0 +1,449 @@
+diff -up mozilla-aurora/config/external/moz.build.remove-ogg mozilla-aurora/config/external/moz.build
+--- mozilla-aurora/config/external/moz.build.remove-ogg	2014-05-06 13:17:17.000000000 +0200
++++ mozilla-aurora/config/external/moz.build	2014-06-03 13:51:14.450340480 +0200
+@@ -33,14 +33,15 @@ if CONFIG['MOZ_WEBM_ENCODER']:
+ if CONFIG['MOZ_VPX'] and not CONFIG['MOZ_NATIVE_LIBVPX']:
+     external_dirs += ['media/libvpx']
+ 
++if CONFIG['MOZ_OGG']:
++    external_dirs += ['media/libogg', 'media/libtheora']
++
+ if not CONFIG['MOZ_NATIVE_PNG']:
+     external_dirs += ['media/libpng']
+ 
+ external_dirs += [
+     'media/kiss_fft',
+     'media/libcubeb',
+-    'media/libogg',
+-    'media/libtheora',
+     'media/libspeex_resampler',
+     'media/libsoundtouch',
+ ]
+diff -up mozilla-aurora/configure.in.remove-ogg mozilla-aurora/configure.in
+--- mozilla-aurora/configure.in.remove-ogg	2014-05-06 13:17:17.000000000 +0200
++++ mozilla-aurora/configure.in	2014-06-03 13:51:14.452340483 +0200
+@@ -3938,6 +3938,7 @@ MOZ_FEEDS=1
+ MOZ_WEBAPP_RUNTIME=
+ MOZ_JSDEBUGGER=1
+ MOZ_AUTH_EXTENSION=1
++MOZ_OGG=1
+ MOZ_RAW=
+ MOZ_VORBIS=
+ MOZ_TREMOR=
+@@ -5191,25 +5192,37 @@ fi
+ 
+ AC_SUBST(MOZ_RAW)
+ 
+-dnl Checks for __attribute__(aligned()) directive need by libogg
+-AC_CACHE_CHECK([__attribute__ ((aligned ())) support],
+-    [ac_cv_c_attribute_aligned],
+-    [ac_cv_c_attribute_aligned=0
+-     CFLAGS_save="${CFLAGS}"
+-     CFLAGS="${CFLAGS} -Werror"
+-     for ac_cv_c_attr_align_try in 64 32 16 8; do
+-       echo "trying $ac_cv_c_attr_align_try"
+-       AC_TRY_COMPILE([],
+-                      [static char c __attribute__ ((aligned(${ac_cv_c_attr_align_try}))) = 0; return c;],
+-                      [ac_cv_c_attribute_aligned="${ac_cv_c_attr_align_try}"])
+-       if test "$ac_cv_c_attribute_aligned" != 0; then
+-         break;
+-       fi
+-     done
+-       CFLAGS="${CFLAGS_save}"])
+-if test "${ac_cv_c_attribute_aligned}" != "0"; then
+-  AC_DEFINE_UNQUOTED([ATTRIBUTE_ALIGNED_MAX],
+-                     [${ac_cv_c_attribute_aligned}],[Maximum supported data alignment])
++dnl ========================================================
++dnl = Disable Ogg Codecs
++dnl ========================================================
++MOZ_ARG_DISABLE_BOOL(ogg,
++[  --disable-ogg           Disable support for OGG media (Theora video and Vorbis audio)],
++    MOZ_OGG=,
++    MOZ_OGG=1)
++
++if test -n "$MOZ_OGG"; then
++    AC_DEFINE(MOZ_OGG)
++
++    dnl Checks for __attribute__(aligned()) directive
++    AC_CACHE_CHECK([__attribute__ ((aligned ())) support],
++        [ac_cv_c_attribute_aligned],
++        [ac_cv_c_attribute_aligned=0
++         CFLAGS_save="${CFLAGS}"
++         CFLAGS="${CFLAGS} -Werror"
++         for ac_cv_c_attr_align_try in 64 32 16 8; do
++           echo "trying $ac_cv_c_attr_align_try"
++           AC_TRY_COMPILE([],
++                          [static char c __attribute__ ((aligned(${ac_cv_c_attr_align_try}))) = 0; return c;],
++                          [ac_cv_c_attribute_aligned="${ac_cv_c_attr_align_try}"])
++           if test "$ac_cv_c_attribute_aligned" != 0; then
++             break;
++           fi
++         done
++           CFLAGS="${CFLAGS_save}"])
++    if test "${ac_cv_c_attribute_aligned}" != "0"; then
++      AC_DEFINE_UNQUOTED([ATTRIBUTE_ALIGNED_MAX],
++                         [${ac_cv_c_attribute_aligned}],[Maximum supported data alignment])
++    fi
+ fi
+ 
+ dnl ========================================================
+@@ -5426,7 +5439,7 @@ AC_SUBST(MOZ_NATIVE_LIBVPX)
+ AC_SUBST(MOZ_LIBVPX_CFLAGS)
+ AC_SUBST(MOZ_LIBVPX_LIBS)
+ 
+-if test "$MOZ_WEBM"; then
++if test "$MOZ_WEBM" -o "$MOZ_OGG"; then
+     if test "$MOZ_SAMPLE_TYPE_FLOAT32"; then
+         MOZ_VORBIS=1
+     else
+@@ -5533,6 +5546,15 @@ dnl ====================================
+ dnl = Handle dependent MEDIA defines
+ dnl ========================================================
+ 
++if test -n "$MOZ_OPUS" -a -z "$MOZ_OGG"; then
++    AC_MSG_ERROR([MOZ_OPUS requires MOZ_OGG which is disabled.])
++fi
++
++if test -n "$MOZ_VORBIS" -a -z "$MOZ_OGG"; then
++    AC_MSG_ERROR([MOZ_VORBIS requires MOZ_OGG which is disabled.
++Note that you need vorbis support for WebM playback.])
++fi
++
+ if test -n "$MOZ_VORBIS" -a -n "$MOZ_TREMOR"; then
+     AC_MSG_ERROR([MOZ_VORBIS and MOZ_TREMOR are mutually exclusive!  The build system should not allow them both to be set, but they are.  Please file a bug at https://bugzilla.mozilla.org/])
+ fi
+@@ -8842,6 +8864,7 @@ AC_SUBST(MOZ_APPLEMEDIA)
+ AC_SUBST(MOZ_OMX_PLUGIN)
+ AC_SUBST(MOZ_VPX_ERROR_CONCEALMENT)
+ AC_SUBST(MOZ_VPX)
++AC_SUBST(MOZ_OGG)
+ AC_SUBST(VPX_AS)
+ AC_SUBST(VPX_ASFLAGS)
+ AC_SUBST(VPX_DASH_C_FLAG)
+diff -up mozilla-aurora/content/html/content/src/HTMLAudioElement.cpp.remove-ogg mozilla-aurora/content/html/content/src/HTMLAudioElement.cpp
+--- mozilla-aurora/content/html/content/src/HTMLAudioElement.cpp.remove-ogg	2014-05-06 13:17:19.000000000 +0200
++++ mozilla-aurora/content/html/content/src/HTMLAudioElement.cpp	2014-06-03 13:51:14.452340483 +0200
+@@ -81,12 +81,16 @@ nsresult HTMLAudioElement::SetAcceptHead
+ #ifdef MOZ_WEBM
+       "audio/webm,"
+ #endif
++#ifdef MOZ_OGG
+       "audio/ogg,"
++#endif
+ #ifdef MOZ_WAVE
+       "audio/wav,"
+ #endif
+       "audio/*;q=0.9,"
++#ifdef MOZ_OGG
+       "application/ogg;q=0.7,"
++#endif
+       "video/*;q=0.6,*/*;q=0.5");
+ 
+     return aChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
+diff -up mozilla-aurora/content/html/content/src/HTMLVideoElement.cpp.remove-ogg mozilla-aurora/content/html/content/src/HTMLVideoElement.cpp
+--- mozilla-aurora/content/html/content/src/HTMLVideoElement.cpp.remove-ogg	2014-05-06 13:17:19.000000000 +0200
++++ mozilla-aurora/content/html/content/src/HTMLVideoElement.cpp	2014-06-03 13:51:14.452340483 +0200
+@@ -136,9 +136,13 @@ nsresult HTMLVideoElement::SetAcceptHead
+ #ifdef MOZ_WEBM
+       "video/webm,"
+ #endif
++#ifdef MOZ_OGG
+       "video/ogg,"
++#endif
+       "video/*;q=0.9,"
++#ifdef MOZ_OGG
+       "application/ogg;q=0.7,"
++#endif
+       "audio/*;q=0.6,*/*;q=0.5");
+ 
+   return aChannel->SetRequestHeader(NS_LITERAL_CSTRING("Accept"),
+diff -up mozilla-aurora/content/media/DecoderTraits.cpp.remove-ogg mozilla-aurora/content/media/DecoderTraits.cpp
+--- mozilla-aurora/content/media/DecoderTraits.cpp.remove-ogg	2014-05-06 13:17:20.000000000 +0200
++++ mozilla-aurora/content/media/DecoderTraits.cpp	2014-06-03 13:51:14.452340483 +0200
+@@ -13,8 +13,10 @@
+ #include "MediaPluginHost.h"
+ #endif
+ 
++#ifdef MOZ_OGG
+ #include "OggDecoder.h"
+ #include "OggReader.h"
++#endif
+ #ifdef MOZ_WAVE
+ #include "WaveDecoder.h"
+ #include "WaveReader.h"
+@@ -100,6 +102,7 @@ IsRawType(const nsACString& aType)
+ }
+ #endif
+ 
++#ifdef MOZ_OGG
+ // See http://www.rfc-editor.org/rfc/rfc5334.txt for the definitions
+ // of Ogg media types and codec types
+ static const char* const gOggTypes[4] = {
+@@ -131,6 +134,7 @@ IsOggType(const nsACString& aType)
+ 
+   return CodecListContains(gOggTypes, aType);
+ }
++#endif
+ 
+ #ifdef MOZ_WAVE
+ // See http://www.rfc-editor.org/rfc/rfc2361.txt for the definitions
+@@ -199,8 +203,10 @@ IsGStreamerSupportedType(const nsACStrin
+   if (IsWebMType(aMimeType) && !Preferences::GetBool("media.prefer-gstreamer", false))
+     return false;
+ #endif
++#ifdef MOZ_OGG
+   if (IsOggType(aMimeType) && !Preferences::GetBool("media.prefer-gstreamer", false))
+     return false;
++#endif
+ 
+   return GStreamerDecoder::CanHandleMediaType(aMimeType, nullptr);
+ }
+@@ -370,10 +376,12 @@ DecoderTraits::CanHandleMediaType(const
+     result = CANPLAY_MAYBE;
+   }
+ #endif
++#ifdef MOZ_OGG
+   if (IsOggType(nsDependentCString(aMIMEType))) {
+     codecList = MediaDecoder::IsOpusEnabled() ? gOggCodecsWithOpus : gOggCodecs;
+     result = CANPLAY_MAYBE;
+   }
++#endif
+ #ifdef MOZ_WAVE
+   if (IsWaveType(nsDependentCString(aMIMEType))) {
+     codecList = gWaveCodecs;
+@@ -479,10 +487,12 @@ InstantiateDecoder(const nsACString& aTy
+     return decoder.forget();
+   }
+ #endif
++#ifdef MOZ_OGG
+   if (IsOggType(aType)) {
+     decoder = new OggDecoder();
+     return decoder.forget();
+   }
++#endif
+ #ifdef MOZ_WAVE
+   if (IsWaveType(aType)) {
+     decoder = new WaveDecoder();
+@@ -587,9 +597,11 @@ MediaDecoderReader* DecoderTraits::Creat
+     decoderReader = new RawReader(aDecoder);
+   } else
+ #endif
++#ifdef MOZ_OGG
+   if (IsOggType(aType)) {
+     decoderReader = new OggReader(aDecoder);
+   } else
++#endif
+ #ifdef MOZ_WAVE
+   if (IsWaveType(aType)) {
+     decoderReader = new WaveReader(aDecoder);
+@@ -642,7 +654,9 @@ MediaDecoderReader* DecoderTraits::Creat
+ bool DecoderTraits::IsSupportedInVideoDocument(const nsACString& aType)
+ {
+   return
++#ifdef MOZ_OGG
+     IsOggType(aType) ||
++#endif
+ #ifdef MOZ_OMX_DECODER
+     // We support amr inside WebApps on firefoxOS but not in general web content.
+     // Ensure we dont create a VideoDocument when accessing amr URLs directly.
+diff -up mozilla-aurora/content/media/encoder/MediaEncoder.cpp.remove-ogg mozilla-aurora/content/media/encoder/MediaEncoder.cpp
+--- mozilla-aurora/content/media/encoder/MediaEncoder.cpp.remove-ogg	2014-05-06 13:17:20.000000000 +0200
++++ mozilla-aurora/content/media/encoder/MediaEncoder.cpp	2014-06-03 13:51:14.453340485 +0200
+@@ -9,7 +9,9 @@
+ #include "prlog.h"
+ #include "mozilla/Preferences.h"
+ 
++#ifdef MOZ_OGG
+ #include "OggWriter.h"
++#endif
+ #ifdef MOZ_OPUS
+ #include "OpusTrackEncoder.h"
+ 
+@@ -133,6 +135,7 @@ MediaEncoder::CreateEncoder(const nsAStr
+     mimeType = NS_LITERAL_STRING(AUDIO_3GPP);
+   }
+ #endif // MOZ_OMX_ENCODER
++#ifdef MOZ_OGG
+   else if (MediaDecoder::IsOggEnabled() && MediaDecoder::IsOpusEnabled() &&
+            (aMIMEType.EqualsLiteral(AUDIO_OGG) ||
+            (aTrackTypes & ContainerWriter::CREATE_AUDIO_TRACK))) {
+@@ -142,6 +145,7 @@ MediaEncoder::CreateEncoder(const nsAStr
+     NS_ENSURE_TRUE(audioEncoder, nullptr);
+     mimeType = NS_LITERAL_STRING(AUDIO_OGG);
+   }
++#endif  // MOZ_OGG
+   else {
+     LOG(PR_LOG_ERROR, ("Can not find any encoder to record this media stream"));
+     return nullptr;
+diff -up mozilla-aurora/content/media/MediaDecoder.cpp.remove-ogg mozilla-aurora/content/media/MediaDecoder.cpp
+--- mozilla-aurora/content/media/MediaDecoder.cpp.remove-ogg	2014-05-06 13:17:20.000000000 +0200
++++ mozilla-aurora/content/media/MediaDecoder.cpp	2014-06-03 13:51:14.453340485 +0200
+@@ -1653,6 +1653,7 @@ MediaDecoder::IsRawEnabled()
+ }
+ #endif
+ 
++#ifdef MOZ_OGG
+ bool
+ MediaDecoder::IsOpusEnabled()
+ {
+@@ -1668,6 +1669,7 @@ MediaDecoder::IsOggEnabled()
+ {
+   return Preferences::GetBool("media.ogg.enabled");
+ }
++#endif
+ 
+ #ifdef MOZ_WAVE
+ bool
+diff -up mozilla-aurora/content/media/MediaDecoder.h.remove-ogg mozilla-aurora/content/media/MediaDecoder.h
+--- mozilla-aurora/content/media/MediaDecoder.h.remove-ogg	2014-05-06 13:17:20.000000000 +0200
++++ mozilla-aurora/content/media/MediaDecoder.h	2014-06-03 13:51:14.453340485 +0200
+@@ -844,8 +844,10 @@ public:
+   static bool IsRawEnabled();
+ #endif
+ 
++#ifdef MOZ_OGG
+   static bool IsOggEnabled();
+   static bool IsOpusEnabled();
++#endif
+ 
+ #ifdef MOZ_WAVE
+   static bool IsWaveEnabled();
+diff -up mozilla-aurora/content/media/moz.build.remove-ogg mozilla-aurora/content/media/moz.build
+--- mozilla-aurora/content/media/moz.build.remove-ogg	2014-05-06 13:17:20.000000000 +0200
++++ mozilla-aurora/content/media/moz.build	2014-06-03 13:51:14.453340485 +0200
+@@ -7,7 +7,6 @@
+ PARALLEL_DIRS += [
+   'encoder',
+   'mediasource',
+-  'ogg',
+   'webaudio',
+   'webvtt'
+ ]
+@@ -17,6 +16,9 @@ TEST_TOOL_DIRS += ['compiledtest']
+ if CONFIG['MOZ_RAW']:
+     PARALLEL_DIRS += ['raw']
+ 
++if CONFIG['MOZ_OGG']:
++    PARALLEL_DIRS += ['ogg']
++
+ if CONFIG['MOZ_WAVE']:
+     PARALLEL_DIRS += ['wave']
+ 
+diff -up mozilla-aurora/layout/media/symbols.def.in.remove-ogg mozilla-aurora/layout/media/symbols.def.in
+--- mozilla-aurora/layout/media/symbols.def.in.remove-ogg	2014-05-06 13:17:13.000000000 +0200
++++ mozilla-aurora/layout/media/symbols.def.in	2014-06-03 13:51:14.454340486 +0200
+@@ -145,6 +145,7 @@ cubeb_stream_init
+ cubeb_stream_start
+ cubeb_stream_stop
+ cubeb_stream_get_latency
++#ifdef MOZ_OGG
+ th_comment_clear
+ th_comment_init
+ th_decode_alloc
+@@ -158,6 +159,7 @@ th_info_init
+ th_packet_isheader
+ th_packet_iskeyframe
+ th_setup_free
++#endif
+ #ifdef MOZ_OPUS
+ opus_decoder_create
+ opus_decoder_destroy
+diff -up mozilla-aurora/modules/libpref/src/init/all.js.remove-ogg mozilla-aurora/modules/libpref/src/init/all.js
+--- mozilla-aurora/modules/libpref/src/init/all.js.remove-ogg	2014-05-19 11:43:49.000000000 +0200
++++ mozilla-aurora/modules/libpref/src/init/all.js	2014-06-03 13:51:25.028355239 +0200
+@@ -212,7 +212,9 @@ pref("media.fragmented-mp4.use-blank-dec
+ #ifdef MOZ_RAW
+ pref("media.raw.enabled", true);
+ #endif
++#ifdef MOZ_OGG
+ pref("media.ogg.enabled", true);
++#endif
+ #ifdef MOZ_OPUS
+ pref("media.opus.enabled", true);
+ #endif
+diff -up mozilla-aurora/python/mozbuild/mozbuild/mozinfo.py.remove-ogg mozilla-aurora/python/mozbuild/mozbuild/mozinfo.py
+--- mozilla-aurora/python/mozbuild/mozbuild/mozinfo.py.remove-ogg	2014-05-06 13:17:17.000000000 +0200
++++ mozilla-aurora/python/mozbuild/mozbuild/mozinfo.py	2014-06-03 13:51:25.028355239 +0200
+@@ -84,6 +84,7 @@ def build_dict(config, env=os.environ):
+     d['tests_enabled'] = substs.get('ENABLE_TESTS') == "1"
+     d['bin_suffix'] = substs.get('BIN_SUFFIX', '')
+ 
++    d['ogg'] = bool(substs.get('MOZ_OGG'))
+     d['webm'] = bool(substs.get('MOZ_WEBM'))
+     d['wave'] = bool(substs.get('MOZ_WAVE'))
+ 
+diff -up mozilla-aurora/uriloader/exthandler/nsExternalHelperAppService.cpp.remove-ogg mozilla-aurora/uriloader/exthandler/nsExternalHelperAppService.cpp
+--- mozilla-aurora/uriloader/exthandler/nsExternalHelperAppService.cpp.remove-ogg	2014-05-06 13:17:27.000000000 +0200
++++ mozilla-aurora/uriloader/exthandler/nsExternalHelperAppService.cpp	2014-06-03 13:51:25.030355242 +0200
+@@ -462,6 +462,7 @@ static nsDefaultMimeTypeEntry defaultMim
+   { "application/xhtml+xml", "xhtml" },
+   { "application/xhtml+xml", "xht" },
+   { TEXT_PLAIN, "txt" },
++#ifdef MOZ_OGG
+   { VIDEO_OGG, "ogv" },
+   { VIDEO_OGG, "ogg" },
+   { APPLICATION_OGG, "ogg" },
+@@ -469,6 +470,7 @@ static nsDefaultMimeTypeEntry defaultMim
+ #ifdef MOZ_OPUS
+   { AUDIO_OGG, "opus" },
+ #endif
++#endif
+ #ifdef MOZ_WEBM
+   { VIDEO_WEBM, "webm" },
+   { AUDIO_WEBM, "webm" },
+diff -up mozilla-aurora/xpcom/build/nsXPComInit.cpp.remove-ogg mozilla-aurora/xpcom/build/nsXPComInit.cpp
+--- mozilla-aurora/xpcom/build/nsXPComInit.cpp.remove-ogg	2014-06-03 14:04:38.913464144 +0200
++++ mozilla-aurora/xpcom/build/nsXPComInit.cpp	2014-06-03 14:06:03.282582245 +0200
+@@ -133,7 +133,9 @@ extern nsresult nsStringInputStreamConst
+ #include "mozilla/VisualEventTracer.h"
+ #endif
+ 
++#if MOZ_OGG
+ #include "ogg/ogg.h"
++#endif
+ #if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
+ #include "vpx_mem/vpx_mem.h"
+ #endif
+@@ -378,7 +380,7 @@ private:
+ NS_IMPL_ISUPPORTS(ICUReporter, nsIMemoryReporter)
+ 
+ /* static */ template<> Atomic<size_t> CountingAllocatorBase<ICUReporter>::sAmount(0);
+-
++#if MOZ_OGG
+ class OggReporter MOZ_FINAL : public nsIMemoryReporter,
+                               public CountingAllocatorBase<OggReporter>
+ {
+@@ -420,7 +422,7 @@ NS_IMPL_ISUPPORTS(VPXReporter, nsIMemory
+ 
+ /* static */ template<> Atomic<size_t> CountingAllocatorBase<VPXReporter>::sAmount(0);
+ #endif /* MOZ_VPX */
+-
++#endif /* MOZ_OGG */
+ #ifdef MOZ_WEBM
+ class NesteggReporter MOZ_FINAL : public nsIMemoryReporter
+                                 , public CountingAllocatorBase<NesteggReporter>
+@@ -606,12 +608,13 @@ NS_InitXPCOM2(nsIServiceManager* *result
+     // depend on the XPCOM-based memory reporting goop.  So for now, we have
+     // this oddness.
+     mozilla::SetICUMemoryFunctions();
+-
++#if MOZ_OGG
+     // Do the same for libogg.
+     ogg_set_mem_functions(OggReporter::CountingMalloc,
+                           OggReporter::CountingCalloc,
+                           OggReporter::CountingRealloc,
+                           OggReporter::CountingFree);
++#endif
+ 
+ #if defined(MOZ_VPX) && !defined(MOZ_VPX_NO_MEM_REPORTING)
+     // And for VPX.
+@@ -678,7 +681,9 @@ NS_InitXPCOM2(nsIServiceManager* *result
+ 
+     // The memory reporter manager is up and running -- register our reporters.
+     RegisterStrongMemoryReporter(new ICUReporter());
++#if MOZ_OGG
+     RegisterStrongMemoryReporter(new OggReporter());
++#endif
+ #ifdef MOZ_VPX
+     RegisterStrongMemoryReporter(new VPXReporter());
+ #endif
