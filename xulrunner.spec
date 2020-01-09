@@ -41,8 +41,8 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        31.5.0
-Release:        1%{?pre_tag}%{?dist}
+Version:        31.6.0
+Release:        2%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -465,6 +465,12 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
+* Thu Mar 26 2015 Martin Stransky <stransky@redhat.com> - 31.6.0-2
+- Update to 31.6.0 ESR Build 2
+
+* Wed Mar 25 2015 Jan Horak <jhorak@redhat.com> - 31.6.0-1
+- Update to 31.6.0 ESR
+
 * Fri Feb 20 2015 Martin Stransky <stransky@redhat.com> - 31.5.0-1
 - Update to 31.5.0 ESR
 
