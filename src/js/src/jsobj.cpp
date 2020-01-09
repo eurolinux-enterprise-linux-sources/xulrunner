@@ -235,11 +235,18 @@ js::GetOwnPropertyDescriptor(JSContext *cx, HandleObject obj, HandleId id,
     if (pobj->isNative()) {
         desc.setAttributes(GetShapeAttributes(pobj, shape));
         if (desc.hasGetterOrSetterObject()) {
+            MOZ_ASSERT(desc.isShared());
             doGet = false;
             if (desc.hasGetterObject())
                 desc.setGetterObject(shape->getterObject());
             if (desc.hasSetterObject())
                 desc.setSetterObject(shape->setterObject());
+        } else {
+            // This is either a straight-up data property or (rarely) a
+            // property with a JSPropertyOp getter/setter. The latter must be
+            // reported to the caller as a plain data property, so don't
+            // populate desc.getter/setter, and mask away the SHARED bit.
+            desc.attributesRef() &= ~JSPROP_SHARED;
         }
     } else {
         if (!JSObject::getGenericAttributes(cx, pobj, id, &desc.attributesRef()))
@@ -1838,12 +1845,8 @@ js::DeepCloneObjectLiteral(JSContext *cx, HandleObject obj, NewObjectKind newKin
     if (!clone || !clone->ensureElements(cx, obj->getDenseCapacity()))
         return nullptr;
 
-    // Copy the number of initialized elements.
-    uint32_t initialized = obj->getDenseInitializedLength();
-    if (initialized)
-        clone->setDenseInitializedLength(initialized);
-
     // Recursive copy of dense element.
+    uint32_t initialized = obj->getDenseInitializedLength();
     for (uint32_t i = 0; i < initialized; ++i) {
         v = obj->getDenseElement(i);
         if (v.isObject()) {
@@ -1855,6 +1858,7 @@ js::DeepCloneObjectLiteral(JSContext *cx, HandleObject obj, NewObjectKind newKin
             }
             v.setObject(*deepObj);
         }
+        clone->setDenseInitializedLength(i + 1);
         clone->initDenseElement(i, v);
     }
 

@@ -1,0 +1,22 @@
+--- a/media/webrtc/trunk/build/build_config.h
++++ b/media/webrtc/trunk/build/build_config.h
+@@ -123,7 +123,9 @@
+ #define ARCH_CPU_PPC_FAMILY 1
+ #define ARCH_CPU_PPC64 1
+ #define ARCH_CPU_64_BITS 1
++#ifndef _LITTLE_ENDIAN
+ #define ARCH_CPU_BIG_ENDIAN 1
++#endif
+ #elif defined(__ppc__) || defined(__powerpc__)
+ #define ARCH_CPU_PPC_FAMILY 1
+ #define ARCH_CPU_PPC 1
+@@ -156,6 +158,9 @@
+ #elif defined(__alpha__)
+ #define ARCH_CPU_ALPHA 1
+ #define ARCH_CPU_64_BITS 1
++#elif defined(__aarch64__)
++#define ARCH_CPU_AARCH64 1
++#define ARCH_CPU_64_BITS 1
+ #else
+ #error Please add support for your architecture in build/build_config.h
+ #endif

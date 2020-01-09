@@ -5,11 +5,7 @@
 # Use system nss/nspr?
 %define system_nss        1
 
-%ifarch %{ix86} x86_64 ppc ppc64
 %define enable_webm       1
-%else
-%define enable_webm       0
-%endif
 
 # Build as a debug package?
 %define debug_build       0
@@ -20,7 +16,7 @@
 # Minimal required versions
 %if %{?system_nss}
 %global nspr_version 4.10.6
-%global nss_version 3.16.2
+%global nss_version 3.16.2.3
 %endif
 
 %define cairo_version 1.6.0
@@ -45,7 +41,7 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        31.2.0
+Version:        31.5.0
 Release:        1%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
@@ -61,6 +57,7 @@ Source100:      find-external-requires
 # Build patches
 Patch0:         xulrunner-nspr-version.patch
 Patch2:         firefox-install-dir.patch
+Patch6:         webrtc-arch-cpu.patch
 Patch20:        xulrunner-24.0-jemalloc-ppc.patch
 Patch21:        disable-webm.patch
 Patch22:        remove-ogg.patch
@@ -196,6 +193,7 @@ sed -e 's/__RH_NSPR_VERSION__/%{nspr_version}/' %{P:%%PATCH0} > version.patch
 %{__patch} -p2 -b --suffix .nspr --fuzz=0 < version.patch
 
 %patch2  -p1
+%patch6  -p1 -b .webrtc-arch-cpu
 %patch20 -p2 -b .jemalloc-ppc
 %if !%{?enable_webm}
 %patch21 -p1 -b .disable-webm
@@ -247,11 +245,6 @@ echo "ac_add_options --enable-libnotify" >> .mozconfig
 echo "ac_add_options --enable-startup-notification" >> .mozconfig
 echo "ac_add_options --enable-jemalloc" >> .mozconfig
 
-# s390(x) fails to start with jemalloc enabled
-%ifarch s390 s390x
-echo "ac_add_options --disable-jemalloc" >> .mozconfig
-%endif
-
 # Debug build flags
 %if %{?debug_build}
 echo "ac_add_options --enable-debug" >> .mozconfig
@@ -297,6 +290,7 @@ MOZ_LINK_FLAGS="-Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 export CFLAGS=$MOZ_OPT_FLAGS
 export CXXFLAGS=$MOZ_OPT_FLAGS
 export LDFLAGS=$MOZ_LINK_FLAGS
+export WCHAR_CFLAGS="-std=gnu++0x"
 
 export PREFIX='%{_prefix}'
 export LIBDIR='%{_libdir}'
@@ -377,6 +371,7 @@ pushd $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
 mv ply *.py $RPM_BUILD_ROOT%{mozappdir}
 popd
 rm -rf $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
+ln -s %{mozappdir} $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
 
 # Library path
 LD_SO_CONF_D=%{_sysconfdir}/ld.so.conf.d
@@ -470,6 +465,24 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
+* Fri Feb 20 2015 Martin Stransky <stransky@redhat.com> - 31.5.0-1
+- Update to 31.5.0 ESR
+
+* Mon Jan 19 2015 Martin Stransky <stransky@redhat.com> - 31.4.0-2
+- Added -std=gnu++0x to libxul library build flags (rhbz#1170226)
+
+* Tue Jan  6 2015 Jan Horak <jhorak@redhat.com> - 31.4.0-1
+- Update to 31.4.0 ESR
+
+* Fri Dec 5 2014 Martin Stransky <stransky@redhat.com> - 31.3.0-1
+- Update to 31.3.0 ESR Build 2
+
+* Mon Nov 10 2014 Martin Stransky <stransky@redhat.com> - 31.2.0-3
+- Ship sdk/bin as a symlink for compability (rhbz#1162187)
+
+* Mon Oct 27 2014 Yaakov Selkowitz <yselkowi@redhat.com> - 31.2.0-2
+- Fix webRTC for aarch64, ppc64le (rhbz#1148622)
+
 * Tue Oct  7 2014 Jan Horak <jhorak@redhat.com> - 31.2.0-1
 - Update to 31.2.0
 
@@ -673,6 +686,3 @@ fi
 * Mon Sep 19 2011 Jan Horak <jhorak@redhat.com> - 7.0-6.b6
 - Updated to 7.0 Beta 6
 - Added fix for mozbz#674522: s390x javascript freeze fix
-
-* Wed Sep 14 2011 Martin Stransky <stransky@redhat.com> 7.0-2.b5
-- Updated to 7.0 Beta 5

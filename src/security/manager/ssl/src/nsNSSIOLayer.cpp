@@ -956,6 +956,17 @@ retryDueToTLSIntolerance(PRErrorCode err, nsNSSSocketInfo* socketInfo)
 
   uint32_t reason;
   switch (err) {
+    case SSL_ERROR_INAPPROPRIATE_FALLBACK_ALERT:
+      // This is a clear signal that we've fallen back too many versions.  Treat
+      // this as a hard failure now, but also mark the next higher version as
+      // being tolerant so that later attempts don't use this version (i.e.,
+      // range.max), which makes the error unrecoverable without a full restart.
+      socketInfo->SharedState().IOLayerHelpers()
+        .rememberTolerantAtVersion(socketInfo->GetHostName(),
+                                   socketInfo->GetPort(),
+                                   range.max + 1);
+      return false;
+
     case SSL_ERROR_BAD_MAC_ALERT: reason = 1; break;
     case SSL_ERROR_BAD_MAC_READ: reason = 2; break;
     case SSL_ERROR_HANDSHAKE_FAILURE_ALERT: reason = 3; break;
@@ -1723,16 +1734,16 @@ nsGetUserCertChoice(SSM_UserCertChoice* certChoice)
 {
   char* mode = nullptr;
   nsresult ret;
-  
+
   NS_ENSURE_ARG_POINTER(certChoice);
-  
+
   nsCOMPtr<nsIPrefBranch> pref = do_GetService(NS_PREFSERVICE_CONTRACTID);
-  
+
   ret = pref->GetCharPref("security.default_personal_cert", &mode);
   if (NS_FAILED(ret)) {
     goto loser;
   }
-  
+
   if (PL_strcmp(mode, "Select Automatically") == 0) {
     *certChoice = AUTO;
   } else if (PL_strcmp(mode, "Ask Every Time") == 0) {
@@ -2294,6 +2305,8 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
     return NS_ERROR_FAILURE;
   }
 
+ uint16_t maxEnabledVersion = range.max;
+
   infoObject->SharedState().IOLayerHelpers()
     .adjustForTLSIntolerance(infoObject->GetHostName(), infoObject->GetPort(),
                              range);
@@ -2306,6 +2319,16 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
     return NS_ERROR_FAILURE;
   }
   infoObject->SetTLSVersionRange(range);
+
+  // when adjustForTLSIntolerance tweaks the maximum version downward,
+  // we tell the server using this SCSV so they can detect a downgrade attack
+  if (range.max < maxEnabledVersion) {
+    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+           ("[%p] nsSSLIOLayerSetOptions: enabling TLS_FALLBACK_SCSV\n", fd));
+    if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_FALLBACK_SCSV, true)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
 
   bool enabled = infoObject->SharedState().IsOCSPStaplingEnabled();
   if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_OCSP_STAPLING, enabled)) {

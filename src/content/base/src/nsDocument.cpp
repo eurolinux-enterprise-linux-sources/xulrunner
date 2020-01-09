@@ -151,6 +151,9 @@
 #include "nsIDOMElementReplaceEvent.h"
 #include "mozilla/dom/HTMLLinkElement.h"
 #include "mozilla/dom/HTMLMediaElement.h"
+#ifdef MOZ_MEDIA_NAVIGATOR
+#include "mozilla/MediaManager.h"
+#endif // MOZ_MEDIA_NAVIGATOR
 #ifdef MOZ_WEBRTC
 #include "IPeerConnection.h"
 #endif // MOZ_WEBRTC
@@ -3913,7 +3916,7 @@ nsDocument::InsertChildAt(nsIContent* aKid, uint32_t aIndex,
                           bool aNotify)
 {
   if (aKid->IsElement() && GetRootElement()) {
-    NS_ERROR("Inserting element child when we already have one");
+    NS_WARNING("Inserting root element when we already have one");
     return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
   }
 
@@ -8455,6 +8458,14 @@ nsDocument::CanSavePresentation(nsIRequest *aNewRequest)
   if (quotaManager && quotaManager->HasOpenTransactions(win)) {
    return false;
   }
+
+#ifdef MOZ_MEDIA_NAVIGATOR
+  // Check if we have active GetUserMedia use
+  if (MediaManager::Exists() && win &&
+      MediaManager::Get()->IsWindowStillActive(win->WindowID())) {
+    return false;
+  }
+#endif // MOZ_MEDIA_NAVIGATOR
 
 #ifdef MOZ_WEBRTC
   // Check if we have active PeerConnections
