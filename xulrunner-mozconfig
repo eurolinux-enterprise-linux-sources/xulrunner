@@ -28,6 +28,7 @@ ac_add_options --disable-necko-wifi
 ac_add_options --disable-libjpeg-turbo
 ac_add_options --disable-cpp-exceptions
 ac_add_options --disable-updater
+ac_add_options --disable-elf-hack
 
 export BUILD_OFFICIAL=1
 export MOZILLA_OFFICIAL=1

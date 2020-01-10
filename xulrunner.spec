@@ -70,8 +70,8 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        17.0.6
-Release:        2%{?pre_tag}%{?dist}
+Version:        17.0.8
+Release:        3%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -85,6 +85,7 @@ Source100:      find-external-requires
 
 # Xulrunner patches
 # Build patches
+Patch0:         xulrunner-nspr-version.patch
 Patch1:         mozilla-build.patch
 Patch2:         xulrunner-install-dir.patch
 Patch16:        xulrunner-2.0-chromium-types.patch
@@ -100,6 +101,7 @@ Patch51:        mozilla-193-pkgconfig.patch
 # Solves runtime crash of yelp:
 Patch53:        mozilla-720682-jemalloc-missing.patch
 Patch54:        rhbz-872752.patch
+Patch55:        rhbz-966424.patch
 
 # RHEL6 specific patches
 Patch100:       mozilla-gcc-4.4.patch
@@ -107,6 +109,7 @@ Patch100:       mozilla-gcc-4.4.patch
 # Upstream patches
 Patch401:       mozilla-746112.patch
 Patch403:       mozilla-791626.patch
+Patch404:       mozilla-821502.patch
 
 # ---------------------------------------------------
 
@@ -221,6 +224,9 @@ AutoProv: 0
 %setup -q -c
 cd %{tarballdir}
 
+sed -e 's/__RH_NSPR_VERSION__/%{nspr_version}/' %{P:%%PATCH0} > version.patch
+%{__patch} -p2 -b --suffix .nspr --fuzz=0 < version.patch
+
 %patch1  -p1 -b .build
 %patch2  -p1
 
@@ -238,10 +244,12 @@ cd %{tarballdir}
 %patch51 -p2 -b .pk
 %patch53 -p1 -b .jemalloc-missing
 %patch54 -p2 -b .embedlink
+%patch55 -p1 -b .966424
 
 %patch100 -p1 -b .gcc-4.4
 %patch401 -p2 -b .746112
 %patch403 -p1 -b .791626
+%patch404 -p2 -b .821502
 
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
@@ -495,6 +503,30 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
+* Tue Aug 6 2013 Martin Stransky <stransky@redhat.com> - 17.0.8-3
+- Update to 17.0.8 ESR Build 2
+
+* Thu Aug 1 2013 Martin Stransky <stransky@redhat.com> - 17.0.8-2
+- Added fix for rhbz#990921 - firefox does not build with 
+  required nss/nspr
+
+* Wed Jul 31 2013 Martin Stransky <stransky@redhat.com> - 17.0.8-1
+- Update to 17.0.8 ESR
+
+* Wed Jun 19 2013 Jan Horak <jhorak@redhat.com> - 17.0.7-1
+- Update to 17.0.7 ESR
+
+* Tue Jun 18 2013 Jan Horak <jhorak@redhat.com> - 17.0.6-5
+- Added workaround for rhbz#973721 - fixing problem with installation
+  of  some addons
+
+* Wed Jun 12 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-4
+- Added a workaround for rhbz#961687 - Prelink throws message 
+  "Cannot safely convert .rel.dyn' section from REL to RELA"
+
+* Mon May 13 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-3
+- Added patch for aliasing issues (mozbz#821502)
+
 * Fri May 10 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-2
 - Update to 17.0.6 ESR
 
