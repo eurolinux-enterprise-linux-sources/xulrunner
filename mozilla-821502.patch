@@ -1,0 +1,33 @@
+diff -up xulrunner-17.0.6/mozilla-esr17/js/src/configure.in.821502 xulrunner-17.0.6/mozilla-esr17/js/src/configure.in
+--- xulrunner-17.0.6/mozilla-esr17/js/src/configure.in.821502	2013-05-09 20:12:23.000000000 +0200
++++ xulrunner-17.0.6/mozilla-esr17/js/src/configure.in	2013-05-13 17:06:03.368086897 +0200
+@@ -4132,6 +4132,29 @@ AC_SUBST(COMPILER_DEPEND)
+ AC_SUBST(MDDEPDIR)
+ 
+ dnl ========================================================
++dnl = Disable -fstrict-aliasing on Linux/Android with GCC 4.4 and earlier.
++dnl = See bug 821502.
++dnl ========================================================
++case "$target" in
++*-android*|*-linuxandroid*|*-*linux*)
++    if test "$GNU_CC"; then
++        changequote(,)
++        GCC_VERSION_FULL=`echo "$CXX_VERSION" | $PERL -pe 's/^.*gcc version ([^ ]*).*/$1/'`
++        GCC_VERSION=`echo "$GCC_VERSION_FULL" | $PERL -pe '(split(/\./))[0]>=4&&s/(^\d*\.\d*).*/$1/;'`
++        changequote([,])
++
++        GCC_MAJOR_VERSION=`echo ${GCC_VERSION} | $AWK -F\. '{ print $1 }'`
++        GCC_MINOR_VERSION=`echo ${GCC_VERSION} | $AWK -F\. '{ print $2 }'`
++
++        dnl GCC 3.x isn't supported, so we don't need to check for that.
++        if test "$GCC_MAJOR_VERSION" -eq "4" -a "$GCC_MINOR_VERSION" -lt "5" ; then
++            CFLAGS="$CFLAGS -fno-strict-aliasing"
++            CXXFLAGS="$CXXFLAGS -fno-strict-aliasing"
++        fi
++    fi
++esac
++
++dnl ========================================================
+ dnl = Link js shell to system readline
+ dnl ========================================================
+ MOZ_ARG_ENABLE_BOOL(readline,

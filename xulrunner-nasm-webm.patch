@@ -1,0 +1,58 @@
+--- media/libvpx/vpx_ports/x86_abi_support.asm-orig	2012-04-20 23:59:54.000000000 +0200
++++ media/libvpx/vpx_ports/x86_abi_support.asm	2012-05-03 08:52:23.183073561 +0200
+@@ -315,7 +315,7 @@
+ section .text
+ %endmacro
+ %else
+-%define SECTION_RODATA section .rodata
++%define SECTION_RODATA section .rodata align=16
+ %endif
+ 
+ 
+--- configure.in.old	2012-06-01 04:04:02.000000000 +0200
++++ configure.in	2012-06-11 16:16:00.000000000 +0200
+@@ -4315,6 +4315,6 @@
+ dnl ======================
+ 
+-AC_MSG_CHECKING([for YASM assembler])
+-AC_CHECK_PROGS(YASM, yasm, "")
++AC_MSG_CHECKING([for NASM assembler])
++AC_CHECK_PROGS(YASM, nasm, "")
+ 
+ if test -n "$YASM"; then
+@@ -5675,9 +5675,9 @@
+     case "$OS_ARCH:$CPU_ARCH" in
+     Linux:x86)
+-      VPX_ASFLAGS="-f elf32 -rnasm -pnasm"
++      VPX_ASFLAGS="-f elf32"
+       VPX_X86_ASM=1
+     ;;
+     Linux:x86_64)
+-      VPX_ASFLAGS="-f elf64 -rnasm -pnasm -DPIC"
++      VPX_ASFLAGS="-f elf64 -DPIC"
+       VPX_X86_ASM=1
+     ;;
+diff -up mozilla-beta/media/libvpx/vp8/common/x86/iwalsh_mmx.asm.old mozilla-beta/media/libvpx/vp8/common/x86/iwalsh_mmx.asm
+--- media/libvpx/vp8/common/x86/iwalsh_mmx.asm.old	2012-10-18 11:10:27.550359033 +0200
++++ media/libvpx/vp8/common/x86/iwalsh_mmx.asm	2012-10-18 11:17:22.381688409 +0200
+@@ -24,7 +24,7 @@ sym(vp8_short_inv_walsh4x4_mmx):
+ 
+     movq        mm0, [rdx + 0]    ;ip[0]
+     movq        mm1, [rdx + 8]    ;ip[4]
+-    movd        mm7, rax
++    movq        mm7, rax
+ 
+     movq        mm2, [rdx + 16]   ;ip[8]
+     movq        mm3, [rdx + 24]   ;ip[12]
+diff -up mozilla-beta/media/libvpx/vp8/encoder/x86/temporal_filter_apply_sse2.asm.old mozilla-beta/media/libvpx/vp8/encoder/x86/temporal_filter_apply_sse2.asm
+--- media/libvpx/vp8/encoder/x86/temporal_filter_apply_sse2.asm.old	2012-10-18 11:18:33.868091841 +0200
++++ media/libvpx/vp8/encoder/x86/temporal_filter_apply_sse2.asm	2012-10-18 11:19:20.062352983 +0200
+@@ -50,7 +50,7 @@ sym(vp8_temporal_filter_apply_sse2):
+         ; 0x8000 >> (16 - strength)
+         mov         rdx,            16
+         sub         rdx,            arg(4) ; 16 - strength
+-        movd        xmm4,           rdx    ; can't use rdx w/ shift
++        movq        xmm4,           rdx    ; can't use rdx w/ shift
+         movdqa      xmm5,           [GLOBAL(_const_top_bit)]
+         psrlw       xmm5,           xmm4
+         movdqa      [rsp + rounding_bit], xmm5

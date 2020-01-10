@@ -1,0 +1,11 @@
+--- mozilla-esr10/gfx/angle/src/compiler/Types.h.old	2012-03-03 04:28:20.000000000 +0100
++++ mozilla-esr10/gfx/angle/src/compiler/Types.h	2012-03-05 16:01:34.888341677 +0100
+@@ -7,6 +7,8 @@
+ #ifndef _TYPES_INCLUDED
+ #define _TYPES_INCLUDED
+ 
++#include <stdlib.h>
++
+ #include "compiler/BaseTypes.h"
+ #include "compiler/Common.h"
+ #include "compiler/compilerdebug.h"

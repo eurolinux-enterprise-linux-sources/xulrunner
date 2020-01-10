@@ -1,0 +1,91 @@
+diff -up xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape.cc.secarch xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape.cc
+--- xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape.cc.secarch	2012-10-17 16:32:38.000000000 +0200
++++ xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape.cc	2012-10-24 10:30:45.316137506 +0200
+@@ -237,12 +237,23 @@ hb_set_unicode_props (hb_buffer_t *buffe
+ static void
+ hb_form_clusters (hb_buffer_t *buffer)
+ {
++#if defined(__s390__) || defined(__s390x__)
++  hb_unicode_general_category_t category;
++#endif
+   unsigned int count = buffer->len;
+   for (unsigned int i = 1; i < count; i++)
+-    if (FLAG (_hb_glyph_info_get_general_category (&buffer->info[i])) &
++    if (
++#if defined(__s390__) || defined(__s390x__)
++    ((category = _hb_glyph_info_get_general_category (&buffer->info[i])) == HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK
++    || category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK
++    || category == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)
++#else      
++      FLAG (_hb_glyph_info_get_general_category (&buffer->info[i])) &
+ 	(FLAG (HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK) |
+ 	 FLAG (HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK) |
+-	 FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
++	 FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK))
++#endif    
++    )
+       buffer->merge_clusters (i - 1, i + 1);
+ }
+ 
+diff -up xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-complex-indic.cc.secarch xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-complex-indic.cc
+diff -up xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-fallback.cc.secarch xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-fallback.cc
+--- xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-fallback.cc.secarch	2012-10-17 16:32:38.000000000 +0200
++++ xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-fallback.cc	2012-10-24 10:11:06.085890298 +0200
+@@ -292,16 +292,28 @@ position_cluster (const hb_ot_shape_plan
+ 		  unsigned int start,
+ 		  unsigned int end)
+ {
++#if defined(__s390__) || defined(__s390x__)
++  hb_unicode_general_category_t category;
++#endif
++
+   if (end - start < 2)
+     return;
+ 
+   /* Find the base glyph */
+   for (unsigned int i = start; i < end; i++)
+     if (is_a_ligature (buffer->info[i]) ||
++#if defined(__s390__) || defined(__s390x__)
++	((category = _hb_glyph_info_get_general_category (&buffer->info[i]))
++	 != HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK
++	 && category != HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK
++	 && category != HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)
++#else
+         !(FLAG (_hb_glyph_info_get_general_category (&buffer->info[i])) &
+ 	  (FLAG (HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK) |
+ 	   FLAG (HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK) |
+-	   FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK))))
++	   FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
++#endif
++      )
+     {
+       position_around_base (plan, font, buffer, i, end);
+       break;
+diff -up xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-normalize.cc.secarch xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-normalize.cc
+--- xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-normalize.cc.secarch	2012-10-17 16:32:38.000000000 +0200
++++ xulrunner-17.0/mozilla-beta/gfx/harfbuzz/src/hb-ot-shape-normalize.cc	2012-10-24 10:36:21.186881463 +0200
+@@ -129,11 +129,22 @@ compose_func (hb_unicode_funcs_t *unicod
+ 	      hb_codepoint_t  b,
+ 	      hb_codepoint_t *ab)
+ {
++#if defined(__s390__) || defined(__s390x__)
++  hb_unicode_general_category_t category;
++#endif
+   /* XXX, this belongs to indic normalizer. */
+-  if ((FLAG (unicode->general_category (a)) &
++  if (
++#if defined(__s390__) || defined(__s390x__)
++    ((category = unicode->general_category (a)) == HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK ||
++    category == HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK ||
++    category == HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)
++#else
++    (FLAG (unicode->general_category (a)) &
+        (FLAG (HB_UNICODE_GENERAL_CATEGORY_SPACING_MARK) |
+ 	FLAG (HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK) |
+-	FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK))))
++	FLAG (HB_UNICODE_GENERAL_CATEGORY_NON_SPACING_MARK)))
++#endif
++  )
+     return false;
+   /* XXX, add composition-exclusion exceptions to Indic shaper. */
+   if (a == 0x09AF && b == 0x09BC) { *ab = 0x09DF; return true; }

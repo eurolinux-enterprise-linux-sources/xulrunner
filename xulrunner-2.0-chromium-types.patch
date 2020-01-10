@@ -1,0 +1,34 @@
+diff -up xulrunner-5.0/mozilla-release/gfx/ycbcr/chromium_types.h.chromium-types xulrunner-5.0/mozilla-release/gfx/ycbcr/chromium_types.h
+--- xulrunner-5.0/mozilla-release/gfx/ycbcr/chromium_types.h.chromium-types	2011-06-15 23:57:26.000000000 +0200
++++ xulrunner-5.0/mozilla-release/gfx/ycbcr/chromium_types.h	2011-06-29 08:23:46.807314175 +0200
+@@ -61,10 +61,14 @@ typedef PRInt16 int16;
+ #define ARCH_CPU_ARM_FAMILY 1
+ #define ARCH_CPU_ARMEL 1
+ #define ARCH_CPU_32_BITS 1
+-#elif defined(__ppc__) || defined(__powerpc) || defined(__PPC__)
++#elif defined(__ppc__) || defined(__powerpc__) || defined(__PPC__)
+ #define ARCH_CPU_PPC_FAMILY 1
+ #define ARCH_CPU_PPC 1
+ #define ARCH_CPU_32_BITS 1
++#elif defined(__powerpc64__)
++#define ARCH_CPU_PPC_FAMILY 1
++#define ARCH_CPU_PPC 1
++#define ARCH_CPU_64_BITS 1
+ #elif defined(__sparc)
+ #define ARCH_CPU_SPARC_FAMILY 1
+ #define ARCH_CPU_SPARC 1
+@@ -73,6 +77,14 @@ typedef PRInt16 int16;
+ #define ARCH_CPU_SPARC_FAMILY 1
+ #define ARCH_CPU_SPARC 1
+ #define ARCH_CPU_64_BITS 1
++#elif defined(__s390__)
++#define ARCH_CPU_S390_FAMILY 1
++#define ARCH_CPU_S390 1
++#define ARCH_CPU_32_BITS 1
++#elif defined(__s390x__)
++#define ARCH_CPU_S390_FAMILY 1
++#define ARCH_CPU_S390 1
++#define ARCH_CPU_64_BITS 1
+ #else
+ #warning Please add support for your architecture in chromium_types.h
+ #endif

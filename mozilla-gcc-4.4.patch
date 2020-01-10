@@ -1,0 +1,12 @@
+diff -up mozilla-esr10/js/public/Vector.h.old mozilla-esr10/js/public/Vector.h
+--- mozilla-esr10/js/public/Vector.h.old	2012-02-24 07:33:11.179857236 +0100
++++ mozilla-esr10/js/public/Vector.h	2012-02-24 07:33:38.046494495 +0100
+@@ -213,7 +213,7 @@ class Vector : private AllocPolicy
+     typedef VectorImpl<T, N, AllocPolicy, sElemIsPod> Impl;
+     friend struct VectorImpl<T, N, AllocPolicy, sElemIsPod>;
+ 
+-    bool calculateNewCapacity(size_t curLength, size_t lengthInc, size_t &newCap);
++    bool MOZ_NEVER_INLINE calculateNewCapacity(size_t curLength, size_t lengthInc, size_t &newCap);
+     bool growStorageBy(size_t lengthInc);
+     bool growHeapStorageBy(size_t lengthInc);
+     bool convertToHeapStorage(size_t lengthInc);
