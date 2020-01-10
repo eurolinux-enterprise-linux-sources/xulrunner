@@ -1,0 +1,222 @@
+# HG changeset patch
+# Parent 0b7c27024048cdfbbd62005d1c4ad5e7f6edf8a8
+# User Martin Stransky <stransky@redhat.com>
+Bug 601442 - extensions.getAddons.showPane need to be updated, r=?bmcbride
+
+diff --git a/toolkit/mozapps/extensions/content/extensions.css b/toolkit/mozapps/extensions/content/extensions.css
+--- a/toolkit/mozapps/extensions/content/extensions.css
++++ b/toolkit/mozapps/extensions/content/extensions.css
+@@ -201,8 +201,12 @@ setting[type="menulist"] {
+ /* Elements in unselected richlistitems cannot be focused */
+ richlistitem:not([selected]) * {
+   -moz-user-focus: ignore;
+ }
+ 
+ #header-search {
+   width: 22em;
+ }
++
++.discover-button[disabled="true"] {
++  display: none;
++}
+diff --git a/toolkit/mozapps/extensions/content/extensions.js b/toolkit/mozapps/extensions/content/extensions.js
+--- a/toolkit/mozapps/extensions/content/extensions.js
++++ b/toolkit/mozapps/extensions/content/extensions.js
+@@ -14,16 +14,18 @@ Cu.import("resource://gre/modules/XPCOMU
+ Cu.import("resource://gre/modules/Services.jsm");
+ Cu.import("resource://gre/modules/PluralForm.jsm");
+ Cu.import("resource://gre/modules/DownloadUtils.jsm");
+ Cu.import("resource://gre/modules/AddonManager.jsm");
+ Cu.import("resource://gre/modules/AddonRepository.jsm");
+ 
+ 
+ const PREF_DISCOVERURL = "extensions.webservice.discoverURL";
++const PREF_DISCOVER_ENABLED = "extensions.getAddons.showPane";
++const PREF_XPI_ENABLED = "xpinstall.enabled";
+ const PREF_MAXRESULTS = "extensions.getAddons.maxResults";
+ const PREF_GETADDONS_CACHE_ENABLED = "extensions.getAddons.cache.enabled";
+ const PREF_GETADDONS_CACHE_ID_ENABLED = "extensions.%ID%.getAddons.cache.enabled";
+ const PREF_UI_TYPE_HIDDEN = "extensions.ui.%TYPE%.hidden";
+ const PREF_UI_LASTCATEGORY = "extensions.ui.lastCategory";
+ 
+ const LOADING_MSG_DELAY = 100;
+ 
+@@ -138,16 +140,33 @@ function loadView(aViewId) {
+     // should be the initial history entry
+ 
+     gViewController.loadInitialView(aViewId);
+   } else {
+     gViewController.loadView(aViewId);
+   }
+ }
+ 
++function isDiscoverEnabled() {
++  if (Services.prefs.getPrefType(PREF_DISCOVERURL) == Services.prefs.PREF_INVALID)
++    return false;
++
++  try {
++    if (!Services.prefs.getBoolPref(PREF_DISCOVER_ENABLED))
++      return false;
++  } catch (e) {}
++
++  try {
++    if (!Services.prefs.getBoolPref(PREF_XPI_ENABLED))
++      return false;
++  } catch (e) {}
++
++  return true;
++}
++
+ /**
+  * A wrapper around the HTML5 session history service that allows the browser
+  * back/forward controls to work within the manager
+  */
+ var HTML5History = {
+   get index() {
+     return window.QueryInterface(Ci.nsIInterfaceRequestor)
+                  .getInterface(Ci.nsIWebNavigation)
+@@ -1737,18 +1756,18 @@ var gDiscoverView = {
+   loaded: false,
+   _browser: null,
+   _loading: null,
+   _error: null,
+   homepageURL: null,
+   _loadListeners: [],
+ 
+   initialize: function gDiscoverView_initialize() {
+-    if (Services.prefs.getPrefType(PREF_DISCOVERURL) == Services.prefs.PREF_INVALID) {
+-      this.enabled = false;
++    this.enabled = isDiscoverEnabled();
++    if (!this.enabled) {
+       gCategories.get("addons://discover/").hidden = true;
+       return;
+     }
+ 
+     this.node = document.getElementById("discover-view");
+     this._loading = document.getElementById("discover-loading");
+     this._error = document.getElementById("discover-error");
+     this._browser = document.getElementById("discover-browser");
+diff --git a/toolkit/mozapps/extensions/content/extensions.xul b/toolkit/mozapps/extensions/content/extensions.xul
+--- a/toolkit/mozapps/extensions/content/extensions.xul
++++ b/toolkit/mozapps/extensions/content/extensions.xul
+@@ -293,17 +293,19 @@
+             </hbox>
+             <spacer class="alert-spacer-after"/>
+           </vbox>
+           <vbox id="search-list-empty" class="alert-container"
+                 flex="1" hidden="true">
+             <spacer class="alert-spacer-before"/>
+             <vbox class="alert">
+               <label value="&listEmpty.search.label;"/>
+-              <button label="&listEmpty.button.label;"
++              <button class="discover-button"
++                      id="discover-button-search"
++                      label="&listEmpty.button.label;"
+                       command="cmd_goToDiscoverPane"/>
+             </vbox>
+             <spacer class="alert-spacer-after"/>
+           </vbox>
+           <richlistbox id="search-list" class="list" flex="1">
+             <hbox pack="center">
+               <label id="search-allresults-link" class="text-link"/>
+             </hbox>
+@@ -353,17 +355,19 @@
+               <spacer flex="5000"/> <!-- Necessary to allow the message to wrap -->
+             </hbox>
+           </hbox>
+           <vbox id="addon-list-empty" class="alert-container"
+                 flex="1" hidden="true">
+             <spacer class="alert-spacer-before"/>
+             <vbox class="alert">
+               <label value="&listEmpty.installed.label;"/>
+-              <button label="&listEmpty.button.label;"
++              <button class="discover-button"
++                      id="discover-button-install"
++                      label="&listEmpty.button.label;"
+                       command="cmd_goToDiscoverPane"/>
+             </vbox>
+             <spacer class="alert-spacer-after"/>
+           </vbox>
+           <richlistbox id="addon-list" class="list" flex="1"/>
+         </vbox>
+ 
+         <!-- updates view -->
+diff --git a/toolkit/mozapps/extensions/test/browser/browser_discovery.js b/toolkit/mozapps/extensions/test/browser/browser_discovery.js
+--- a/toolkit/mozapps/extensions/test/browser/browser_discovery.js
++++ b/toolkit/mozapps/extensions/test/browser/browser_discovery.js
+@@ -570,8 +570,53 @@ add_test(function() {
+ 
+   open_manager("addons://discover/", function(aWindow) {
+     gManagerWindow = aWindow;
+     var browser = gManagerWindow.document.getElementById("discover-browser");
+     is(getURL(browser), MAIN_URL + "?mode=ignore", "Should have loaded the right url");
+     close_manager(gManagerWindow, run_next_test);
+   });
+ });
++
++// Test for Bug 601442 - extensions.getAddons.showPane need to be update 
++// for the new addon manager.
++function bug_601442_test_elements(visible) {
++  open_manager("addons://list/extension", function(aWindow) {
++    gManagerWindow = aWindow;
++    gCategoryUtilities = new CategoryUtilities(gManagerWindow);
++    if(visible)
++      ok(gCategoryUtilities.isTypeVisible("discover"), "Discover category should be visible");
++    else
++      ok(!gCategoryUtilities.isTypeVisible("discover"), "Discover category should not be visible");
++
++    gManagerWindow.loadView("addons://list/dictionary");
++    wait_for_view_load(gManagerWindow, function(aManager) {
++      var button = aManager.document.getElementById("discover-button-install");
++      if(visible)
++        ok(!is_hidden(button), "Discover button should be visible!");
++      else
++        ok(is_hidden(button), "Discover button should not be visible!");
++
++      close_manager(gManagerWindow, run_next_test);
++    });
++  });
++}
++
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, false);
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, true);
++  bug_601442_test_elements(false);
++});
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, true);
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, false);
++  bug_601442_test_elements(false);
++});
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, false);
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, false);
++  bug_601442_test_elements(false);
++});
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_DISCOVER_ENABLED, true);
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, true);
++  bug_601442_test_elements(true);
++});
+diff --git a/toolkit/mozapps/extensions/test/browser/head.js b/toolkit/mozapps/extensions/test/browser/head.js
+--- a/toolkit/mozapps/extensions/test/browser/head.js
++++ b/toolkit/mozapps/extensions/test/browser/head.js
+@@ -20,16 +20,18 @@ pathParts.splice(pathParts.length - 1, p
+ pathParts.push("browser");
+ 
+ const RELATIVE_DIR = pathParts.slice(4).join("/") + "/";
+ 
+ const TESTROOT = "http://example.com/" + RELATIVE_DIR;
+ const TESTROOT2 = "http://example.org/" + RELATIVE_DIR;
+ const CHROMEROOT = pathParts.join("/") + "/";
+ const PREF_DISCOVERURL = "extensions.webservice.discoverURL";
++const PREF_DISCOVER_ENABLED = "extensions.getAddons.showPane";
++const PREF_XPI_ENABLED = "xpinstall.enabled";
+ const PREF_UPDATEURL = "extensions.update.url";
+ const PREF_GETADDONS_CACHE_ENABLED = "extensions.getAddons.cache.enabled";
+ 
+ const MANAGER_URI = "about:addons";
+ const INSTALL_URI = "chrome://mozapps/content/xpinstall/xpinstallConfirm.xul";
+ const PREF_LOGGING_ENABLED = "extensions.logging.enabled";
+ const PREF_SEARCH_MAXRESULTS = "extensions.getAddons.maxResults";
+ const PREF_STRICT_COMPAT = "extensions.strictCompatibility";

@@ -70,8 +70,8 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        17.0.8
-Release:        3%{?pre_tag}%{?dist}
+Version:        17.0.9
+Release:        1%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -110,6 +110,9 @@ Patch100:       mozilla-gcc-4.4.patch
 Patch401:       mozilla-746112.patch
 Patch403:       mozilla-791626.patch
 Patch404:       mozilla-821502.patch
+Patch405:       mozilla-601442.patch
+Patch406:       mozilla-815120.patch
+Patch407:       mozilla-633001.patch
 
 # ---------------------------------------------------
 
@@ -250,6 +253,9 @@ sed -e 's/__RH_NSPR_VERSION__/%{nspr_version}/' %{P:%%PATCH0} > version.patch
 %patch401 -p2 -b .746112
 %patch403 -p1 -b .791626
 %patch404 -p2 -b .821502
+%patch405 -p1 -b .601442
+%patch406 -p1 -b .815120
+%patch407 -p1 -b .633001
 
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
@@ -503,6 +509,16 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
+* Thu Sep 12 2013 Jan Horak <jhorak@redhat.com> - 17.0.9-1
+- Update to 17.0.9 ESR
+
+* Wed Sep  4 2013 Jan Horak <jhorak@redhat.com> - 17.0.8-5
+- Fixed mozbz#633001 - Cannot open ipv6 address with self-signed certificate
+
+* Tue Sep 3 2013 Martin Stransky <stransky@redhat.com> - 17.0.8-4
+- Fixed rhbz#818636 - Firefox allows install of addons,
+  disregarding xpinstall.enabled flag set as false.
+
 * Tue Aug 6 2013 Martin Stransky <stransky@redhat.com> - 17.0.8-3
 - Update to 17.0.8 ESR Build 2
 

@@ -1,0 +1,164 @@
+# HG changeset patch
+# Parent e42dce3209da3d347c575bea7860aa692ef107a0
+# User Martin Stransky <stransky@redhat.com>
+diff --git a/toolkit/mozapps/extensions/content/extensions.js b/toolkit/mozapps/extensions/content/extensions.js
+--- a/toolkit/mozapps/extensions/content/extensions.js
++++ b/toolkit/mozapps/extensions/content/extensions.js
+@@ -2080,16 +2080,19 @@ var gSearchView = {
+     this._filter = document.getElementById("search-filter-radiogroup");
+     this._sorters = document.getElementById("search-sorters");
+     this._sorters.handler = this;
+     this._loading = document.getElementById("search-loading");
+     this._listBox = document.getElementById("search-list");
+     this._emptyNotice = document.getElementById("search-list-empty");
+     this._allResultsLink = document.getElementById("search-allresults-link");
+ 
++    if (!AddonManager.isInstallEnabled("application/x-xpinstall"))
++      this._filter.hidden = true;
++
+     var self = this;
+     this._listBox.addEventListener("keydown", function listbox_onKeydown(aEvent) {
+       if (aEvent.keyCode == aEvent.DOM_VK_ENTER ||
+           aEvent.keyCode == aEvent.DOM_VK_RETURN) {
+         var item = self._listBox.selectedItem;
+         if (item)
+           item.showInDetailView();
+       }
+@@ -2221,16 +2224,20 @@ var gSearchView = {
+   
+   showLoading: function gSearchView_showLoading(aLoading) {
+     this._loading.hidden = !aLoading;
+     this._listBox.hidden = aLoading;
+   },
+ 
+   updateView: function gSearchView_updateView() {
+     var showLocal = this._filter.value == "local";
++
++    if (!showLocal && !AddonManager.isInstallEnabled("application/x-xpinstall"))
++      showLocal = true;
++
+     this._listBox.setAttribute("local", showLocal);
+     this._listBox.setAttribute("remote", !showLocal);
+ 
+     this.showLoading(this.isSearching && !showLocal);
+     if (!this.isSearching) {
+       var isEmpty = true;
+       var results = this._listBox.getElementsByTagName("richlistitem");
+       for (let result of results) {
+diff --git a/toolkit/mozapps/extensions/test/browser/browser_searching.js b/toolkit/mozapps/extensions/test/browser/browser_searching.js
+--- a/toolkit/mozapps/extensions/test/browser/browser_searching.js
++++ b/toolkit/mozapps/extensions/test/browser/browser_searching.js
+@@ -259,20 +259,30 @@ function get_expected_results(aSortBy, a
+  * @param  aSortBy
+  *         How the results are sorted (e.g. "name")
+  * @param  aReverseOrder
+  *         Boolean representing if the results are in reverse default order
+  * @param  aShowLocal
+  *         Boolean representing if local results are being shown
+  */
+ function check_results(aQuery, aSortBy, aReverseOrder, aShowLocal) {
+-  var localFilterSelected = gManagerWindow.document.getElementById("search-filter-local").selected;
+-  var remoteFilterSelected = gManagerWindow.document.getElementById("search-filter-remote").selected;
+-  is(localFilterSelected, aShowLocal, "Local filter should be selected if showing local items");
+-  is(remoteFilterSelected, !aShowLocal, "Remote filter should be selected if showing remote items");
++
++  var xpinstall_enabled = true;
++  try {
++    xpinstall_enabled = Services.prefs.getBoolPref(PREF_XPI_ENABLED);
++  }
++  catch (e) {};
++
++  // When XPI Instalation is disabled, those buttons are hidden and unused  
++  if (xpinstall_enabled) {
++    var localFilterSelected = gManagerWindow.document.getElementById("search-filter-local").selected;
++    var remoteFilterSelected = gManagerWindow.document.getElementById("search-filter-remote").selected;
++    is(localFilterSelected, aShowLocal, "Local filter should be selected if showing local items");
++    is(remoteFilterSelected, !aShowLocal, "Remote filter should be selected if showing remote items");
++  }
+ 
+   // Get expected order assuming default order
+   var expectedOrder = [], unknownOrder = [];
+   if (aQuery == QUERY)
+     [expectedOrder, unknownOrder] = get_expected_results(aSortBy, aShowLocal);
+ 
+   // Get actual order of results
+   var actualResults = get_actual_results();
+@@ -330,31 +340,34 @@ function check_results(aQuery, aSortBy, 
+  * Check results of a search with different filterings
+  *
+  * @param  aQuery
+  *         The search query used
+  * @param  aSortBy
+  *         How the results are sorted (e.g. "name")
+  * @param  aReverseOrder
+  *         Boolean representing if the results are in reverse default order
++ * @param  aLocalOnly
++ *         Boolean representing if the results are local only, can be undefined
+  */
+-function check_filtered_results(aQuery, aSortBy, aReverseOrder) {
++function check_filtered_results(aQuery, aSortBy, aReverseOrder, aLocalOnly) {
+   var localFilter = gManagerWindow.document.getElementById("search-filter-local");
+   var remoteFilter = gManagerWindow.document.getElementById("search-filter-remote");
+ 
+   var list = gManagerWindow.document.getElementById("search-list");
+   list.ensureElementIsVisible(localFilter);
+ 
+   // Check with showing local add-ons
+   EventUtils.synthesizeMouseAtCenter(localFilter, { }, gManagerWindow);
+   check_results(aQuery, aSortBy, aReverseOrder, true);
+ 
+   // Check with showing remote add-ons
++  aLocalOnly = aLocalOnly || false;
+   EventUtils.synthesizeMouseAtCenter(remoteFilter, { }, gManagerWindow);
+-  check_results(aQuery, aSortBy, aReverseOrder, false);
++  check_results(aQuery, aSortBy, aReverseOrder, aLocalOnly);
+ }
+ 
+ /*
+  * Get item for a specific add-on by name
+  *
+  * @param  aName
+  *         The name of the add-on to search for
+  * @return Row of add-on if found, null otherwise
+@@ -642,8 +655,41 @@ add_test(function() {
+       var installBtn = get_install_button(get_addon_item(REMOTE_TO_INSTALL));
+       is(installBtn.hidden, true, "Install button should be hidden for installed item");
+ 
+       run_next_test();
+     });
+   });
+ });
+ 
++function bug_815120_test_search(aLocalOnly) {
++  restart_manager(gManagerWindow, "addons://list/extension", function(aWindow) {
++    gManagerWindow = aWindow;
++    gCategoryUtilities = new CategoryUtilities(gManagerWindow);
++
++    // Installed add-on is considered local on new search
++    gAddonInstalled = true;
++
++    // The search buttons should be hidden in the LocalOnly setup
++    var localFilterButton = aWindow.document.getElementById("search-filter-local");
++    is(aLocalOnly, is_hidden(localFilterButton), "Local filter button visibility does not match, aLocalOnly = " + aLocalOnly);
++
++    var remoteFilterButton = aWindow.document.getElementById("search-filter-remote");
++    is(aLocalOnly, is_hidden(remoteFilterButton), "Remote filter button visibility does not match, aLocalOnly = " + aLocalOnly);
++
++    search(QUERY, false, function() {
++      check_filtered_results(QUERY, "relevancescore", false, aLocalOnly);
++      run_next_test();
++    });
++  });
++}
++
++// Tests for Bug 815120
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, false);
++  bug_815120_test_search(true);
++});
++
++add_test(function() {
++  Services.prefs.setBoolPref(PREF_XPI_ENABLED, true);
++  bug_815120_test_search(false);
++});
++

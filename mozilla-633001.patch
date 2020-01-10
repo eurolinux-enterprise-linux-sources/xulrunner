@@ -1,0 +1,144 @@
+diff --git a/security/manager/boot/src/nsStrictTransportSecurityService.cpp b/security/manager/boot/src/nsStrictTransportSecurityService.cpp
+--- a/security/manager/boot/src/nsStrictTransportSecurityService.cpp
++++ b/security/manager/boot/src/nsStrictTransportSecurityService.cpp
+@@ -1,15 +1,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #include "plstr.h"
+ #include "prlog.h"
+ #include "prprf.h"
++#include "prnetdb.h"
+ #include "nsCRTGlue.h"
+ #include "nsIPermissionManager.h"
+ #include "nsIPrivateBrowsingService.h"
+ #include "nsISSLStatus.h"
+ #include "nsISSLStatusProvider.h"
+ #include "nsStrictTransportSecurityService.h"
+ #include "nsIURI.h"
+ #include "nsNetUtil.h"
+@@ -203,27 +204,42 @@ nsStrictTransportSecurityService::Remove
+ 
+   rv = RemovePermission(hostname, STS_SUBDOMAIN_PERMISSION);
+   NS_ENSURE_SUCCESS(rv, rv);
+   STSLOG(("STS: deleted subdomains permission\n"));
+ 
+   return NS_OK;
+ }
+ 
++static bool
++HostIsIPAddress(const char *hostname)
++{
++  PRNetAddr hostAddr;
++  return (PR_StringToNetAddr(hostname, &hostAddr) == PR_SUCCESS);
++}
++
+ NS_IMETHODIMP
+ nsStrictTransportSecurityService::ProcessStsHeader(nsIURI* aSourceURI,
+                                                    const char* aHeader)
+ {
+   // Should be called on the main thread (or via proxy) since the permission
+   // manager is used and it's not threadsafe.
+   NS_ENSURE_TRUE(NS_IsMainThread(), NS_ERROR_UNEXPECTED);
+ 
++  nsCString host;
++  nsresult rv = GetHost(aSourceURI, host);
++  NS_ENSURE_SUCCESS(rv, rv);
++  if (HostIsIPAddress(host.get())) {
++    /* Don't process headers if a site is accessed by IP address. */
++    return NS_OK;
++  }
++
+   char * header = NS_strdup(aHeader);
+   if (!header) return NS_ERROR_OUT_OF_MEMORY;
+-  nsresult rv = ProcessStsHeaderMutating(aSourceURI, header);
++  rv = ProcessStsHeaderMutating(aSourceURI, header);
+   NS_Free(header);
+   return rv;
+ }
+ 
+ nsresult
+ nsStrictTransportSecurityService::ProcessStsHeaderMutating(nsIURI* aSourceURI,
+                                                            char* aHeader)
+ {
+@@ -325,16 +341,22 @@ nsStrictTransportSecurityService::Proces
+ 
+ NS_IMETHODIMP
+ nsStrictTransportSecurityService::IsStsHost(const char* aHost, bool* aResult)
+ {
+   // Should be called on the main thread (or via proxy) since the permission
+   // manager is used and it's not threadsafe.
+   NS_ENSURE_TRUE(NS_IsMainThread(), NS_ERROR_UNEXPECTED);
+ 
++  /* An IP address never qualifies as a secure URI. */
++  if (HostIsIPAddress(aHost)) {
++    *aResult = false;
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIURI> uri;
+   nsDependentCString hostString(aHost);
+   nsresult rv = NS_NewURI(getter_AddRefs(uri),
+                           NS_LITERAL_CSTRING("https://") + hostString);
+   NS_ENSURE_SUCCESS(rv, rv);
+   return IsStsURI(uri, aResult);
+ }
+ 
+@@ -379,16 +401,21 @@ nsStrictTransportSecurityService::IsStsU
+ 
+   // set default in case if we can't find any STS information
+   *aResult = false;
+ 
+   nsCAutoString host;
+   nsresult rv = GetHost(aURI, host);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
++  /* An IP address never qualifies as a secure URI. */
++  if (HostIsIPAddress(host.BeginReading())) {
++    return NS_OK;
++  }
++
+   const nsSTSPreload *preload = nullptr;
+   nsSTSHostEntry *pbEntry = nullptr;
+ 
+   if (mInPrivateMode) {
+     pbEntry = mPrivateModeHostTable.GetEntry(host.get());
+   }
+ 
+   nsCOMPtr<nsIPrincipal> principal;
+diff --git a/security/manager/ssl/tests/unit/test_sts_ipv4_ipv6.js b/security/manager/ssl/tests/unit/test_sts_ipv4_ipv6.js
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/tests/unit/test_sts_ipv4_ipv6.js
+@@ -0,0 +1,14 @@
++var Cc = Components.classes;
++var Ci = Components.interfaces;
++
++Components.utils.import("resource://gre/modules/Services.jsm");
++
++var gSTSService = Cc["@mozilla.org/stsservice;1"]
++                  .getService(Ci.nsIStrictTransportSecurityService);
++
++function run_test() {
++  do_check_false(gSTSService.isStsHost("127.0.0.1"));
++  do_check_false(gSTSService.isStsHost("10.0.0.1"));
++  do_check_false(gSTSService.isStsHost("2001:db8::1"));
++  do_check_false(gSTSService.isStsHost("1080::8:800:200C:417A"));
++}
+diff --git a/security/manager/ssl/tests/unit/xpcshell.ini b/security/manager/ssl/tests/unit/xpcshell.ini
+--- a/security/manager/ssl/tests/unit/xpcshell.ini
++++ b/security/manager/ssl/tests/unit/xpcshell.ini
+@@ -12,9 +12,10 @@ skip-if = os == "android"
+ # Bug 676972: test hangs consistently on Android
+ skip-if = os == "android"
+ [test_bug627234.js]
+ # Bug 846862: disable test until bug 836097 is resolved
+ [test_sts_preloadlist.js]
+ skip-if = true
+ # Bug 846862: disable test until bug 836097 is resolved
+ [test_sts_preloadlist_selfdestruct.js]
+-skip-if = true
+\ No newline at end of file
++skip-if = true
++[test_sts_ipv4_ipv6.js]
