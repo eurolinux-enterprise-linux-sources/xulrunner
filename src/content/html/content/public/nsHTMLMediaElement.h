@@ -34,8 +34,6 @@ namespace mozilla {
 class MediaResource;
 }
 
-class nsRange;
-
 class nsHTMLMediaElement : public nsGenericHTMLElement,
                            public nsIObserver
 {
@@ -668,7 +666,7 @@ protected:
 
   // Points to the child source elements, used to iterate through the children
   // when selecting a resource to load.
-  nsRefPtr<nsRange> mSourcePointer;
+  nsCOMPtr<nsIDOMRange> mSourcePointer;
 
   // Points to the document whose load we're blocking. This is the document
   // we're bound to when loading starts.

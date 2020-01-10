@@ -70,8 +70,8 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        17.0.7
-Release:        1%{?pre_tag}%{?dist}
+Version:        17.0.6
+Release:        2%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -100,7 +100,6 @@ Patch51:        mozilla-193-pkgconfig.patch
 # Solves runtime crash of yelp:
 Patch53:        mozilla-720682-jemalloc-missing.patch
 Patch54:        rhbz-872752.patch
-Patch55:        rhbz-966424.patch
 
 # RHEL6 specific patches
 Patch100:       mozilla-gcc-4.4.patch
@@ -108,7 +107,6 @@ Patch100:       mozilla-gcc-4.4.patch
 # Upstream patches
 Patch401:       mozilla-746112.patch
 Patch403:       mozilla-791626.patch
-Patch404:       mozilla-821502.patch
 
 # ---------------------------------------------------
 
@@ -240,12 +238,10 @@ cd %{tarballdir}
 %patch51 -p2 -b .pk
 %patch53 -p1 -b .jemalloc-missing
 %patch54 -p2 -b .embedlink
-%patch55 -p1 -b .966424
 
 %patch100 -p1 -b .gcc-4.4
 %patch401 -p2 -b .746112
 %patch403 -p1 -b .791626
-%patch404 -p2 -b .821502
 
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
@@ -499,20 +495,6 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
-* Wed Jun 19 2013 Jan Horak <jhorak@redhat.com> - 17.0.7-1
-- Update to 17.0.7 ESR
-
-* Tue Jun 18 2013 Jan Horak <jhorak@redhat.com> - 17.0.6-5
-- Added workaround for rhbz#973721 - fixing problem with installation
-  of  some addons
-
-* Wed Jun 12 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-4
-- Added a workaround for rhbz#961687 - Prelink throws message 
-  "Cannot safely convert .rel.dyn' section from REL to RELA"
-
-* Mon May 13 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-3
-- Added patch for aliasing issues (mozbz#821502)
-
 * Fri May 10 2013 Martin Stransky <stransky@redhat.com> - 17.0.6-2
 - Update to 17.0.6 ESR
 

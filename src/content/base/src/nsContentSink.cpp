@@ -1449,8 +1449,7 @@ void
 nsContentSink::DidBuildModelImpl(bool aTerminated)
 {
   if (mDocument) {
-    MOZ_ASSERT(aTerminated ||
-               mDocument->GetReadyStateEnum() ==
+    MOZ_ASSERT(mDocument->GetReadyStateEnum() ==
                nsIDocument::READYSTATE_LOADING, "Bad readyState");
     mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_INTERACTIVE);
   }

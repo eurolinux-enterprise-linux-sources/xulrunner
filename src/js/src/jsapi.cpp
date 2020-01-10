@@ -4825,14 +4825,12 @@ JS_CloneFunctionObject(JSContext *cx, JSObject *funobjArg, JSRawObject parentArg
     RootedObject parent(cx, parentArg);
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, parent);
-    // Note that funobj can be in a different compartment.
+    assertSameCompartment(cx, parent);  // XXX no funobj for now
 
     if (!parent)
         parent = cx->global();
 
     if (!funobj->isFunction()) {
-        AutoCompartment ac(cx, funobj);
         ReportIsNotFunction(cx, ObjectValue(*funobj));
         return NULL;
     }

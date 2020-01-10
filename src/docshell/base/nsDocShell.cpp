@@ -4536,10 +4536,8 @@ nsDocShell::Stop(uint32_t aStopFlags)
 
     if (nsIWebNavigation::STOP_CONTENT & aStopFlags) {
         // Stop the document loading
-        if (mContentViewer) {
-            nsCOMPtr<nsIContentViewer> cv = mContentViewer;
-            cv->Stop();
-        }
+        if (mContentViewer)
+            mContentViewer->Stop();
     }
 
     if (nsIWebNavigation::STOP_NETWORK & aStopFlags) {
@@ -10317,7 +10315,6 @@ nsDocShell::AddToSessionHistory(nsIURI * aURI, nsIChannel * aChannel,
                 shContainer->GetChildAt(i, getter_AddRefs(child));
                 shContainer->RemoveChild(child);
             }  // for
-            entry->AbandonBFCacheEntry();
         }  // shContainer
     }
 
