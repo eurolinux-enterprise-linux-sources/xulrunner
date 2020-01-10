@@ -70,7 +70,7 @@
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        17.0.9
+Version:        17.0.10
 Release:        1%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
@@ -113,6 +113,7 @@ Patch404:       mozilla-821502.patch
 Patch405:       mozilla-601442.patch
 Patch406:       mozilla-815120.patch
 Patch407:       mozilla-633001.patch
+Patch408:       mozilla-813997.patch
 
 # ---------------------------------------------------
 
@@ -256,6 +257,7 @@ sed -e 's/__RH_NSPR_VERSION__/%{nspr_version}/' %{P:%%PATCH0} > version.patch
 %patch405 -p1 -b .601442
 %patch406 -p1 -b .815120
 %patch407 -p1 -b .633001
+%patch408 -p2 -b .813997
 
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
@@ -509,6 +511,13 @@ fi
 #---------------------------------------------------------------------
 
 %changelog
+* Wed Oct 23 2013 Martin Stransky <stransky@redhat.com> - 17.0.10-1
+- Update to 17.0.10 ESR
+
+* Fri Oct 11 2013 Martin Stransky <stransky@redhat.com> - 17.0.9-2
+- Added patch for rhbz#983488 - Resizing window changes window
+  size to 0 with third party window manager.
+
 * Thu Sep 12 2013 Jan Horak <jhorak@redhat.com> - 17.0.9-1
 - Update to 17.0.9 ESR
 
