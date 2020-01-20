@@ -3,8 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-#include "mozilla/MemoryReporting.h"
+#include "mozilla/Util.h"
 
 #ifdef MOZ_LOGGING
 #define FORCE_PR_LOG /* Allow logging in the release build */
@@ -58,110 +57,14 @@ gfxDWriteFontFamily::~gfxDWriteFontFamily()
 {
 }
 
-static HRESULT
-GetDirectWriteFontName(IDWriteFont *aFont, nsAString& aFontName)
-{
-    HRESULT hr;
-
-    nsRefPtr<IDWriteLocalizedStrings> names;
-    hr = aFont->GetFaceNames(getter_AddRefs(names));
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    BOOL exists;
-    nsAutoTArray<wchar_t,32> faceName;
-    UINT32 englishIdx = 0;
-    hr = names->FindLocaleName(L"en-us", &englishIdx, &exists);
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    if (!exists) {
-        // No english found, use whatever is first in the list.
-        englishIdx = 0;
-    }
-    UINT32 length;
-    hr = names->GetStringLength(englishIdx, &length);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    faceName.SetLength(length + 1);
-    hr = names->GetString(englishIdx, faceName.Elements(), length + 1);
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    aFontName.Assign(faceName.Elements());
-    return S_OK;
-}
-
-// These strings are only defined in Win SDK 8+, so use #ifdef for now
-#if MOZ_WINSDK_TARGETVER > 0x08000000
-#define FULLNAME_ID   DWRITE_INFORMATIONAL_STRING_FULL_NAME
-#define PSNAME_ID     DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME
-#else
-#define FULLNAME_ID   DWRITE_INFORMATIONAL_STRING_ID(DWRITE_INFORMATIONAL_STRING_SAMPLE_TEXT + 1)
-#define PSNAME_ID     DWRITE_INFORMATIONAL_STRING_ID(DWRITE_INFORMATIONAL_STRING_SAMPLE_TEXT + 2)
-#endif
-
-// for use in reading postscript or fullname
-static HRESULT
-GetDirectWriteFaceName(IDWriteFont *aFont,
-                       DWRITE_INFORMATIONAL_STRING_ID aWhichName,
-                       nsAString& aFontName)
-{
-    HRESULT hr;
-
-    BOOL exists;
-    nsRefPtr<IDWriteLocalizedStrings> infostrings;
-    hr = aFont->GetInformationalStrings(aWhichName, getter_AddRefs(infostrings), &exists);
-    if (FAILED(hr) || !exists) {
-        return E_FAIL;
-    }
-
-    nsAutoTArray<wchar_t,32> faceName;
-    UINT32 englishIdx = 0;
-    hr = infostrings->FindLocaleName(L"en-us", &englishIdx, &exists);
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    if (!exists) {
-        // No english found, use whatever is first in the list.
-        englishIdx = 0;
-    }
-    UINT32 length;
-    hr = infostrings->GetStringLength(englishIdx, &length);
-    if (FAILED(hr)) {
-        return hr;
-    }
-    faceName.SetLength(length + 1);
-    hr = infostrings->GetString(englishIdx, faceName.Elements(), length + 1);
-    if (FAILED(hr)) {
-        return hr;
-    }
-
-    aFontName.Assign(faceName.Elements());
-    return S_OK;
-}
-
 void
-gfxDWriteFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
+gfxDWriteFontFamily::FindStyleVariations()
 {
     HRESULT hr;
     if (mHasStyles) {
         return;
     }
     mHasStyles = true;
-
-    gfxPlatformFontList *fp = gfxPlatformFontList::PlatformFontList();
-
-    bool skipFaceNames = mFaceNamesInitialized ||
-                         !fp->NeedFullnamePostscriptNames();
-    bool fontInfoShouldHaveFaceNames = !mFaceNamesInitialized &&
-                                       fp->NeedFullnamePostscriptNames() &&
-                                       aFontInfoData;
 
     for (UINT32 i = 0; i < mDWFamily->GetFontCount(); i++) {
         nsRefPtr<IDWriteFont> font;
@@ -177,63 +80,62 @@ gfxDWriteFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
             continue;
         }
 
-        // name
-        nsString fullID(mName);
-        nsAutoString faceName;
-        hr = GetDirectWriteFontName(font, faceName);
+        nsRefPtr<IDWriteLocalizedStrings> names;
+        hr = font->GetFaceNames(getter_AddRefs(names));
         if (FAILED(hr)) {
             continue;
         }
-        fullID.Append(NS_LITERAL_STRING(" "));
-        fullID.Append(faceName);
+        
+        BOOL exists;
+        nsAutoTArray<WCHAR,32> faceName;
+        UINT32 englishIdx = 0;
+        hr = names->FindLocaleName(L"en-us", &englishIdx, &exists);
+        if (FAILED(hr)) {
+            continue;
+        }
 
-        gfxDWriteFontEntry *fe = new gfxDWriteFontEntry(fullID, font);
+        if (!exists) {
+            // No english found, use whatever is first in the list.
+            englishIdx = 0;
+        }
+        UINT32 length;
+        hr = names->GetStringLength(englishIdx, &length);
+        if (FAILED(hr)) {
+            continue;
+        }
+        if (!faceName.SetLength(length + 1)) {
+            // Eeep - running out of memory. Unlikely to end well.
+            continue;
+        }
+
+        hr = names->GetString(englishIdx, faceName.Elements(), length + 1);
+        if (FAILED(hr)) {
+            continue;
+        }
+
+        nsString fullID(mName);
+        fullID.Append(NS_LITERAL_STRING(" "));
+        fullID.Append(faceName.Elements());
+
+        /**
+         * Faces do not have a localized name so we just put the en-us name in
+         * here.
+         */
+        gfxDWriteFontEntry *fe = 
+            new gfxDWriteFontEntry(fullID, font);
         fe->SetForceGDIClassic(mForceGDIClassic);
         AddFontEntry(fe);
-
-        // postscript/fullname if needed
-        nsAutoString psname, fullname;
-        if (fontInfoShouldHaveFaceNames) {
-            aFontInfoData->GetFaceNames(fe->Name(), fullname, psname);
-            if (!fullname.IsEmpty()) {
-                fp->AddFullname(fe, fullname);
-            }
-            if (!psname.IsEmpty()) {
-                fp->AddPostscriptName(fe, psname);
-            }
-        } else if (!skipFaceNames) {
-            hr = GetDirectWriteFaceName(font, PSNAME_ID, psname);
-            if (FAILED(hr)) {
-                skipFaceNames = true;
-            } else if (psname.Length() > 0) {
-                fp->AddPostscriptName(fe, psname);
-            }
-
-            hr = GetDirectWriteFaceName(font, FULLNAME_ID, fullname);
-            if (FAILED(hr)) {
-                skipFaceNames = true;
-            } else if (fullname.Length() > 0) {
-                fp->AddFullname(fe, fullname);
-            }
-        }
 
 #ifdef PR_LOGGING
         if (LOG_FONTLIST_ENABLED()) {
             LOG_FONTLIST(("(fontlist) added (%s) to family (%s)"
-                 " with style: %s weight: %d stretch: %d psname: %s fullname: %s",
+                 " with style: %s weight: %d stretch: %d",
                  NS_ConvertUTF16toUTF8(fe->Name()).get(),
                  NS_ConvertUTF16toUTF8(Name()).get(),
                  (fe->IsItalic()) ? "italic" : "normal",
-                 fe->Weight(), fe->Stretch(),
-                 NS_ConvertUTF16toUTF8(psname).get(),
-                 NS_ConvertUTF16toUTF8(fullname).get()));
+                 fe->Weight(), fe->Stretch()));
         }
 #endif
-    }
-
-    // assume that if no error, all postscript/fullnames were initialized
-    if (!skipFaceNames) {
-        mFaceNamesInitialized = true;
     }
 
     if (!mAvailableFonts.Length()) {
@@ -242,27 +144,6 @@ gfxDWriteFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
 
     if (mIsBadUnderlineFamily) {
         SetBadUnderlineFonts();
-    }
-}
-
-void
-gfxDWriteFontFamily::ReadFaceNames(gfxPlatformFontList *aPlatformFontList,
-                                   bool aNeedFullnamePostscriptNames)
-{
-    // if all needed names have already been read, skip
-    if (mOtherFamilyNamesInitialized &&
-        (mFaceNamesInitialized || !aNeedFullnamePostscriptNames)) {
-        return;
-    }
-
-    // DirectWrite version of this will try to read
-    // postscript/fullnames via DirectWrite API
-    FindStyleVariations();
-
-    // fallback to looking up via name table
-    if (!mOtherFamilyNamesInitialized || !mFaceNamesInitialized) {
-        gfxFontFamily::ReadFaceNames(aPlatformFontList,
-                                     aNeedFullnamePostscriptNames);
     }
 }
 
@@ -293,7 +174,7 @@ gfxDWriteFontFamily::LocalizedName(nsAString &aLocalizedName)
     }
     UINT32 idx = 0;
     BOOL exists;
-    hr = names->FindLocaleName(localeName.get(),
+    hr = names->FindLocaleName(localeName.BeginReading(),
                                &idx,
                                &exists);
     if (FAILED(hr)) {
@@ -310,7 +191,7 @@ gfxDWriteFontFamily::LocalizedName(nsAString &aLocalizedName)
             idx = 0;
         }
     }
-    AutoFallibleTArray<WCHAR, 32> famName;
+    nsAutoTArray<WCHAR, 32> famName;
     UINT32 length;
     
     hr = names->GetStringLength(idx, &length);
@@ -332,20 +213,20 @@ gfxDWriteFontFamily::LocalizedName(nsAString &aLocalizedName)
 }
 
 void
-gfxDWriteFontFamily::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
-                                            FontListSizes* aSizes) const
+gfxDWriteFontFamily::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                         FontListSizes*    aSizes) const
 {
-    gfxFontFamily::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxFontFamily::SizeOfExcludingThis(aMallocSizeOf, aSizes);
     // TODO:
     // This doesn't currently account for |mDWFamily|
 }
 
 void
-gfxDWriteFontFamily::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                            FontListSizes* aSizes) const
+gfxDWriteFontFamily::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                         FontListSizes*    aSizes) const
 {
     aSizes->mFontListSize += aMallocSizeOf(this);
-    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    SizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -408,7 +289,7 @@ gfxDWriteFontEntry::CopyFontTable(uint32_t aTableTag,
             uint32_t tableSize =
                 ::GetFontData(dc.GetDC(),
                               NativeEndian::swapToBigEndian(aTableTag), 0,
-                              nullptr, 0);
+                              NULL, 0);
             if (tableSize != GDI_ERROR) {
                 if (aBuffer.SetLength(tableSize)) {
                     ::GetFontData(dc.GetDC(),
@@ -430,7 +311,7 @@ gfxDWriteFontEntry::CopyFontTable(uint32_t aTableTag,
 
     uint8_t *tableData;
     uint32_t len;
-    void *tableContext = nullptr;
+    void *tableContext = NULL;
     BOOL exists;
     HRESULT hr =
         fontFace->TryGetFontTable(NativeEndian::swapToBigEndian(aTableTag),
@@ -507,50 +388,34 @@ gfxDWriteFontEntry::GetFontTable(uint32_t aTag)
 }
 
 nsresult
-gfxDWriteFontEntry::ReadCMAP(FontInfoData *aFontInfoData)
+gfxDWriteFontEntry::ReadCMAP()
 {
+    nsresult rv;
+
     // attempt this once, if errors occur leave a blank cmap
     if (mCharacterMap) {
         return NS_OK;
     }
 
-    nsRefPtr<gfxCharacterMap> charmap;
-    nsresult rv;
-    bool symbolFont;
+    nsRefPtr<gfxCharacterMap> charmap = new gfxCharacterMap();
 
-    if (aFontInfoData && (charmap = GetCMAPFromFontInfo(aFontInfoData,
-                                                        mUVSOffset,
-                                                        symbolFont))) {
-        rv = NS_OK;
+    uint32_t kCMAP = TRUETYPE_TAG('c','m','a','p');
+    AutoTable cmapTable(this, kCMAP);
+    if (cmapTable) {
+        bool unicodeFont = false, symbolFont = false; // currently ignored
+        uint32_t cmapLen;
+        const uint8_t* cmapData =
+            reinterpret_cast<const uint8_t*>(hb_blob_get_data(cmapTable,
+                                                              &cmapLen));
+        rv = gfxFontUtils::ReadCMAP(cmapData, cmapLen,
+                                    *charmap, mUVSOffset,
+                                    unicodeFont, symbolFont);
     } else {
-        uint32_t kCMAP = TRUETYPE_TAG('c','m','a','p');
-        charmap = new gfxCharacterMap();
-        AutoTable cmapTable(this, kCMAP);
-
-        if (cmapTable) {
-            bool unicodeFont = false, symbolFont = false; // currently ignored
-            uint32_t cmapLen;
-            const uint8_t* cmapData =
-                reinterpret_cast<const uint8_t*>(hb_blob_get_data(cmapTable,
-                                                                  &cmapLen));
-            rv = gfxFontUtils::ReadCMAP(cmapData, cmapLen,
-                                        *charmap, mUVSOffset,
-                                        unicodeFont, symbolFont);
-        } else {
-            rv = NS_ERROR_NOT_AVAILABLE;
-        }
+        rv = NS_ERROR_NOT_AVAILABLE;
     }
 
     mHasCmapTable = NS_SUCCEEDED(rv);
     if (mHasCmapTable) {
-        // Bug 969504: exclude U+25B6 from Segoe UI family, because it's used
-        // by sites to represent a "Play" icon, but the glyph in Segoe UI Light
-        // and Semibold on Windows 7 is too thin. (Ditto for leftward U+25C0.)
-        // Fallback to Segoe UI Symbol is preferred.
-        if (FamilyName().EqualsLiteral("Segoe UI")) {
-            charmap->clear(0x25b6);
-            charmap->clear(0x25c0);
-        }
         gfxPlatformFontList *pfl = gfxPlatformFontList::PlatformFontList();
         mCharacterMap = pfl->FindCharMap(charmap);
     } else {
@@ -615,7 +480,7 @@ gfxDWriteFontEntry::CreateFontFace(IDWriteFontFace **aFontFace,
         // has the Bold simulation - unfortunately, DWrite doesn't provide
         // a simple API for this
         UINT32 numberOfFiles = 0;
-        if (FAILED(mFontFace->GetFiles(&numberOfFiles, nullptr))) {
+        if (FAILED(mFontFace->GetFiles(&numberOfFiles, NULL))) {
             return NS_ERROR_FAILURE;
         }
         nsAutoTArray<IDWriteFontFile*,1> files;
@@ -690,20 +555,20 @@ gfxDWriteFontEntry::IsCJKFont()
 }
 
 void
-gfxDWriteFontEntry::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
-                                           FontListSizes* aSizes) const
+gfxDWriteFontEntry::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                        FontListSizes*    aSizes) const
 {
-    gfxFontEntry::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxFontEntry::SizeOfExcludingThis(aMallocSizeOf, aSizes);
     // TODO:
     // This doesn't currently account for the |mFont| and |mFontFile| members
 }
 
 void
-gfxDWriteFontEntry::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                           FontListSizes* aSizes) const
+gfxDWriteFontEntry::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                        FontListSizes*    aSizes) const
 {
     aSizes->mFontListSize += aMallocSizeOf(this);
-    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    SizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -712,6 +577,7 @@ gfxDWriteFontEntry::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
 gfxDWriteFontList::gfxDWriteFontList()
     : mInitialized(false), mForceGDIClassicMaxFontSize(0.0)
 {
+    mFontSubstitutes.Init();
 }
 
 // bug 602792 - CJK systems default to large CJK fonts which cause excessive
@@ -749,11 +615,17 @@ gfxDWriteFontList::LookupLocalFont(const gfxProxyFontEntry *aProxyEntry,
 {
     gfxFontEntry *lookup;
 
-    lookup = LookupInFaceNameLists(aFullname);
-    if (!lookup) {
-        return nullptr;
+    // initialize name lookup tables if needed
+    if (!mFaceNamesInitialized) {
+        InitFaceNameLists();
     }
 
+    // lookup in name lookup tables, return null if not found
+    if (!(lookup = mPostscriptNames.GetWeak(aFullname)) &&
+        !(lookup = mFullnames.GetWeak(aFullname))) 
+    {
+        return nullptr;
+    }
     gfxDWriteFontEntry* dwriteLookup = static_cast<gfxDWriteFontEntry*>(lookup);
     gfxDWriteFontEntry *fe =
         new gfxDWriteFontEntry(lookup->Name(),
@@ -880,8 +752,8 @@ gfxDWriteFontList::InitFontList()
 
     if (LOG_FONTINIT_ENABLED()) {    
         GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, 
-                      nullptr, nullptr, nowTime, 256);
-        GetDateFormat(LOCALE_INVARIANT, 0, nullptr, nullptr, nowDate, 256);
+                      NULL, NULL, nowTime, 256);
+        GetDateFormat(LOCALE_INVARIANT, 0, NULL, NULL, nowDate, 256);
     }
     upTime = (double) GetTickCount();
     QueryPerformanceFrequency(&frequency);
@@ -948,8 +820,8 @@ gfxDWriteFontList::DelayedInitFontList()
 
     if (LOG_FONTINIT_ENABLED()) {    
         GetTimeFormat(LOCALE_INVARIANT, TIME_FORCE24HOURFORMAT, 
-                      nullptr, nullptr, nowTime, 256);
-        GetDateFormat(LOCALE_INVARIANT, 0, nullptr, nullptr, nowDate, 256);
+                      NULL, NULL, nowTime, 256);
+        GetDateFormat(LOCALE_INVARIANT, 0, NULL, NULL, nowDate, 256);
     }
 
     upTime = (double) GetTickCount();
@@ -993,7 +865,7 @@ gfxDWriteFontList::DelayedInitFontList()
             englishIdx = 0;
         }
 
-        AutoFallibleTArray<WCHAR, 32> enName;
+        nsAutoTArray<WCHAR, 32> enName;
         UINT32 length;
         
         hr = names->GetStringLength(englishIdx, &length);
@@ -1038,7 +910,7 @@ gfxDWriteFontList::DelayedInitFontList()
 
         for (nameIndex = 0; nameIndex < nameCount; nameIndex++) {
             UINT32 nameLen;
-            AutoFallibleTArray<WCHAR, 32> localizedName;
+            nsAutoTArray<WCHAR, 32> localizedName;
 
             // only add other names
             if (nameIndex == englishIdx) {
@@ -1193,7 +1065,7 @@ gfxDWriteFontList::DelayedInitFontList()
 static void
 RemoveCharsetFromFontSubstitute(nsAString &aName)
 {
-    int32_t comma = aName.FindChar(char16_t(','));
+    int32_t comma = aName.FindChar(PRUnichar(','));
     if (comma >= 0)
         aName.Truncate(comma);
 }
@@ -1221,7 +1093,7 @@ gfxDWriteFontList::GetFontSubstitutes()
         lenAlias = ArrayLength(aliasName);
         actualName[0] = 0;
         lenActual = sizeof(actualName);
-        rv = RegEnumValueW(hKey, i, aliasName, &lenAlias, nullptr, &valueType,
+        rv = RegEnumValueW(hKey, i, aliasName, &lenAlias, NULL, &valueType, 
                 (LPBYTE)actualName, &lenActual);
 
         if (rv != ERROR_SUCCESS || valueType != REG_SZ || lenAlias == 0) {
@@ -1232,8 +1104,8 @@ gfxDWriteFontList::GetFontSubstitutes()
             continue;
         }
 
-        nsAutoString substituteName((char16_t*) aliasName);
-        nsAutoString actualFontName((char16_t*) actualName);
+        nsAutoString substituteName((PRUnichar*) aliasName);
+        nsAutoString actualFontName((PRUnichar*) actualName);
         RemoveCharsetFromFontSubstitute(substituteName);
         BuildKeyNameFromFontName(substituteName);
         RemoveCharsetFromFontSubstitute(actualFontName);
@@ -1268,14 +1140,14 @@ gfxDWriteFontList::GetDirectWriteSubstitutes()
 {
     for (uint32_t i = 0; i < ArrayLength(sDirectWriteSubs); ++i) {
         const FontSubstitution& sub(sDirectWriteSubs[i]);
-        nsAutoString substituteName((char16_t*)sub.aliasName);
+        nsAutoString substituteName((PRUnichar*)sub.aliasName);
         BuildKeyNameFromFontName(substituteName);
         if (nullptr != mFontFamilies.GetWeak(substituteName)) {
             // don't do the substitution if user actually has a usable font
             // with this name installed
             continue;
         }
-        nsAutoString actualFontName((char16_t*)sub.actualName);
+        nsAutoString actualFontName((PRUnichar*)sub.actualName);
         BuildKeyNameFromFontName(actualFontName);
         gfxFontFamily *ff;
         if (nullptr != (ff = mFontFamilies.GetWeak(actualFontName))) {
@@ -1346,10 +1218,10 @@ gfxDWriteFontList::ResolveFontName(const nsAString& aFontName,
 }
 
 void
-gfxDWriteFontList::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
-                                          FontListSizes* aSizes) const
+gfxDWriteFontList::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                       FontListSizes*    aSizes) const
 {
-    gfxPlatformFontList::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxPlatformFontList::SizeOfExcludingThis(aMallocSizeOf, aSizes);
 
     aSizes->mFontListSize +=
         mFontSubstitutes.SizeOfExcludingThis(SizeOfFamilyNameEntryExcludingThis,
@@ -1364,11 +1236,11 @@ gfxDWriteFontList::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
 }
 
 void
-gfxDWriteFontList::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                          FontListSizes* aSizes) const
+gfxDWriteFontList::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                       FontListSizes*    aSizes) const
 {
     aSizes->mFontListSize += aMallocSizeOf(this);
-    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    SizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
 
 static HRESULT GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
@@ -1404,7 +1276,7 @@ static HRESULT GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
         index = 0;
     }
 
-    AutoFallibleTArray<WCHAR, 32> name;
+    nsAutoTArray<WCHAR, 32> name;
     UINT32 length;
 
     hr = familyNames->GetStringLength(index, &length);
@@ -1498,7 +1370,7 @@ gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
 
     // initialize text format
     if (!mFallbackFormat) {
-        hr = dwFactory->CreateTextFormat(L"Arial", nullptr,
+        hr = dwFactory->CreateTextFormat(L"Arial", NULL,
                                          DWRITE_FONT_WEIGHT_REGULAR,
                                          DWRITE_FONT_STYLE_NORMAL,
                                          DWRITE_FONT_STRETCH_NORMAL,
@@ -1536,7 +1408,7 @@ gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
 
     // call the draw method to invoke the DirectWrite layout functions
     // which determine the fallback font
-    hr = fallbackLayout->Draw(nullptr, mFallbackRenderer, 50.0f, 50.0f);
+    hr = fallbackLayout->Draw(NULL, mFallbackRenderer, 50.0f, 50.0f);
     if (FAILED(hr)) {
         return nullptr;
     }
@@ -1554,190 +1426,4 @@ gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
     }
 
     return nullptr;
-}
-
-// used to load system-wide font info on off-main thread
-class DirectWriteFontInfo : public FontInfoData {
-public:
-    DirectWriteFontInfo(bool aLoadOtherNames,
-                        bool aLoadFaceNames,
-                        bool aLoadCmaps) :
-        FontInfoData(aLoadOtherNames, aLoadFaceNames, aLoadCmaps)
-    {}
-
-    virtual ~DirectWriteFontInfo() {}
-
-    // loads font data for all members of a given family
-    virtual void LoadFontFamilyData(const nsAString& aFamilyName);
-
-    nsRefPtr<IDWriteFontCollection> mSystemFonts;
-};
-
-void
-DirectWriteFontInfo::LoadFontFamilyData(const nsAString& aFamilyName)
-{
-    // lookup the family
-    nsAutoTArray<wchar_t, 32> famName;
-
-    uint32_t len = aFamilyName.Length();
-    famName.SetLength(len + 1);
-    memcpy(famName.Elements(), aFamilyName.BeginReading(), len * sizeof(char16_t));
-    famName[len] = 0;
-
-    HRESULT hr;
-    BOOL exists = false;
-
-    uint32_t index;
-    hr = mSystemFonts->FindFamilyName(famName.Elements(), &index, &exists);
-    if (FAILED(hr) || !exists) {
-        return;
-    }
-
-    nsRefPtr<IDWriteFontFamily> family;
-    mSystemFonts->GetFontFamily(index, getter_AddRefs(family));
-    if (!family) {
-        return;
-    }
-
-    // later versions of DirectWrite support querying the fullname/psname
-    bool loadFaceNamesUsingDirectWrite = mLoadFaceNames;
-
-    for (uint32_t i = 0; i < family->GetFontCount(); i++) {
-        // get the font
-        nsRefPtr<IDWriteFont> dwFont;
-        hr = family->GetFont(i, getter_AddRefs(dwFont));
-        if (FAILED(hr)) {
-            // This should never happen.
-            NS_WARNING("Failed to get existing font from family.");
-            continue;
-        }
-
-        if (dwFont->GetSimulations() & DWRITE_FONT_SIMULATIONS_OBLIQUE) {
-            // We don't want these.
-            continue;
-        }
-
-        mLoadStats.fonts++;
-
-        // get the name of the face
-        nsString fullID(aFamilyName);
-        nsAutoString fontName;
-        hr = GetDirectWriteFontName(dwFont, fontName);
-        if (FAILED(hr)) {
-            continue;
-        }
-        fullID.Append(NS_LITERAL_STRING(" "));
-        fullID.Append(fontName);
-
-        FontFaceData fontData;
-        bool haveData = true;
-        nsRefPtr<IDWriteFontFace> dwFontFace;
-
-        if (mLoadFaceNames) {
-            // try to load using DirectWrite first
-            if (loadFaceNamesUsingDirectWrite) {
-                hr = GetDirectWriteFaceName(dwFont, PSNAME_ID, fontData.mPostscriptName);
-                if (FAILED(hr)) {
-                    loadFaceNamesUsingDirectWrite = false;
-                }
-                hr = GetDirectWriteFaceName(dwFont, FULLNAME_ID, fontData.mFullName);
-                if (FAILED(hr)) {
-                    loadFaceNamesUsingDirectWrite = false;
-                }
-            }
-
-            // if DirectWrite read fails, load directly from name table
-            if (!loadFaceNamesUsingDirectWrite) {
-                hr = dwFont->CreateFontFace(getter_AddRefs(dwFontFace));
-                if (SUCCEEDED(hr)) {
-                    uint32_t kNAME =
-                        NativeEndian::swapToBigEndian(TRUETYPE_TAG('n','a','m','e'));
-                    const char *nameData;
-                    BOOL exists;
-                    void* ctx;
-                    uint32_t nameSize;
-
-                    hr = dwFontFace->TryGetFontTable(
-                             kNAME,
-                             (const void**)&nameData, &nameSize, &ctx, &exists);
-
-                    if (SUCCEEDED(hr) && nameData && nameSize > 0) {
-                        gfxFontUtils::ReadCanonicalName(nameData, nameSize,
-                            gfxFontUtils::NAME_ID_FULL,
-                            fontData.mFullName);
-                        gfxFontUtils::ReadCanonicalName(nameData, nameSize,
-                            gfxFontUtils::NAME_ID_POSTSCRIPT,
-                            fontData.mPostscriptName);
-                        dwFontFace->ReleaseFontTable(ctx);
-                    }
-                }
-            }
-
-            haveData = !fontData.mPostscriptName.IsEmpty() ||
-                       !fontData.mFullName.IsEmpty();
-            if (haveData) {
-                mLoadStats.facenames++;
-            }
-        }
-
-        // cmaps
-        if (mLoadCmaps) {
-            if (!dwFontFace) {
-                hr = dwFont->CreateFontFace(getter_AddRefs(dwFontFace));
-                if (!SUCCEEDED(hr)) {
-                    continue;
-                }
-            }
-
-            uint32_t kCMAP =
-                NativeEndian::swapToBigEndian(TRUETYPE_TAG('c','m','a','p'));
-            const uint8_t *cmapData;
-            BOOL exists;
-            void* ctx;
-            uint32_t cmapSize;
-
-            hr = dwFontFace->TryGetFontTable(kCMAP,
-                     (const void**)&cmapData, &cmapSize, &ctx, &exists);
-
-            if (SUCCEEDED(hr)) {
-                bool cmapLoaded = false;
-                bool unicodeFont = false, symbolFont = false;
-                nsRefPtr<gfxCharacterMap> charmap = new gfxCharacterMap();
-                uint32_t offset;
-
-                if (cmapData &&
-                    cmapSize > 0 &&
-                    NS_SUCCEEDED(
-                        gfxFontUtils::ReadCMAP(cmapData, cmapSize, *charmap,
-                                               offset, unicodeFont, symbolFont))) {
-                    fontData.mCharacterMap = charmap;
-                    fontData.mUVSOffset = offset;
-                    fontData.mSymbolFont = symbolFont;
-                    cmapLoaded = true;
-                    mLoadStats.cmaps++;
-                }
-                dwFontFace->ReleaseFontTable(ctx);
-                haveData = haveData || cmapLoaded;
-           }
-        }
-
-        // if have data, load
-        if (haveData) {
-            mFontFaceData.Put(fullID, fontData);
-        }
-    }
-}
-
-already_AddRefed<FontInfoData>
-gfxDWriteFontList::CreateFontInfoData()
-{
-    bool loadCmaps = !UsesSystemFallback() ||
-        gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
-
-    nsRefPtr<DirectWriteFontInfo> fi =
-        new DirectWriteFontInfo(false, NeedFullnamePostscriptNames(), loadCmaps);
-    gfxWindowsPlatform::GetPlatform()->GetDWriteFactory()->
-        GetSystemFontCollection(getter_AddRefs(fi->mSystemFonts));
-
-    return fi.forget();
 }

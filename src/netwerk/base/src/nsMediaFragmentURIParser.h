@@ -6,11 +6,9 @@
 #if !defined(nsMediaFragmentURIParser_h__)
 #define nsMediaFragmentURIParser_h__
 
-#include "mozilla/Maybe.h"
-#include "nsStringFwd.h"
+#include "nsIURI.h"
+#include "nsString.h"
 #include "nsRect.h"
-
-class nsIURI;
 
 // Class to handle parsing of a W3C media fragment URI as per
 // spec at: http://www.w3.org/TR/media-frags/
@@ -34,9 +32,6 @@ class nsMediaFragmentURIParser
 public:
   // Create a parser with the provided URI.
   nsMediaFragmentURIParser(nsIURI* aURI);
-
-  // Create a parser with the provided URI reference portion.
-  nsMediaFragmentURIParser(nsCString& aRef);
 
   // True if a valid temporal media fragment indicated a start time.
   bool HasStartTime() const { return !mStart.empty(); }
@@ -70,10 +65,6 @@ public:
   // returns the unit used.
   ClipUnit GetClipUnit() const { return mClipUnit; }
 
-  bool HasSampleSize() const { return !mSampleSize.empty(); }
-
-  int GetSampleSize() const { return mSampleSize.ref(); }
-
 private:
   // Parse the URI ref provided, looking for media fragments. This is
   // the top-level parser the invokes the others below.
@@ -96,7 +87,6 @@ private:
   bool ParseNPTSS(nsDependentSubstring& aString, uint32_t& aSecond);
   bool ParseXYWH(nsDependentSubstring aString);
   bool ParseMozResolution(nsDependentSubstring aString);
-  bool ParseMozSampleSize(nsDependentSubstring aString);
 
   // Media fragment information.
   Maybe<double>    mStart;
@@ -104,7 +94,6 @@ private:
   Maybe<nsIntRect> mClip;
   ClipUnit         mClipUnit;
   Maybe<nsIntSize> mResolution;
-  Maybe<int>       mSampleSize;
 };
 
 }} // namespace mozilla::net

@@ -1,7 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
- * Copyright (C) 2009, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Peter Varga (pvarga@inf.u-szeged.hu), University of Szeged
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,14 +23,14 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #ifndef yarr_YarrPattern_h
 #define yarr_YarrPattern_h
 
-#include "yarr/wtfbridge.h"
-#include "yarr/ASCIICType.h"
+#include "wtfbridge.h"
+#include "ASCIICType.h"
 
 namespace JSC { namespace Yarr {
 
@@ -49,7 +49,6 @@ enum ErrorCode {
     CharacterClassOutOfOrder,
     CharacterClassInvalidRange,
     EscapeUnterminated,
-    RuntimeError,
     NumberOfErrorCodes
 };
 
@@ -88,28 +87,40 @@ struct CharacterRange {
     }
 };
 
+struct CharacterClassTable : RefCounted<CharacterClassTable> {
+    const char* m_table;
+    bool m_inverted;
+    static PassRefPtr<CharacterClassTable> create(const char* table, bool inverted)
+    {
+        return adoptRef(js_new<CharacterClassTable>(table, inverted));
+    }
+
+    CharacterClassTable(const char* table, bool inverted)
+        : m_table(table)
+        , m_inverted(inverted)
+    {
+    }
+};
+
 struct CharacterClass {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     // All CharacterClass instances have to have the full set of matches and ranges,
-    // they may have an optional m_table for faster lookups (which must match the
+    // they may have an optional table for faster lookups (which must match the
     // specified matches and ranges)
-    CharacterClass()
-        : m_table(0)
+    CharacterClass(PassRefPtr<CharacterClassTable> table)
+        : m_table(table)
     {
     }
-    CharacterClass(const char* table, bool inverted)
-        : m_table(table)
-        , m_tableInverted(inverted)
+    ~CharacterClass()
     {
+        js_delete(m_table.get());
     }
     Vector<UChar> m_matches;
     Vector<CharacterRange> m_ranges;
     Vector<UChar> m_matchesUnicode;
     Vector<CharacterRange> m_rangesUnicode;
-
-    const char* m_table;
-    bool m_tableInverted;
+    RefPtr<CharacterClassTable> m_table;
 };
 
 enum QuantifierType {
@@ -186,7 +197,7 @@ struct PatternTerm {
         quantityType = QuantifierFixedCount;
         quantityCount = 1;
     }
-
+    
     PatternTerm(Type type, bool invert = false)
         : type(type)
         , m_capture(false)
@@ -227,7 +238,7 @@ struct PatternTerm {
         quantityType = QuantifierFixedCount;
         quantityCount = 1;
     }
-
+    
     static PatternTerm ForwardReference()
     {
         return PatternTerm(TypeForwardReference);
@@ -247,7 +258,7 @@ struct PatternTerm {
     {
         return PatternTerm(TypeAssertionWordBoundary, invert);
     }
-
+    
     bool invert()
     {
         return m_invert;
@@ -257,7 +268,7 @@ struct PatternTerm {
     {
         return m_capture;
     }
-
+    
     void quantify(unsigned count, QuantifierType type)
     {
         quantityCount = count;
@@ -282,18 +293,18 @@ public:
         ASSERT(m_terms.size());
         return m_terms[m_terms.size() - 1];
     }
-
+    
     void removeLastTerm()
     {
         ASSERT(m_terms.size());
         m_terms.shrink(m_terms.size() - 1);
     }
-
+    
     void setOnceThrough()
     {
         m_onceThrough = true;
     }
-
+    
     bool onceThrough()
     {
         return m_onceThrough;
@@ -316,7 +327,7 @@ public:
         , m_hasFixedSize(false)
     {
     }
-
+    
     ~PatternDisjunction()
     {
         deleteAllValues(m_alternatives);
@@ -324,7 +335,7 @@ public:
 
     PatternAlternative* addNewAlternative()
     {
-        PatternAlternative* alternative = newOrCrash<PatternAlternative>(this);
+        PatternAlternative* alternative = js_new<PatternAlternative>(this);
         m_alternatives.append(alternative);
         return alternative;
     }

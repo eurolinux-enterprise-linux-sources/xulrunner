@@ -13,6 +13,8 @@
 #include "nsISVGChildFrame.h"
 #include "nsLiteralString.h"
 #include "nsQueryFrame.h"
+#include "nsRect.h"
+#include "nsSVGGeometryFrame.h"
 #include "nsSVGUtils.h"
 
 class gfxContext;
@@ -26,10 +28,8 @@ class nsSVGMarkerFrame;
 class nsSVGMarkerProperty;
 
 struct nsPoint;
-struct nsRect;
-struct nsIntRect;
 
-typedef nsFrame nsSVGPathGeometryFrameBase;
+typedef nsSVGGeometryFrame nsSVGPathGeometryFrameBase;
 
 class nsSVGPathGeometryFrame : public nsSVGPathGeometryFrameBase,
                                public nsISVGChildFrame
@@ -43,7 +43,7 @@ protected:
   nsSVGPathGeometryFrame(nsStyleContext* aContext)
     : nsSVGPathGeometryFrameBase(aContext)
   {
-     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_MAY_BE_TRANSFORMED);
+     AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
   }
 
 public:
@@ -52,18 +52,9 @@ public:
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsIFrame interface:
-  virtual void Init(nsIContent* aContent,
-                    nsIFrame* aParent,
-                    nsIFrame* aPrevInFlow) MOZ_OVERRIDE;
-
-  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
-  {
-    return nsSVGPathGeometryFrameBase::IsFrameOfType(aFlags & ~(nsIFrame::eSVG | nsIFrame::eSVGGeometry));
-  }
-
-  virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
-                                     nsIAtom*        aAttribute,
-                                     int32_t         aModType) MOZ_OVERRIDE;
+  NS_IMETHOD  AttributeChanged(int32_t         aNameSpaceID,
+                               nsIAtom*        aAttribute,
+                               int32_t         aModType) MOZ_OVERRIDE;
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
@@ -74,11 +65,11 @@ public:
    */
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  virtual bool IsSVGTransformed(Matrix *aOwnTransforms = nullptr,
-                                Matrix *aFromParentTransforms = nullptr) const MOZ_OVERRIDE;
+  virtual bool IsSVGTransformed(gfxMatrix *aOwnTransforms = nullptr,
+                                gfxMatrix *aFromParentTransforms = nullptr) const MOZ_OVERRIDE;
 
-#ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+#ifdef DEBUG
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGPathGeometry"), aResult);
   }
@@ -88,34 +79,27 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  // nsSVGPathGeometryFrame methods
-  gfxMatrix GetCanvasTM(uint32_t aFor,
-                        nsIFrame* aTransformRoot = nullptr);
+  // nsSVGGeometryFrame methods
+  gfxMatrix GetCanvasTM(uint32_t aFor) MOZ_OVERRIDE;
+
 protected:
   // nsISVGChildFrame interface:
-  virtual nsresult PaintSVG(nsRenderingContext *aContext,
-                            const nsIntRect *aDirtyRect,
-                            nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
-  virtual nsIFrame* GetFrameForPoint(const nsPoint &aPoint) MOZ_OVERRIDE;
-  virtual nsRect GetCoveredRegion() MOZ_OVERRIDE;
+  NS_IMETHOD PaintSVG(nsRenderingContext *aContext,
+                      const nsIntRect *aDirtyRect) MOZ_OVERRIDE;
+  NS_IMETHOD_(nsIFrame*) GetFrameForPoint(const nsPoint &aPoint) MOZ_OVERRIDE;
+  NS_IMETHOD_(nsRect) GetCoveredRegion() MOZ_OVERRIDE;
   virtual void ReflowSVG() MOZ_OVERRIDE;
   virtual void NotifySVGChanged(uint32_t aFlags) MOZ_OVERRIDE;
-  virtual SVGBBox GetBBoxContribution(const Matrix &aToBBoxUserspace,
+  virtual SVGBBox GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
                                       uint32_t aFlags) MOZ_OVERRIDE;
-  virtual bool IsDisplayContainer() MOZ_OVERRIDE { return false; }
+  NS_IMETHOD_(bool) IsDisplayContainer() MOZ_OVERRIDE { return false; }
 
-  void GeneratePath(gfxContext *aContext, const Matrix &aTransform);
-  /**
-   * This function returns a set of bit flags indicating which parts of the
-   * element (fill, stroke, bounds) should intercept pointer events. It takes
-   * into account the type of element and the value of the 'pointer-events'
-   * property on the element.
-   */
-  virtual uint16_t GetHitTestFlags();
+protected:
+  void GeneratePath(gfxContext *aContext, const gfxMatrix &aTransform);
+
 private:
   enum { eRenderFill = 1, eRenderStroke = 2 };
-  void Render(nsRenderingContext *aContext, uint32_t aRenderComponents,
-              nsIFrame* aTransformRoot);
+  void Render(nsRenderingContext *aContext, uint32_t aRenderComponents);
   void PaintMarkers(nsRenderingContext *aContext);
 
   struct MarkerProperties {

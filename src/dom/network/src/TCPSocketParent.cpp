@@ -7,14 +7,10 @@
 #include "jsfriendapi.h"
 #include "nsJSUtils.h"
 #include "nsIDOMTCPSocket.h"
+#include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "mozilla/unused.h"
 #include "mozilla/AppProcessChecker.h"
-#include "mozilla/net/NeckoCommon.h"
-#include "mozilla/net/PNeckoParent.h"
-#include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/TabParent.h"
-#include "nsIScriptSecurityManager.h"
 
 namespace IPC {
 
@@ -35,74 +31,22 @@ FireInteralError(mozilla::net::PTCPSocketParent* aActor, uint32_t aLineNo)
   mozilla::unused <<
       aActor->SendCallback(NS_LITERAL_STRING("onerror"),
                            TCPError(NS_LITERAL_STRING("InvalidStateError")),
-                           NS_LITERAL_STRING("connecting"));
+                           NS_LITERAL_STRING("connecting"), 0);
 }
 
-NS_IMPL_CYCLE_COLLECTION(TCPSocketParentBase, mSocket, mIntermediary)
-NS_IMPL_CYCLE_COLLECTING_ADDREF(TCPSocketParentBase)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(TCPSocketParentBase)
+NS_IMPL_CYCLE_COLLECTION_2(TCPSocketParent, mSocket, mIntermediary)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(TCPSocketParent)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(TCPSocketParent)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TCPSocketParentBase)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TCPSocketParent)
   NS_INTERFACE_MAP_ENTRY(nsITCPSocketParent)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-TCPSocketParentBase::TCPSocketParentBase()
-: mIPCOpen(false)
-{
-}
-
-TCPSocketParentBase::~TCPSocketParentBase()
-{
-}
-
-void
-TCPSocketParentBase::ReleaseIPDLReference()
-{
-  MOZ_ASSERT(mIPCOpen);
-  mIPCOpen = false;
-  this->Release();
-}
-
-void
-TCPSocketParentBase::AddIPDLReference()
-{
-  MOZ_ASSERT(!mIPCOpen);
-  mIPCOpen = true;
-  this->AddRef();
-}
-
-NS_IMETHODIMP_(MozExternalRefCountType) TCPSocketParent::Release(void)
-{
-  nsrefcnt refcnt = TCPSocketParentBase::Release();
-  if (refcnt == 1 && mIPCOpen) {
-    mozilla::unused << PTCPSocketParent::SendRequestDelete();
-    return 1;
-  }
-  return refcnt;
-}
-
 bool
-TCPSocketParent::RecvOpen(const nsString& aHost, const uint16_t& aPort, const bool& aUseSSL,
-                          const nsString& aBinaryType)
+TCPSocketParent::Init(const nsString& aHost, const uint16_t& aPort, const bool& aUseSSL,
+                      const nsString& aBinaryType)
 {
-  // We don't have browser actors in xpcshell, and hence can't run automated
-  // tests without this loophole.
-  if (net::UsingNeckoIPCSecurity() &&
-      !AssertAppProcessPermission(Manager()->Manager(), "tcp-socket")) {
-    FireInteralError(this, __LINE__);
-    return true;
-  }
-
-  // Obtain App ID
-  uint32_t appId = nsIScriptSecurityManager::NO_APP_ID;
-  const PContentParent *content = Manager()->Manager();
-  const InfallibleTArray<PBrowserParent*>& browsers = content->ManagedPBrowserParent();
-  if (browsers.Length() > 0) {
-    TabParent *tab = static_cast<TabParent*>(browsers[0]);
-    appId = tab->OwnAppId();
-  }
-
   nsresult rv;
   mIntermediary = do_CreateInstance("@mozilla.org/tcp-socket-intermediary;1", &rv);
   if (NS_FAILED(rv)) {
@@ -110,8 +54,7 @@ TCPSocketParent::RecvOpen(const nsString& aHost, const uint16_t& aPort, const bo
     return true;
   }
 
-  rv = mIntermediary->Open(this, aHost, aPort, aUseSSL, aBinaryType, appId,
-                           getter_AddRefs(mSocket));
+  rv = mIntermediary->Open(this, aHost, aPort, aUseSSL, aBinaryType, getter_AddRefs(mSocket));
   if (NS_FAILED(rv) || !mSocket) {
     FireInteralError(this, __LINE__);
     return true;
@@ -121,20 +64,11 @@ TCPSocketParent::RecvOpen(const nsString& aHost, const uint16_t& aPort, const bo
 }
 
 NS_IMETHODIMP
-TCPSocketParent::InitJS(JS::Handle<JS::Value> aIntermediary, JSContext* aCx)
+TCPSocketParent::InitJS(const JS::Value& aIntermediary, JSContext* aCx)
 {
   MOZ_ASSERT(aIntermediary.isObject());
   mIntermediaryObj = &aIntermediary.toObject();
   return NS_OK;
-}
-
-bool
-TCPSocketParent::RecvStartTLS()
-{
-  NS_ENSURE_TRUE(mSocket, true);
-  nsresult rv = mSocket->UpgradeToSecure();
-  NS_ENSURE_SUCCESS(rv, true);
-  return true;
 }
 
 bool
@@ -156,8 +90,7 @@ TCPSocketParent::RecvResume()
 }
 
 bool
-TCPSocketParent::RecvData(const SendableData& aData,
-                          const uint32_t& aTrackingNumber)
+TCPSocketParent::RecvData(const SendableData& aData)
 {
   NS_ENSURE_TRUE(mIntermediary, true);
 
@@ -165,22 +98,22 @@ TCPSocketParent::RecvData(const SendableData& aData,
   switch (aData.type()) {
     case SendableData::TArrayOfuint8_t: {
       AutoSafeJSContext cx;
-      JSAutoRequest ar(cx);
       JS::Rooted<JS::Value> val(cx);
       JS::Rooted<JSObject*> obj(cx, mIntermediaryObj);
       IPC::DeserializeArrayBuffer(obj, aData.get_ArrayOfuint8_t(), &val);
-      rv = mIntermediary->OnRecvSendArrayBuffer(val, aTrackingNumber);
+      rv = mIntermediary->SendArrayBuffer(val);
       NS_ENSURE_SUCCESS(rv, true);
       break;
     }
 
     case SendableData::TnsString:
-      rv = mIntermediary->OnRecvSendString(aData.get_nsString(), aTrackingNumber);
+      rv = mIntermediary->SendString(aData.get_nsString());
       NS_ENSURE_SUCCESS(rv, true);
       break;
 
     default:
-      MOZ_CRASH("unexpected SendableData type");
+      MOZ_NOT_REACHED("unexpected SendableData type");
+      return false;
   }
   return true;
 }
@@ -195,8 +128,9 @@ TCPSocketParent::RecvClose()
 }
 
 NS_IMETHODIMP
-TCPSocketParent::SendEvent(const nsAString& aType, JS::Handle<JS::Value> aDataVal,
-                           const nsAString& aReadyState, JSContext* aCx)
+TCPSocketParent::SendCallback(const nsAString& aType, const JS::Value& aDataVal,
+                              const nsAString& aReadyState, uint32_t aBuffered,
+                              JSContext* aCx)
 {
   if (!mIPCOpen) {
     NS_WARNING("Dropping callback due to no IPC connection");
@@ -217,7 +151,7 @@ TCPSocketParent::SendEvent(const nsAString& aType, JS::Handle<JS::Value> aDataVa
     data = mozilla::void_t();
 
   } else if (aDataVal.isObject()) {
-    JS::Rooted<JSObject *> obj(aCx, &aDataVal.toObject());
+    JSObject* obj = &aDataVal.toObject();
     if (JS_IsArrayBufferObject(obj)) {
       uint32_t nbytes = JS_GetArrayBufferByteLength(obj);
       uint8_t* buffer = JS_GetArrayBufferData(obj);
@@ -238,7 +172,7 @@ TCPSocketParent::SendEvent(const nsAString& aType, JS::Handle<JS::Value> aDataVa
       nsDependentJSString name;
 
       JS::Rooted<JS::Value> val(aCx);
-      if (!JS_GetProperty(aCx, obj, "name", &val)) {
+      if (!JS_GetProperty(aCx, obj, "name", val.address())) {
         NS_ERROR("No name property on supposed error object");
       } else if (JSVAL_IS_STRING(val)) {
         if (!name.init(aCx, JSVAL_TO_STRING(val))) {
@@ -255,32 +189,15 @@ TCPSocketParent::SendEvent(const nsAString& aType, JS::Handle<JS::Value> aDataVa
   }
   mozilla::unused <<
       PTCPSocketParent::SendCallback(nsString(aType), data,
-                                     nsString(aReadyState));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TCPSocketParent::SetSocketAndIntermediary(nsIDOMTCPSocket *socket,
-                                          nsITCPSocketIntermediary *intermediary,
-                                          JSContext* cx)
-{
-  mSocket = socket;
-  mIntermediary = intermediary;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-TCPSocketParent::SendUpdateBufferedAmount(uint32_t aBufferedAmount,
-                                          uint32_t aTrackingNumber)
-{
-  mozilla::unused << PTCPSocketParent::SendUpdateBufferedAmount(aBufferedAmount,
-                                                                aTrackingNumber);
+                                     nsString(aReadyState), aBuffered);
   return NS_OK;
 }
 
 void
 TCPSocketParent::ActorDestroy(ActorDestroyReason why)
 {
+  MOZ_ASSERT(mIPCOpen);
+  mIPCOpen = false;
   if (mSocket) {
     mSocket->Close();
   }

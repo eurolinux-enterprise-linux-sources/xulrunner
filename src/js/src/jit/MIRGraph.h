@@ -10,14 +10,13 @@
 // This file declares the data structures used to build a control-flow graph
 // containing MIR.
 
-#include "jit/FixedList.h"
-#include "jit/IonAllocPolicy.h"
-#include "jit/MIR.h"
+#include "IonAllocPolicy.h"
+#include "MIRGenerator.h"
+#include "FixedList.h"
 
 namespace js {
 namespace jit {
 
-class BytecodeAnalysis;
 class MBasicBlock;
 class MIRGraph;
 class MStart;
@@ -46,13 +45,12 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MBasicBlock(MIRGraph &graph, CompileInfo &info, jsbytecode *pc, Kind kind);
     bool init();
     void copySlots(MBasicBlock *from);
-    bool inherit(TempAllocator &alloc, BytecodeAnalysis *analysis, MBasicBlock *pred,
-                 uint32_t popped, unsigned stackPhiCount = 0);
+    bool inherit(MBasicBlock *pred, uint32_t popped);
     bool inheritResumePoint(MBasicBlock *pred);
     void assertUsesAreNotWithin(MUseIterator use, MUseIterator end);
 
-    // This block cannot be reached by any means.
-    bool unreachable_;
+    // Does this block do something that forces it to terminate early?
+    bool earlyAbort_;
 
     // Pushes a copy of a local variable or argument.
     void pushVariable(uint32_t slot);
@@ -66,9 +64,9 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     ////////// BEGIN GRAPH BUILDING INSTRUCTIONS //////////
     ///////////////////////////////////////////////////////
 
-    // Creates a new basic block for a MIR generator. If |pred| is not nullptr,
+    // Creates a new basic block for a MIR generator. If |pred| is not NULL,
     // its slots and stack depth are initialized from |pred|.
-    static MBasicBlock *New(MIRGraph &graph, BytecodeAnalysis *analysis, CompileInfo &info,
+    static MBasicBlock *New(MIRGraph &graph, CompileInfo &info,
                             MBasicBlock *pred, jsbytecode *entryPc, Kind kind);
     static MBasicBlock *NewPopN(MIRGraph &graph, CompileInfo &info,
                                 MBasicBlock *pred, jsbytecode *entryPc, Kind kind, uint32_t popn);
@@ -76,25 +74,25 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
                                            MBasicBlock *pred, jsbytecode *entryPc,
                                            MResumePoint *resumePoint);
     static MBasicBlock *NewPendingLoopHeader(MIRGraph &graph, CompileInfo &info,
-                                             MBasicBlock *pred, jsbytecode *entryPc,
-                                             unsigned loopStateSlots);
+                                             MBasicBlock *pred, jsbytecode *entryPc);
     static MBasicBlock *NewSplitEdge(MIRGraph &graph, CompileInfo &info, MBasicBlock *pred);
-    static MBasicBlock *NewAbortPar(MIRGraph &graph, CompileInfo &info,
-                                    MBasicBlock *pred, jsbytecode *entryPc,
-                                    MResumePoint *resumePoint);
-    static MBasicBlock *NewAsmJS(MIRGraph &graph, CompileInfo &info,
-                                 MBasicBlock *pred, Kind kind);
+    static MBasicBlock *NewParBailout(MIRGraph &graph, CompileInfo &info,
+                                      MBasicBlock *pred, jsbytecode *entryPc,
+                                      MResumePoint *resumePoint);
 
-    bool dominates(const MBasicBlock *other) const;
+    bool dominates(MBasicBlock *other);
 
     void setId(uint32_t id) {
         id_ = id;
     }
-
-    // Mark the current block and all dominated blocks as unreachable.
-    void setUnreachable();
-    bool unreachable() const {
-        return unreachable_;
+    void setEarlyAbort() {
+        earlyAbort_ = true;
+    }
+    void clearEarlyAbort() {
+        earlyAbort_ = false;
+    }
+    bool earlyAbort() {
+        return earlyAbort_;
     }
     // Move the definition to the top of the stack.
     void pick(int32_t depth);
@@ -110,7 +108,6 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 
     // Increase the number of slots available
     bool increaseSlots(size_t num);
-    bool ensureHasSlots(size_t num);
 
     // Initializes a slot value; must not be called for normal stack
     // operations, as it will not create new SSA names for copies.
@@ -149,8 +146,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MDefinition *pop();
     void popn(uint32_t n);
 
-    // Adds an instruction to this block's instruction list. |ins| may be
-    // nullptr to simplify OOM checking.
+    // Adds an instruction to this block's instruction list. |ins| may be NULL
+    // to simplify OOM checking.
     void add(MInstruction *ins);
 
     // Marks the last instruction of the block; no further instructions
@@ -168,17 +165,17 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     // Adds a predecessor. Every predecessor must have the same exit stack
     // depth as the entry state to this block. Adding a predecessor
     // automatically creates phi nodes and rewrites uses as needed.
-    bool addPredecessor(TempAllocator &alloc, MBasicBlock *pred);
-    bool addPredecessorPopN(TempAllocator &alloc, MBasicBlock *pred, uint32_t popped);
+    bool addPredecessor(MBasicBlock *pred);
+    bool addPredecessorPopN(MBasicBlock *pred, uint32_t popped);
 
     // Stranger utilities used for inlining.
     bool addPredecessorWithoutPhis(MBasicBlock *pred);
     void inheritSlots(MBasicBlock *parent);
-    bool initEntrySlots(TempAllocator &alloc);
+    bool initEntrySlots();
 
     // Replaces an edge for a given block with a new block. This is
     // used for critical edge splitting and also for inserting
-    // bailouts during ParallelSafetyAnalysis.
+    // bailouts during ParallelArrayAnalysis.
     //
     // Note: If successorWithPhis is set, you must not be replacing it.
     void replacePredecessor(MBasicBlock *old, MBasicBlock *split);
@@ -198,7 +195,6 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     // the current loop as necessary. If the backedge introduces new types for
     // phis at the loop header, returns a disabling abort.
     AbortReason setBackedge(MBasicBlock *block);
-    bool setBackedgeAsmJS(MBasicBlock *block);
 
     // Resets a LOOP_HEADER block to a NORMAL block.  This is needed when
     // optimizations remove the backedge.
@@ -208,7 +204,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     void inheritPhis(MBasicBlock *header);
 
     // Compute the types for phis in this block according to their inputs.
-    bool specializePhis();
+    void specializePhis();
 
     void insertBefore(MInstruction *at, MInstruction *ins);
     void insertAfter(MInstruction *at, MInstruction *ins);
@@ -226,7 +222,6 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MInstructionReverseIterator discardAt(MInstructionReverseIterator &iter);
     MDefinitionIterator discardDefAt(MDefinitionIterator &iter);
     void discardAllInstructions();
-    void discardAllPhiOperands();
     void discardAllPhis();
     void discardAllResumePoints(bool discardEntry = true);
 
@@ -451,6 +446,15 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MBasicBlock *getSuccessor(size_t index) const;
     size_t getSuccessorIndex(MBasicBlock *) const;
 
+    // Specifies the closest loop header dominating this block.
+    void setLoopHeader(MBasicBlock *loop) {
+        JS_ASSERT(loop->isLoopHeader());
+        loopHeader_ = loop;
+    }
+    MBasicBlock *loopHeader() const {
+        return loopHeader_;
+    }
+
     void setLoopDepth(uint32_t loopDepth) {
         loopDepth_ = loopDepth;
     }
@@ -459,13 +463,10 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     }
 
     bool strict() const {
-        return info_.script()->strict();
+        return info_.script()->strict;
     }
 
     void dumpStack(FILE *fp);
-
-    void dump(FILE *fp);
-    void dump();
 
     // Track bailouts by storing the current pc in MIR instruction added at this
     // cycle. This is also used for tracking calls when profiling.
@@ -504,73 +505,60 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     Vector<MBasicBlock *, 1, IonAllocPolicy> immediatelyDominated_;
     MBasicBlock *immediateDominator_;
     size_t numDominated_;
+    MBasicBlock *loopHeader_;
 
     jsbytecode *trackedPc_;
-
-#if defined (JS_ION_PERF)
-    unsigned lineno_;
-    unsigned columnIndex_;
-
-  public:
-    void setLineno(unsigned l) { lineno_ = l; }
-    unsigned lineno() const { return lineno_; }
-    void setColumnIndex(unsigned c) { columnIndex_ = c; }
-    unsigned columnIndex() const { return columnIndex_; }
-#endif
 };
 
 typedef InlineListIterator<MBasicBlock> MBasicBlockIterator;
 typedef InlineListIterator<MBasicBlock> ReversePostorderIterator;
 typedef InlineListReverseIterator<MBasicBlock> PostorderIterator;
 
-typedef Vector<MBasicBlock *, 1, IonAllocPolicy> MIRGraphReturns;
+typedef Vector<MBasicBlock *, 1, IonAllocPolicy> MIRGraphExits;
 
 class MIRGraph
 {
     InlineList<MBasicBlock> blocks_;
     TempAllocator *alloc_;
-    MIRGraphReturns *returnAccumulator_;
+    MIRGraphExits *exitAccumulator_;
     uint32_t blockIdGen_;
     uint32_t idGen_;
     MBasicBlock *osrBlock_;
     MStart *osrStart_;
 
+    // List of compiled/inlined scripts.
+    Vector<JSScript *, 4, IonAllocPolicy> scripts_;
+
     size_t numBlocks_;
-    bool hasTryBlock_;
 
   public:
     MIRGraph(TempAllocator *alloc)
       : alloc_(alloc),
-        returnAccumulator_(nullptr),
+        exitAccumulator_(NULL),
         blockIdGen_(0),
-        idGen_(1),
-        osrBlock_(nullptr),
-        osrStart_(nullptr),
-        numBlocks_(0),
-        hasTryBlock_(false)
+        idGen_(0),
+        osrBlock_(NULL),
+        osrStart_(NULL),
+        numBlocks_(0)
     { }
-
-    TempAllocator &alloc() const {
-        return *alloc_;
-    }
 
     void addBlock(MBasicBlock *block);
     void insertBlockAfter(MBasicBlock *at, MBasicBlock *block);
 
     void unmarkBlocks();
 
-    void setReturnAccumulator(MIRGraphReturns *accum) {
-        returnAccumulator_ = accum;
+    void setExitAccumulator(MIRGraphExits *accum) {
+        exitAccumulator_ = accum;
     }
-    MIRGraphReturns *returnAccumulator() const {
-        return returnAccumulator_;
+    MIRGraphExits *exitAccumulator() const {
+        return exitAccumulator_;
     }
 
-    bool addReturn(MBasicBlock *returnBlock) {
-        if (!returnAccumulator_)
+    bool addExit(MBasicBlock *exitBlock) {
+        if (!exitAccumulator_)
             return true;
 
-        return returnAccumulator_->append(returnBlock);
+        return exitAccumulator_->append(exitBlock);
     }
 
     MBasicBlock *entryBlock() {
@@ -583,9 +571,7 @@ class MIRGraph
         numBlocks_ = 0;
     }
     void resetInstructionNumber() {
-        // This intentionally starts above 0. The id 0 is in places used to
-        // indicate a failure to perform an operation on an instruction.
-        idGen_ = 1;
+        idGen_ = 0;
     }
     MBasicBlockIterator begin() {
         return blocks_.begin();
@@ -605,9 +591,6 @@ class MIRGraph
     ReversePostorderIterator rpoBegin() {
         return blocks_.begin();
     }
-    ReversePostorderIterator rpoBegin(MBasicBlock *at) {
-        return blocks_.begin(at);
-    }
     ReversePostorderIterator rpoEnd() {
         return blocks_.end();
     }
@@ -625,9 +608,12 @@ class MIRGraph
         return blockIdGen_;
     }
     void allocDefinitionId(MDefinition *ins) {
-        ins->setId(idGen_++);
+        // This intentionally starts above 0. The id 0 is in places used to
+        // indicate a failure to perform an operation on an instruction.
+        idGen_ += 2;
+        ins->setId(idGen_);
     }
-    uint32_t getNumInstructionIds() {
+    uint32_t getMaxInstructionId() {
         return idGen_;
     }
     MResumePoint *entryResumePoint() {
@@ -653,22 +639,28 @@ class MIRGraph
     MStart *osrStart() {
         return osrStart_;
     }
-
-    bool hasTryBlock() const {
-        return hasTryBlock_;
+    bool addScript(JSScript *script) {
+        // The same script may be inlined multiple times, add it only once.
+        for (size_t i = 0; i < scripts_.length(); i++) {
+            if (scripts_[i] == script)
+                return true;
+        }
+        return scripts_.append(script);
     }
-    void setHasTryBlock() {
-        hasTryBlock_ = true;
+    size_t numScripts() const {
+        return scripts_.length();
+    }
+    JSScript **scripts() {
+        return scripts_.begin();
     }
 
-    // The per-thread context. So as not to modify the calling convention for
-    // parallel code, we obtain the current ForkJoinContext from thread-local
-    // storage.  This helper method will lazilly insert an MForkJoinContext
-    // instruction in the entry block and return the definition.
-    MDefinition *forkJoinContext();
-
-    void dump(FILE *fp);
-    void dump();
+    // The ParSlice is an instance of ForkJoinSlice*, it carries
+    // "per-helper-thread" information.  So as not to modify the
+    // calling convention for parallel code, we obtain the current
+    // slice from thread-local storage.  This helper method will
+    // lazilly insert an MParSlice instruction in the entry block and
+    // return the definition.
+    MDefinition *parSlice();
 };
 
 class MDefinitionIterator

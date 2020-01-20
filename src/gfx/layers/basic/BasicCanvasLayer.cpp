@@ -3,16 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/layers/PLayerTransactionParent.h"
 #include "BasicCanvasLayer.h"
-#include "basic/BasicLayers.h"          // for BasicLayerManager
-#include "basic/BasicLayersImpl.h"      // for GetEffectiveOperator
-#include "mozilla/mozalloc.h"           // for operator new
-#include "nsAutoPtr.h"                  // for nsRefPtr
-#include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
-#include "gfx2DGlue.h"
+#include "gfxImageSurface.h"
+#include "GLContext.h"
+#include "gfxUtils.h"
+#include "gfxPlatform.h"
+#include "mozilla/Preferences.h"
+#include "BasicLayersImpl.h"
+#include "SurfaceStream.h"
+#include "SharedSurfaceGL.h"
+#include "SharedSurfaceEGL.h"
+#include "GeckoProfiler.h"
 
-class gfxContext;
+#include "nsXULAppAPI.h"
 
 using namespace mozilla::gfx;
 using namespace mozilla::gl;
@@ -21,39 +25,16 @@ namespace mozilla {
 namespace layers {
 
 void
-BasicCanvasLayer::Paint(DrawTarget* aDT,
-                        const Point& aDeviceOffset,
-                        Layer* aMaskLayer)
+BasicCanvasLayer::Paint(gfxContext* aContext, Layer* aMaskLayer)
 {
   if (IsHidden())
     return;
 
   FirePreTransactionCallback();
-  UpdateTarget();
+  UpdateSurface();
   FireDidTransactionCallback();
 
-  if (!mSurface) {
-    return;
-  }
-
-  Matrix m;
-  if (mNeedsYFlip) {
-    m = aDT->GetTransform();
-    Matrix newTransform = m;
-    newTransform.Translate(0.0f, mBounds.height);
-    newTransform.Scale(1.0f, -1.0f);
-    aDT->SetTransform(newTransform);
-  }
-
-  FillRectWithMask(aDT, aDeviceOffset,
-                   Rect(0, 0, mBounds.width, mBounds.height),
-                   mSurface, ToFilter(mFilter),
-                   DrawOptions(GetEffectiveOpacity(), GetEffectiveOperator(this)),
-                   aMaskLayer);
-
-  if (mNeedsYFlip) {
-    aDT->SetTransform(m);
-  }
+  PaintWithOpacity(aContext, GetEffectiveOpacity(), aMaskLayer, GetOperator());
 }
 
 already_AddRefed<CanvasLayer>

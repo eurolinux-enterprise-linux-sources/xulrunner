@@ -17,7 +17,7 @@
 extern PRLogModuleInfo* gPIPNSSLog;
 #endif
 
-NS_IMPL_ISUPPORTS(nsPKCS11Slot, nsIPKCS11Slot)
+NS_IMPL_ISUPPORTS1(nsPKCS11Slot, nsIPKCS11Slot)
 
 nsPKCS11Slot::nsPKCS11Slot(PK11SlotInfo *slot)
 {
@@ -67,9 +67,9 @@ nsPKCS11Slot::refreshSlotInfo()
 nsPKCS11Slot::~nsPKCS11Slot()
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
+  if (isAlreadyShutDown())
     return;
-  }
+
   destructorSafeDestroyNSSReference();
   shutdown(calledFromObject);
 }
@@ -81,6 +81,9 @@ void nsPKCS11Slot::virtualDestroyNSSReference()
 
 void nsPKCS11Slot::destructorSafeDestroyNSSReference()
 {
+  if (isAlreadyShutDown())
+    return;
+
   if (mSlot) {
     PK11_FreeSlot(mSlot);
     mSlot = nullptr;
@@ -89,7 +92,7 @@ void nsPKCS11Slot::destructorSafeDestroyNSSReference()
 
 /* readonly attribute wstring name; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetName(char16_t **aName)
+nsPKCS11Slot::GetName(PRUnichar **aName)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
@@ -113,7 +116,7 @@ nsPKCS11Slot::GetName(char16_t **aName)
 
 /* readonly attribute wstring desc; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetDesc(char16_t **aDesc)
+nsPKCS11Slot::GetDesc(PRUnichar **aDesc)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
@@ -130,7 +133,7 @@ nsPKCS11Slot::GetDesc(char16_t **aDesc)
 
 /* readonly attribute wstring manID; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetManID(char16_t **aManID)
+nsPKCS11Slot::GetManID(PRUnichar **aManID)
 {
   if (mSeries != PK11_GetSlotSeries(mSlot)) {
     refreshSlotInfo();
@@ -142,7 +145,7 @@ nsPKCS11Slot::GetManID(char16_t **aManID)
 
 /* readonly attribute wstring HWVersion; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetHWVersion(char16_t **aHWVersion)
+nsPKCS11Slot::GetHWVersion(PRUnichar **aHWVersion)
 {
   if (mSeries != PK11_GetSlotSeries(mSlot)) {
     refreshSlotInfo();
@@ -154,7 +157,7 @@ nsPKCS11Slot::GetHWVersion(char16_t **aHWVersion)
 
 /* readonly attribute wstring FWVersion; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetFWVersion(char16_t **aFWVersion)
+nsPKCS11Slot::GetFWVersion(PRUnichar **aFWVersion)
 {
   if (mSeries != PK11_GetSlotSeries(mSlot)) {
     refreshSlotInfo();
@@ -180,7 +183,7 @@ nsPKCS11Slot::GetToken(nsIPK11Token **_retval)
 
 /* readonly attribute wstring tokenName; */
 NS_IMETHODIMP 
-nsPKCS11Slot::GetTokenName(char16_t **aName)
+nsPKCS11Slot::GetTokenName(PRUnichar **aName)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
@@ -223,7 +226,7 @@ nsPKCS11Slot::GetStatus(uint32_t *_retval)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(nsPKCS11Module, nsIPKCS11Module)
+NS_IMPL_ISUPPORTS1(nsPKCS11Module, nsIPKCS11Module)
 
 nsPKCS11Module::nsPKCS11Module(SECMODModule *module)
 {
@@ -238,9 +241,9 @@ nsPKCS11Module::nsPKCS11Module(SECMODModule *module)
 nsPKCS11Module::~nsPKCS11Module()
 {
   nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown()) {
+  if (isAlreadyShutDown())
     return;
-  }
+
   destructorSafeDestroyNSSReference();
   shutdown(calledFromObject);
 }
@@ -252,6 +255,9 @@ void nsPKCS11Module::virtualDestroyNSSReference()
 
 void nsPKCS11Module::destructorSafeDestroyNSSReference()
 {
+  if (isAlreadyShutDown())
+    return;
+
   if (mModule) {
     SECMOD_DestroyModule(mModule);
     mModule = nullptr;
@@ -260,7 +266,7 @@ void nsPKCS11Module::destructorSafeDestroyNSSReference()
 
 /* readonly attribute wstring name; */
 NS_IMETHODIMP 
-nsPKCS11Module::GetName(char16_t **aName)
+nsPKCS11Module::GetName(PRUnichar **aName)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
@@ -272,7 +278,7 @@ nsPKCS11Module::GetName(char16_t **aName)
 
 /* readonly attribute wstring libName; */
 NS_IMETHODIMP 
-nsPKCS11Module::GetLibName(char16_t **aName)
+nsPKCS11Module::GetLibName(PRUnichar **aName)
 {
   nsNSSShutDownPreventionLock locker;
   if (isAlreadyShutDown())
@@ -288,7 +294,7 @@ nsPKCS11Module::GetLibName(char16_t **aName)
 
 /*  nsIPKCS11Slot findSlotByName(in wstring name); */
 NS_IMETHODIMP 
-nsPKCS11Module::FindSlotByName(const char16_t *aName,
+nsPKCS11Module::FindSlotByName(const PRUnichar *aName,
                                nsIPKCS11Slot **_retval)
 {
   nsNSSShutDownPreventionLock locker;
@@ -363,7 +369,7 @@ nsPKCS11Module::ListSlots(nsIEnumerator **_retval)
   return rv;
 }
 
-NS_IMPL_ISUPPORTS(nsPKCS11ModuleDB, nsIPKCS11ModuleDB, nsICryptoFIPSInfo)
+NS_IMPL_ISUPPORTS2(nsPKCS11ModuleDB, nsIPKCS11ModuleDB, nsICryptoFIPSInfo)
 
 nsPKCS11ModuleDB::nsPKCS11ModuleDB()
 {
@@ -403,7 +409,7 @@ nsPKCS11ModuleDB::GetInternalFIPS(nsIPKCS11Module **_retval)
 
 /* nsIPKCS11Module findModuleByName(in wstring name); */
 NS_IMETHODIMP 
-nsPKCS11ModuleDB::FindModuleByName(const char16_t *aName,
+nsPKCS11ModuleDB::FindModuleByName(const PRUnichar *aName,
                                    nsIPKCS11Module **_retval)
 {
   nsNSSShutDownPreventionLock locker;
@@ -424,7 +430,7 @@ nsPKCS11ModuleDB::FindModuleByName(const char16_t *aName,
  */
 /* nsIPKCS11Module findSlotByName(in wstring name); */
 NS_IMETHODIMP 
-nsPKCS11ModuleDB::FindSlotByName(const char16_t *aName,
+nsPKCS11ModuleDB::FindSlotByName(const PRUnichar *aName,
                                  nsIPKCS11Slot **_retval)
 {
   nsNSSShutDownPreventionLock locker;

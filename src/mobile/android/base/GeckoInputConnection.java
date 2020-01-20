@@ -5,16 +5,10 @@
 
 package org.mozilla.gecko;
 
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
-import java.util.concurrent.SynchronousQueue;
-
 import org.mozilla.gecko.gfx.InputConnectionHandler;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.ThreadUtils;
-import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
 
 import android.R;
 import android.content.Context;
@@ -39,16 +33,17 @@ import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.concurrent.SynchronousQueue;
+
 class GeckoInputConnection
     extends BaseInputConnection
     implements InputConnectionHandler, GeckoEditableListener {
 
     private static final boolean DEBUG = false;
     protected static final String LOGTAG = "GeckoInputConnection";
-
-    private static final String CUSTOM_HANDLER_TEST_METHOD = "testInputConnection";
-    private static final String CUSTOM_HANDLER_TEST_CLASS =
-        "org.mozilla.gecko.tests.components.GeckoViewComponent$TextInput";
 
     private static final int INLINE_IME_MIN_DISPLAY_SIZE = 480;
 
@@ -116,7 +111,7 @@ class GeckoInputConnection
 
         public void waitForUiThread(Handler icHandler) {
             if (DEBUG) {
-                ThreadUtils.assertOnThread(icHandler.getLooper().getThread(), AssertBehavior.THROW);
+                ThreadUtils.assertOnThread(icHandler.getLooper().getThread());
                 Log.d(LOGTAG, "waitForUiThread() blocking on thread " +
                               icHandler.getLooper().getThread().getName());
             }
@@ -142,20 +137,10 @@ class GeckoInputConnection
             runOnIcThread(icHandler, runnable);
         }
 
-        public void sendEventFromUiThread(final Handler uiHandler,
-                                          final GeckoEditableClient client,
-                                          final GeckoEvent event) {
-            runOnIcThread(uiHandler, client, new Runnable() {
-                @Override public void run() {
-                    client.sendEvent(event);
-                }
-            });
-        }
-
         public Editable getEditableForUiThread(final Handler uiHandler,
                                                final GeckoEditableClient client) {
             if (DEBUG) {
-                ThreadUtils.assertOnThread(uiHandler.getLooper().getThread(), AssertBehavior.THROW);
+                ThreadUtils.assertOnThread(uiHandler.getLooper().getThread());
             }
             final Handler icHandler = client.getInputConnectionHandler();
             if (icHandler.getLooper() == uiHandler.getLooper()) {
@@ -172,7 +157,7 @@ class GeckoInputConnection
                                                final Method method,
                                                final Object[] args) throws Throwable {
                     if (DEBUG) {
-                        ThreadUtils.assertOnThread(uiHandler.getLooper().getThread(), AssertBehavior.THROW);
+                        ThreadUtils.assertOnThread(uiHandler.getLooper().getThread());
                         Log.d(LOGTAG, "UiEditable." + method.getName() + "() blocking");
                     }
                     synchronized (icHandler) {
@@ -433,13 +418,6 @@ class GeckoInputConnection
     public void onTextChange(String text, int start, int oldEnd, int newEnd) {
 
         if (mUpdateRequest == null) {
-            // Android always expects selection updates when not in extracted mode;
-            // in extracted mode, the selection is reported through updateExtractedText
-            final Editable editable = getEditable();
-            if (editable != null) {
-                onSelectionChange(Selection.getSelectionStart(editable),
-                                  Selection.getSelectionEnd(editable));
-            }
             return;
         }
 
@@ -548,11 +526,6 @@ class GeckoInputConnection
                 // only return our own Handler to InputMethodManager
                 return true;
             }
-            if (CUSTOM_HANDLER_TEST_METHOD.equals(frame.getMethodName()) &&
-                CUSTOM_HANDLER_TEST_CLASS.equals(frame.getClassName())) {
-                // InputConnection tests should also run on the custom handler
-                return true;
-            }
         }
         return false;
     }
@@ -625,9 +598,9 @@ class GeckoInputConnection
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
             else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
-            else if (!mIMEModeHint.equalsIgnoreCase("lowercase"))
+            else if (mIMEModeHint.equalsIgnoreCase("autocapitalized"))
                 outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
-            // auto-capitalized mode is the default
+            // lowercase mode is the default
         }
 
         if (mIMEActionHint.equalsIgnoreCase("go"))
@@ -821,8 +794,7 @@ class GeckoInputConnection
 
         View view = getView();
         if (view == null) {
-            InputThreadUtils.sInstance.sendEventFromUiThread(ThreadUtils.getUiHandler(),
-                mEditableClient, GeckoEvent.createKeyEvent(event, 0));
+            mEditableClient.sendEvent(GeckoEvent.createKeyEvent(event, 0));
             return true;
         }
 
@@ -839,7 +811,7 @@ class GeckoInputConnection
         if (skip ||
             (down && !keyListener.onKeyDown(view, uiEditable, keyCode, event)) ||
             (!down && !keyListener.onKeyUp(view, uiEditable, keyCode, event))) {
-            InputThreadUtils.sInstance.sendEventFromUiThread(uiHandler, mEditableClient,
+            mEditableClient.sendEvent(
                 GeckoEvent.createKeyEvent(event, TextKeyListener.getMetaState(uiEditable)));
             if (skip && down) {
                 // Usually, the down key listener call above adjusts meta states for us.
@@ -931,10 +903,6 @@ class GeckoInputConnection
             case NOTIFY_IME_OF_BLUR:
                 // Showing/hiding vkb is done in notifyIMEContext
                 resetInputConnection();
-                break;
-
-            case NOTIFY_IME_OPEN_VKB:
-                showSoftInput();
                 break;
 
             default:

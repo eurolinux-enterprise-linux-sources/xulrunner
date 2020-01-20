@@ -4,7 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-UNIFIED_SOURCES += [
+TEST_DIRS += ['tests']
+
+MODULE = 'editor'
+
+CPP_SOURCES += [
     'nsInternetCiter.cpp',
     'nsPlaintextDataTransfer.cpp',
     'nsPlaintextEditor.cpp',
@@ -13,16 +17,5 @@ UNIFIED_SOURCES += [
     'nsTextEditUtils.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'texteditor_s'
 
-LOCAL_INCLUDES += [
-    '../base',
-    '/content/base/src',
-    '/editor/txmgr/src',
-]
-
-FINAL_LIBRARY = 'gklayout'
-
-MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
-
-MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']

@@ -5,19 +5,16 @@
 
 #include "mozilla/dom/SVGFEPointLightElement.h"
 #include "mozilla/dom/SVGFEPointLightElementBinding.h"
-#include "nsSVGFilterInstance.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEPointLight)
-
-using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEPointLightElement::WrapNode(JSContext *aCx)
+SVGFEPointLightElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGFEPointLightElementBinding::Wrap(aCx, this);
+  return SVGFEPointLightElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::NumberInfo SVGFEPointLightElement::sNumberInfo[3] =
@@ -47,31 +44,19 @@ SVGFEPointLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
 
 //----------------------------------------------------------------------
 
-AttributeMap
-SVGFEPointLightElement::ComputeLightAttributes(nsSVGFilterInstance* aInstance)
-{
-  Point3D lightPos;
-  GetAnimatedNumberValues(&lightPos.x, &lightPos.y, &lightPos.z, nullptr);
-  
-  AttributeMap map;
-  map.Set(eLightType, (uint32_t)eLightTypePoint);
-  map.Set(ePointLightPosition, aInstance->ConvertLocation(lightPos));
-  return map;
-}
-
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGFEPointLightElement::X()
 {
   return mNumberAttributes[ATTR_X].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGFEPointLightElement::Y()
 {
   return mNumberAttributes[ATTR_Y].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGFEPointLightElement::Z()
 {
   return mNumberAttributes[ATTR_Z].ToDOMAnimatedNumber(this);

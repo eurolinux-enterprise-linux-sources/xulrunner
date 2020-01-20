@@ -8,15 +8,13 @@
 #ifndef nsDOMCSSDeclaration_h___
 #define nsDOMCSSDeclaration_h___
 
-#include "nsICSSDeclaration.h"
-
 #include "mozilla/Attributes.h"
+#include "nsICSSDeclaration.h"
 #include "nsCOMPtr.h"
+#include "mozilla/dom/CSS2PropertiesBinding.h"
 
 class nsIPrincipal;
 class nsIDocument;
-struct JSContext;
-class JSObject;
 
 namespace mozilla {
 namespace css {
@@ -36,8 +34,8 @@ public:
   // Declare addref and release so they can be called on us, but don't
   // implement them.  Our subclasses must handle their own
   // refcounting.
-  NS_IMETHOD_(MozExternalRefCountType) AddRef() MOZ_OVERRIDE = 0;
-  NS_IMETHOD_(MozExternalRefCountType) Release() MOZ_OVERRIDE = 0;
+  NS_IMETHOD_(nsrefcnt) AddRef() MOZ_OVERRIDE = 0;
+  NS_IMETHOD_(nsrefcnt) Release() MOZ_OVERRIDE = 0;
 
   NS_DECL_NSICSSDECLARATION
   using nsICSSDeclaration::GetLength;
@@ -94,7 +92,11 @@ public:
 
   virtual void IndexedGetter(uint32_t aIndex, bool& aFound, nsAString& aPropName) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE
+  {
+    return mozilla::dom::CSS2PropertiesBinding::Wrap(cx, scope, this);
+  }
 
 protected:
   // This method can return null regardless of the value of aAllocate;
@@ -139,12 +141,6 @@ protected:
   // return the old value; it just does a straight removal.
   nsresult RemoveProperty(const nsCSSProperty aPropID);
 
-  void GetCustomPropertyValue(const nsAString& aPropertyName, nsAString& aValue);
-  nsresult RemoveCustomProperty(const nsAString& aPropertyName);
-  nsresult ParseCustomPropertyValue(const nsAString& aPropertyName,
-                                    const nsAString& aPropValue,
-                                    bool aIsImportant);
-
 protected:
   virtual ~nsDOMCSSDeclaration();
   nsDOMCSSDeclaration()
@@ -152,13 +148,5 @@ protected:
     SetIsDOMBinding();
   }
 };
-
-bool IsCSSPropertyExposedToJS(nsCSSProperty aProperty, JSContext* cx, JSObject* obj);
-
-template <nsCSSProperty Property>
-MOZ_ALWAYS_INLINE bool IsCSSPropertyExposedToJS(JSContext* cx, JSObject* obj)
-{
-  return IsCSSPropertyExposedToJS(Property, cx, obj);
-}
 
 #endif // nsDOMCSSDeclaration_h___

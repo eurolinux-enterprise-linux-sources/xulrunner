@@ -5,29 +5,21 @@
 
 package org.mozilla.gecko.widget;
 
-import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.Telemetry;
-import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.menu.MenuItemActionView;
-import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.drawable.Drawable;
+import android.view.ActionProvider;
 import android.view.MenuItem;
 import android.view.MenuItem.OnMenuItemClickListener;
 import android.view.SubMenu;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.text.TextUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-
-public class GeckoActionProvider {
-    private static int MAX_HISTORY_SIZE = 2;
+public class GeckoActionProvider extends ActionProvider {
 
     /**
      * A listener to know when a target was selected.
@@ -40,8 +32,6 @@ public class GeckoActionProvider {
 
     private final Context mContext;
 
-    public final static String DEFAULT_MIME_TYPE = "text/plain";
-
     public static final String DEFAULT_HISTORY_FILE_NAME = "history.xml";
 
     //  History file.
@@ -51,61 +41,22 @@ public class GeckoActionProvider {
 
     private final Callbacks mCallbacks = new Callbacks();
 
-    private static HashMap<String, GeckoActionProvider> mProviders = new HashMap<String, GeckoActionProvider>();
-
-    private static String getFilenameFromMimeType(String mimeType) {
-        String[] mime = mimeType.split("/");
-
-        // All text mimetypes use the default provider
-        if ("text".equals(mime[0])) {
-            return DEFAULT_HISTORY_FILE_NAME;
-        }
-
-        return "history-" + mime[0] + ".xml";
-    }
-
-    // Gets the action provider for a particular mimetype
-    public static GeckoActionProvider getForType(String mimeType, Context context) {
-        if (!mProviders.keySet().contains(mimeType)) {
-            GeckoActionProvider provider = new GeckoActionProvider(context);
-
-            // For empty types, we just return a default provider
-            if (TextUtils.isEmpty(mimeType)) {
-                return provider;
-            }
-
-            provider.setHistoryFileName(getFilenameFromMimeType(mimeType));
-            mProviders.put(mimeType, provider);
-        }
-        return mProviders.get(mimeType);
-    }
-
     public GeckoActionProvider(Context context) {
+        super(context);
         mContext = context;
     }
 
+    @Override
     public View onCreateActionView() {
         // Create the view and set its data model.
         ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
         MenuItemActionView view = new MenuItemActionView(mContext, null);
-        view.addActionButtonClickListener(mCallbacks);
+        view.setActionButtonClickListener(mCallbacks);
 
-        final PackageManager packageManager = mContext.getPackageManager();
-        int historySize = dataModel.getDistinctActivityCountInHistory();
-        if (historySize > MAX_HISTORY_SIZE) {
-            historySize = MAX_HISTORY_SIZE;
-        }
-
-        // Historical data is dependent on past selection of activities.
-        // Activity count is determined by the number of activities that can handle
-        // the particular intent. When no intent is set, the activity count is 0,
-        // while the history count can be a valid number.
-        if (historySize > dataModel.getActivityCount()) {
-            return view;
-        }
-
-        for (int i = 0; i < historySize; i++) {
-            view.addActionButton(dataModel.getActivity(i).loadIcon(packageManager));
+        if (dataModel.getHistorySize() > 0) {
+            PackageManager packageManager = mContext.getPackageManager();
+            ResolveInfo defaultActivity = dataModel.getDefaultActivity();
+            view.setActionButton(defaultActivity == null ? null : defaultActivity.loadIcon(packageManager));
         }
 
         return view;
@@ -115,10 +66,12 @@ public class GeckoActionProvider {
         return onCreateActionView();
     }
 
+    @Override
     public boolean hasSubMenu() {
         return true;
     }
 
+    @Override
     public void onPrepareSubMenu(SubMenu subMenu) {
         // Clear since the order of items may change.
         subMenu.clear();
@@ -148,33 +101,10 @@ public class GeckoActionProvider {
     public void setIntent(Intent intent) {
         ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
         dataModel.setIntent(intent);
-
-        // Inform the target listener to refresh it's UI, if needed.
-        if (mOnTargetListener != null) {
-            mOnTargetListener.onTargetSelected();
-        }
     }
 
     public void setOnTargetSelectedListener(OnTargetSelectedListener listener) {
         mOnTargetListener = listener;
-    }
-
-    public ArrayList<ResolveInfo> getSortedActivites() {
-        ArrayList<ResolveInfo> infos = new ArrayList<ResolveInfo>();
-
-        ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
-        PackageManager packageManager = mContext.getPackageManager();
-
-        // Populate the sub-menu with a sub set of the activities.
-        final int count = dataModel.getActivityCount();
-        for (int i = 0; i < count; i++) {
-            infos.add(dataModel.getActivity(i));
-        }
-        return infos;
-    }
-
-    public void chooseActivity(int position) {
-        mCallbacks.chooseActivity(position);
     }
 
     /**
@@ -183,46 +113,28 @@ public class GeckoActionProvider {
     private class Callbacks implements OnMenuItemClickListener,
                                        OnClickListener {
         private void chooseActivity(int index) { 
-            final ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
-            final Intent launchIntent = dataModel.chooseActivity(index);
-            if (launchIntent != null) {
-                // This may cause a download to happen. Make sure we're on the background thread.
-                ThreadUtils.postToBackgroundThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        // Share image downloads the image before sharing it.
-                        String type = launchIntent.getType();
-                        if (Intent.ACTION_SEND.equals(launchIntent.getAction()) && type != null && type.startsWith("image/")) {
-                            GeckoAppShell.downloadImageForIntent(launchIntent);
-                        }
-
-                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-                        mContext.startActivity(launchIntent);
-                    }
-                });
-            }
-
-            if (mOnTargetListener != null) {
+            if (mOnTargetListener != null)
                 mOnTargetListener.onTargetSelected();
+
+            ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
+            Intent launchIntent = dataModel.chooseActivity(index);
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
+                mContext.startActivity(launchIntent);
             }
         }
 
         @Override
         public boolean onMenuItemClick(MenuItem item) {
             chooseActivity(item.getItemId());
-
-            // Context: Sharing via chrome mainmenu list (no explicit session is active)
-            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST);
             return true;
         }
 
         @Override
         public void onClick(View view) {
-            Integer index = (Integer) view.getTag();
-            chooseActivity(index);
-
-            // Context: Sharing via chrome mainmenu and content contextmenu quickshare (no explicit session is active)
-            Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.BUTTON);
+            ActivityChooserModel dataModel = ActivityChooserModel.get(mContext, mHistoryFileName);
+            chooseActivity(dataModel.getActivityIndex(dataModel.getDefaultActivity()));
         }
     }
 }
+

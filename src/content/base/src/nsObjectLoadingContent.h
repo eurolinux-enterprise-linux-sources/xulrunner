@@ -19,6 +19,7 @@
 #include "nsIChannelEventSink.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsIRunnable.h"
+#include "nsPluginInstanceOwner.h"
 #include "nsIThreadInternal.h"
 #include "nsIFrame.h"
 #include "nsIFrameLoader.h"
@@ -29,13 +30,6 @@ class AutoSetInstantiatingToFalse;
 class nsObjectFrame;
 class nsFrameLoader;
 class nsXULElement;
-class nsPluginInstanceOwner;
-
-namespace mozilla {
-namespace dom {
-template<typename T> class Sequence;
-}
-}
 
 class nsObjectLoadingContent : public nsImageLoadingContent
                              , public nsIStreamListener
@@ -110,7 +104,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      * Object state. This is a bitmask of NS_EVENT_STATEs epresenting the
      * current state of the object.
      */
-    mozilla::EventStates ObjectState() const;
+    nsEventStates ObjectState() const;
 
     ObjectType Type() const { return mType; }
 
@@ -154,12 +148,8 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     void TeardownProtoChain();
 
     // Helper for WebIDL newResolve
-    bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
-                      JS::Handle<jsid> aId,
-                      JS::MutableHandle<JSPropertyDescriptor> aDesc);
-    // Helper for WebIDL enumeration
-    void GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& /* unused */,
-                             mozilla::ErrorResult& aRv);
+    bool DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject, JS::Handle<jsid> aId,
+                      unsigned aFlags, JS::MutableHandle<JSObject*> aObjp);
 
     // WebIDL API
     nsIDocument* GetContentDocument();
@@ -178,10 +168,6 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     void PlayPlugin(mozilla::ErrorResult& aRv)
     {
       aRv = PlayPlugin();
-    }
-    void Reload(bool aClearActivation, mozilla::ErrorResult& aRv)
-    {
-      aRv = Reload(aClearActivation);
     }
     bool Activated() const
     {
@@ -214,10 +200,9 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     {
       aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
     }
-    void LegacyCall(JSContext* aCx, JS::Handle<JS::Value> aThisVal,
-                    const mozilla::dom::Sequence<JS::Value>& aArguments,
-                    JS::MutableHandle<JS::Value> aRetval,
-                    mozilla::ErrorResult& aRv);
+    JS::Value LegacyCall(JSContext* aCx, JS::Handle<JS::Value> aThisVal,
+                         const mozilla::dom::Sequence<JS::Value>& aArguments,
+                         mozilla::ErrorResult& aRv);
 
   protected:
     /**
@@ -450,8 +435,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      *              the construction may either be sync or async.
      * @param aNotify if false, only need to update the state of our element.
      */
-    void NotifyStateChanged(ObjectType aOldType,
-                            mozilla::EventStates aOldState,
+    void NotifyStateChanged(ObjectType aOldType, nsEventStates aOldState,
                             bool aSync, bool aNotify);
 
     /**
@@ -496,8 +480,8 @@ class nsObjectLoadingContent : public nsImageLoadingContent
     static nsresult GetPluginJSObject(JSContext *cx,
                                       JS::Handle<JSObject*> obj,
                                       nsNPAPIPluginInstance *plugin_inst,
-                                      JS::MutableHandle<JSObject*> plugin_obj,
-                                      JS::MutableHandle<JSObject*> plugin_proto);
+                                      JSObject **plugin_obj,
+                                      JSObject **plugin_proto);
 
     // The final listener for mChannel (uriloader, pluginstreamlistener, etc.)
     nsCOMPtr<nsIStreamListener> mFinalListener;

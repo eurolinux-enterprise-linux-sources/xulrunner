@@ -8,7 +8,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #elif defined(MOZ_WIDGET_QT)
-#include <QWindow>
+#include <QWidget>
 #endif
 
 #include "nsShmImage.h"
@@ -25,7 +25,7 @@ static bool gShmAvailable = true;
 bool nsShmImage::UseShm()
 {
     return gfxPlatform::GetPlatform()->
-        ScreenReferenceSurface()->GetType() == gfxSurfaceType::Image
+        ScreenReferenceSurface()->GetType() == gfxASurface::SurfaceTypeImage
         && gShmAvailable;
 }
 
@@ -76,25 +76,17 @@ nsShmImage::Create(const gfxIntSize& aSize,
     shm->mXAttached = true;
     shm->mSize = aSize;
     switch (shm->mImage->depth) {
-    case 32:
-        if ((shm->mImage->red_mask == 0xff0000) &&
-            (shm->mImage->green_mask == 0xff00) &&
-            (shm->mImage->blue_mask == 0xff)) {
-            shm->mFormat = gfxImageFormat::ARGB32;
-            break;
-        }
-        goto unsupported;
     case 24:
         // Only xRGB is supported.
         if ((shm->mImage->red_mask == 0xff0000) &&
             (shm->mImage->green_mask == 0xff00) &&
             (shm->mImage->blue_mask == 0xff)) {
-            shm->mFormat = gfxImageFormat::RGB24;
+            shm->mFormat = gfxASurface::ImageFormatRGB24;
             break;
         }
         goto unsupported;
     case 16:
-        shm->mFormat = gfxImageFormat::RGB16_565; break;
+        shm->mFormat = gfxASurface::ImageFormatRGB16_565; break;
     unsupported:
     default:
         NS_WARNING("Unsupported XShm Image format!");
@@ -177,14 +169,14 @@ nsShmImage::Put(GdkWindow* aWindow, cairo_rectangle_list_t* aRects)
 
 #elif defined(MOZ_WIDGET_QT)
 void
-nsShmImage::Put(QWindow* aWindow, QRect& aRect)
+nsShmImage::Put(QWidget* aWindow, QRect& aRect)
 {
     Display* dpy = gfxQtPlatform::GetXDisplay(aWindow);
     Drawable d = aWindow->winId();
 
     GC gc = XCreateGC(dpy, d, 0, nullptr);
     // Avoid out of bounds painting
-    QRect inter = aRect.intersected(aWindow->geometry());
+    QRect inter = aRect.intersected(aWindow->rect());
     XShmPutImage(dpy, d, gc, mImage,
                  inter.x(), inter.y(),
                  inter.x(), inter.y(),

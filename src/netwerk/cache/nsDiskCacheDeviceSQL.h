@@ -42,7 +42,7 @@ private:
 
 class nsOfflineCacheEvictionFunction MOZ_FINAL : public mozIStorageFunction {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_MOZISTORAGEFUNCTION
 
   nsOfflineCacheEvictionFunction(nsOfflineCacheDevice *device)
@@ -64,7 +64,7 @@ class nsOfflineCacheDevice : public nsCacheDevice
 public:
   nsOfflineCacheDevice();
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
 
   /**
    * nsCacheDevice methods
@@ -157,7 +157,7 @@ public:
   nsresult                DeactivateGroup(const nsACString &group);
 
   nsresult                ChooseApplicationCache(const nsACString &key,
-                                                 nsILoadContextInfo *loadContext,
+                                                 nsILoadContext *loadContext,
                                                  nsIApplicationCache **out);
 
   nsresult                CacheOpportunistically(nsIApplicationCache* cache,
@@ -208,7 +208,7 @@ private:
   nsresult EnableEvictionObserver();
   nsresult DisableEvictionObserver();
 
-  bool CanUseCache(nsIURI *keyURI, const nsACString &clientID, nsILoadContextInfo *loadContext);
+  bool CanUseCache(nsIURI *keyURI, const nsACString &clientID, nsILoadContext *loadContext);
 
   nsresult MarkEntry(const nsCString &clientID,
                      const nsACString &key,

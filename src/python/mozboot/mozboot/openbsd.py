@@ -10,23 +10,24 @@ class OpenBSDBootstrapper(BaseBootstrapper):
     def __init__(self, version):
         BaseBootstrapper.__init__(self)
 
-        self.packages = [
+    def install_system_packages(self):
+        # we use -z because there's no other way to say "any autoconf-2.13"
+        self.run_as_root(['pkg_add', '-z',
             'mercurial',
             'llvm',
             'autoconf-2.13',
             'yasm',
             'gtk+2',
-            'dbus-glib',
-            'gstreamer-plugins-base',
-            'pulseaudio',
             'libIDL',
             'gmake',
             'gtar',
             'wget',
             'unzip',
-            'zip',
-        ]
+            'zip'])
 
-    def install_system_packages(self):
-        # we use -z because there's no other way to say "any autoconf-2.13"
-        self.run_as_root(['pkg_add', '-z'] + self.packages)
+    def _update_package_manager(self):
+        self.run_as_root(['port', 'sync'])
+
+    def upgrade_mercurial(self, current):
+        self.run_as_root(['pkg_add', '-u', 'mercurial'])
+

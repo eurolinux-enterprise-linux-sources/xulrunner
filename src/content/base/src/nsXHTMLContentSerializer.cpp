@@ -15,7 +15,7 @@
 #include "nsIDOMElement.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsXPIDLString.h"
@@ -33,6 +33,8 @@
 #include "nsIScriptElement.h"
 #include "nsAttrName.h"
 #include "nsParserConstants.h"
+
+static const char kMozStr[] = "moz";
 
 static const int32_t kLongLineLen = 128;
 

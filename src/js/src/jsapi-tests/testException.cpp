@@ -5,21 +5,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsapi-tests/tests.h"
+
+#include "tests.h"
 
 BEGIN_TEST(testException_bug860435)
 {
     JS::RootedValue fun(cx);
 
-    EVAL("ReferenceError", &fun);
+    EVAL("ReferenceError", fun.address());
     CHECK(fun.isObject());
 
     JS::RootedValue v(cx);
-    JS_CallFunctionValue(cx, global, fun, JS::HandleValueArray::empty(), &v);
+    JS_CallFunctionValue(cx, global, fun, 0, v.address(), v.address());
     CHECK(v.isObject());
-    JS::RootedObject obj(cx, &v.toObject());
 
-    JS_GetProperty(cx, obj, "stack", &v);
+    JS_GetProperty(cx, &v.toObject(), "stack", v.address());
     CHECK(v.isString());
     return true;
 }

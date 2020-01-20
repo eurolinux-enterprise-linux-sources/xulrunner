@@ -7,30 +7,25 @@
 let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
 
 const URI_EXTENSION_BLOCKLIST_DIALOG = "chrome://mozapps/content/extensions/blocklist.xul";
-let blocklistURL = "http://example.com/browser/browser/base/content/test/social/blocklist.xml";
+let blocklistURL = "http://example.org/browser/browser/base/content/test/social/blocklist.xml";
 
 let manifest = { // normal provider
   name: "provider ok",
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
+  iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
 };
 let manifest_bad = { // normal provider
   name: "provider blocked",
   origin: "https://test1.example.com",
   sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png"
+  iconURL: "https://test1.example.com/browser/browser/base/content/test/moz.png"
 };
 
 function test() {
   waitForExplicitFinish();
-  // turn on logging for nsBlocklistService.js
-  Services.prefs.setBoolPref("extensions.logging.enabled", true);
-  registerCleanupFunction(function () {
-    Services.prefs.clearUserPref("extensions.logging.enabled");
-  });
 
   runSocialTests(tests, undefined, undefined, function () {
     resetBlocklist(finish); //restore to original pref
@@ -41,16 +36,16 @@ var tests = {
   testSimpleBlocklist: function(next) {
     // this really just tests adding and clearing our blocklist for later tests
     setAndUpdateBlocklist(blocklistURL, function() {
-      ok(Services.blocklist.isAddonBlocklisted(SocialService.createWrapper(manifest_bad)), "blocking 'blocked'");
-      ok(!Services.blocklist.isAddonBlocklisted(SocialService.createWrapper(manifest)), "not blocking 'good'");
+      ok(Services.blocklist.isAddonBlocklisted("test1.example.com@services.mozilla.org", "0", "0", "0"), "blocking 'blocked'");
+      ok(!Services.blocklist.isAddonBlocklisted("example.com@services.mozilla.org", "0", "0", "0"), "not blocking 'good'");
       resetBlocklist(function() {
-        ok(!Services.blocklist.isAddonBlocklisted(SocialService.createWrapper(manifest_bad)), "blocklist cleared");
+        ok(!Services.blocklist.isAddonBlocklisted("test1.example.com@services.mozilla.org", "0", "0", "0"), "blocklist cleared");
         next();
       });
     });
   },
   testAddingNonBlockedProvider: function(next) {
-    function finishTest(isgood) {
+    function finish(isgood) {
       ok(isgood, "adding non-blocked provider ok");
       Services.prefs.clearUserPref("social.manifest.good");
       resetBlocklist(next);
@@ -62,21 +57,21 @@ var tests = {
           try {
             SocialService.removeProvider(provider.origin, function() {
               ok(true, "added and removed provider");
-              finishTest(true);
+              finish(true);
             });
           } catch(e) {
             ok(false, "SocialService.removeProvider threw exception: " + e);
-            finishTest(false);
+            finish(false);
           }
         });
       } catch(e) {
         ok(false, "SocialService.addProvider threw exception: " + e);
-        finishTest(false);
+        finish(false);
       }
     });
   },
   testAddingBlockedProvider: function(next) {
-    function finishTest(good) {
+    function finish(good) {
       ok(good, "Unable to add blocklisted provider");
       Services.prefs.clearUserPref("social.manifest.blocked");
       resetBlocklist(next);
@@ -85,19 +80,17 @@ var tests = {
     setAndUpdateBlocklist(blocklistURL, function() {
       try {
         SocialService.addProvider(manifest_bad, function(provider) {
-          SocialService.removeProvider(provider.origin, function() {
-            ok(false, "SocialService.addProvider should throw blocklist exception");
-            finishTest(false);
-          });
+          ok(false, "SocialService.addProvider should throw blocklist exception");
+          finish(false);
         });
       } catch(e) {
         ok(true, "SocialService.addProvider should throw blocklist exception: " + e);
-        finishTest(true);
+        finish(true);
       }
     });
   },
   testInstallingBlockedProvider: function(next) {
-    function finishTest(good) {
+    function finish(good) {
       ok(good, "Unable to add blocklisted provider");
       Services.prefs.clearUserPref("social.whitelist");
       resetBlocklist(next);
@@ -115,16 +108,24 @@ var tests = {
           // provider
           Social.installProvider(doc, manifest_bad, function(addonManifest) {
             gBrowser.removeTab(tab);
-            finishTest(false);
+            finish(false);
           });
         } catch(e) {
           gBrowser.removeTab(tab);
-          finishTest(true);
+          finish(true);
         }
       });
     });
   },
   testBlockingExistingProvider: function(next) {
+    let windowWasClosed = false;
+    function finish() {
+      waitForCondition(function() windowWasClosed, function() {
+        Services.wm.removeListener(listener);
+        next();
+      }, "blocklist dialog was closed");
+    }
+
     let listener = {
       _window: null,
       onOpenWindow: function(aXULWindow) {
@@ -133,25 +134,17 @@ var tests = {
         let domwindow = aXULWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIDOMWindow);
 
-        domwindow.addEventListener("load", function _load() {
-          domwindow.removeEventListener("load", _load, false);
-
-          domwindow.addEventListener("unload", function _unload() {
-            domwindow.removeEventListener("unload", _unload, false);
-            info("blocklist window was closed");
-            Services.wm.removeListener(listener);
-            next();
-          }, false);
-
-          is(domwindow.document.location.href, URI_EXTENSION_BLOCKLIST_DIALOG, "dialog opened and focused");
-          // wait until after load to cancel so the dialog has initalized. we
-          // don't want to accept here since that restarts the browser.
-          executeSoon(() => {
-            let cancelButton = domwindow.document.documentElement.getButton("cancel");
-            info("***** hit the cancel button\n");
-            cancelButton.doCommand();
-          });
+        domwindow.addEventListener("unload", function _unload() {
+          domwindow.removeEventListener("unload", _unload, false);
+          windowWasClosed = true;
         }, false);
+        info("dialog opened, waiting for focus");
+        waitForFocus(function() {
+          is(domwindow.document.location.href, URI_EXTENSION_BLOCKLIST_DIALOG, "dialog opened and focused");
+          executeSoon(function() {
+            domwindow.close();
+          });
+        }, domwindow);
       },
       onCloseWindow: function(aXULWindow) { },
       onWindowTitleChange: function(aXULWindow, aNewTitle) { }
@@ -162,17 +155,16 @@ var tests = {
     setManifestPref("social.manifest.blocked", manifest_bad);
     try {
       SocialService.addProvider(manifest_bad, function(provider) {
-        // the act of blocking should cause a 'provider-disabled' notification
+        // the act of blocking should cause a 'provider-removed' notification
         // from SocialService.
-        SocialService.registerProviderListener(function providerListener(topic, origin, providers) {
-          if (topic != "provider-disabled")
+        SocialService.registerProviderListener(function providerListener(topic) {
+          if (topic != "provider-removed")
             return;
           SocialService.unregisterProviderListener(providerListener);
-          is(origin, provider.origin, "provider disabled");
           SocialService.getProvider(provider.origin, function(p) {
-            ok(p == null, "blocklisted provider disabled");
+            ok(p==null, "blocklisted provider removed");
             Services.prefs.clearUserPref("social.manifest.blocked");
-            resetBlocklist();
+            resetBlocklist(finish);
           });
         });
         // no callback - the act of updating should cause the listener above
@@ -181,7 +173,7 @@ var tests = {
       });
     } catch(e) {
       ok(false, "unable to add provider " + e);
-      next();
+      finish();
     }
   }
 }

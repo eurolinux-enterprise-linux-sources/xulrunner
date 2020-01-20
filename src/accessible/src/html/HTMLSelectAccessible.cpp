@@ -218,7 +218,6 @@ HTMLSelectOptionAccessible::NativeState()
     // visible option
     if (!selected) {
       state |= states::OFFSCREEN;
-      state ^= states::INVISIBLE;
     } else {
       // Clear offscreen and invisible for currently showing option
       state &= ~(states::OFFSCREEN | states::INVISIBLE);
@@ -394,7 +393,11 @@ HTMLComboboxAccessible::InvalidateChildren()
 void
 HTMLComboboxAccessible::CacheChildren()
 {
-  nsIComboboxControlFrame* comboFrame = do_QueryFrame(GetFrame());
+  nsIFrame* frame = GetFrame();
+  if (!frame)
+    return;
+
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(frame);
   if (!comboFrame)
     return;
 
@@ -407,7 +410,8 @@ HTMLComboboxAccessible::CacheChildren()
       new HTMLComboboxListAccessible(mParent, mContent, mDoc);
 
     // Initialize and put into cache.
-    Document()->BindToDocument(mListAccessible, nullptr);
+    if (!Document()->BindToDocument(mListAccessible, nullptr))
+      return;
   }
 
   if (AppendChild(mListAccessible)) {
@@ -502,7 +506,11 @@ HTMLComboboxAccessible::GetActionName(uint8_t aIndex, nsAString& aName)
   if (aIndex != HTMLComboboxAccessible::eAction_Click) {
     return NS_ERROR_INVALID_ARG;
   }
-  nsIComboboxControlFrame* comboFrame = do_QueryFrame(GetFrame());
+  nsIFrame* frame = GetFrame();
+  if (!frame) {
+    return NS_ERROR_FAILURE;
+  }
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(frame);
   if (!comboFrame) {
     return NS_ERROR_FAILURE;
   }
@@ -588,19 +596,25 @@ HTMLComboboxListAccessible::
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HTMLComboboxAccessible: Accessible
+// HTMLComboboxAccessible: nsAccessNode
 
 nsIFrame*
 HTMLComboboxListAccessible::GetFrame() const
 {
   nsIFrame* frame = HTMLSelectListAccessible::GetFrame();
-  nsIComboboxControlFrame* comboBox = do_QueryFrame(frame);
-  if (comboBox) {
-    return comboBox->GetDropDown();
+
+  if (frame) {
+    nsIComboboxControlFrame* comboBox = do_QueryFrame(frame);
+    if (comboBox) {
+      return comboBox->GetDropDown();
+    }
   }
 
   return nullptr;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// HTMLComboboxAccessible: Accessible
 
 role
 HTMLComboboxListAccessible::NativeRole()

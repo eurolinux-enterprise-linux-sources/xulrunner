@@ -21,7 +21,7 @@ namespace reflect {
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(Module)
 
-NS_IMPL_ISUPPORTS(Module, nsIXPCScriptable)
+NS_IMPL_ISUPPORTS1(Module, nsIXPCScriptable)
 
 Module::Module()
 {
@@ -44,7 +44,7 @@ Module::Call(nsIXPConnectWrappedNative* wrapper,
              const JS::CallArgs& args,
              bool* _retval)
 {
-  JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+  JSObject* global = JS_GetGlobalForScopeChain(cx);
   if (!global)
     return NS_ERROR_NOT_AVAILABLE;
 
@@ -58,13 +58,13 @@ Module::Call(nsIXPConnectWrappedNative* wrapper,
 NS_DEFINE_NAMED_CID(JSREFLECT_CID);
 
 static const mozilla::Module::CIDEntry kReflectCIDs[] = {
-  { &kJSREFLECT_CID, false, nullptr, mozilla::reflect::ModuleConstructor },
-  { nullptr }
+  { &kJSREFLECT_CID, false, NULL, mozilla::reflect::ModuleConstructor },
+  { NULL }
 };
 
 static const mozilla::Module::ContractIDEntry kReflectContracts[] = {
   { JSREFLECT_CONTRACTID, &kJSREFLECT_CID },
-  { nullptr }
+  { NULL }
 };
 
 static const mozilla::Module kReflectModule = {

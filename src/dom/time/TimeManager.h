@@ -21,7 +21,7 @@ class TimeManager MOZ_FINAL : public nsISupports
                             , public nsWrapperCache
 {
 public:
-  static bool PrefEnabled(JSContext* aCx, JSObject* aGlobal)
+  static bool PrefEnabled()
   {
 #ifdef MOZ_TIME_MANAGER
     return true;
@@ -43,7 +43,7 @@ public:
   {
     return mWindow;
   }
-  JSObject* WrapObject(JSContext* aCx);
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
 
   void Set(Date& aDate);
   void Set(double aTime);

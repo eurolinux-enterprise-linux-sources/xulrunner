@@ -7,9 +7,6 @@ let Ci = Components.interfaces, Cc = Components.classes, Cu = Components.utils;
 Cu.import("resource://gre/modules/Services.jsm")
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "UITelemetry",
-                                  "resource://gre/modules/UITelemetry.jsm");
-
 XPCOMUtils.defineLazyGetter(window, "gChromeWin", function ()
   window.QueryInterface(Ci.nsIInterfaceRequestor)
     .getInterface(Ci.nsIWebNavigation)
@@ -34,7 +31,8 @@ let AboutReader = function(doc, win) {
   Services.obs.addObserver(this, "Reader:FaviconReturn", false);
   Services.obs.addObserver(this, "Reader:Add", false);
   Services.obs.addObserver(this, "Reader:Remove", false);
-  Services.obs.addObserver(this, "Reader:ListStatusReturn", false);
+  Services.obs.addObserver(this, "Reader:ListCountReturn", false);
+  Services.obs.addObserver(this, "Reader:ListCountUpdated", false);
 
   this._article = null;
 
@@ -62,6 +60,7 @@ let AboutReader = function(doc, win) {
 
   this._setupAllDropdowns();
   this._setupButton("toggle-button", this._onReaderToggle.bind(this));
+  this._setupButton("list-button", this._onList.bind(this));
   this._setupButton("share-button", this._onShare.bind(this));
 
   let colorSchemeOptions = [
@@ -80,11 +79,11 @@ let AboutReader = function(doc, win) {
   let fontTypeSample = gStrings.GetStringFromName("aboutReader.fontTypeSample");
   let fontTypeOptions = [
     { name: fontTypeSample,
-      description: gStrings.GetStringFromName("aboutReader.fontTypeSerif"),
+      description: gStrings.GetStringFromName("aboutReader.fontTypeCharis"),
       value: "serif",
       linkClass: "serif" },
     { name: fontTypeSample,
-      description: gStrings.GetStringFromName("aboutReader.fontTypeSansSerif"),
+      description: gStrings.GetStringFromName("aboutReader.fontTypeOpenSans"),
       value: "sans-serif",
       linkClass: "sans-serif"
     },
@@ -120,9 +119,13 @@ let AboutReader = function(doc, win) {
   dump("Decoding query arguments");
   let queryArgs = this._decodeQueryString(win.location.href);
 
-  // Track status of reader toolbar add/remove toggle button
-  this._isReadingListItem = -1;
+  this._isReadingListItem = (queryArgs.readingList == "1");
   this._updateToggleButton();
+
+  // Track status of reader toolbar list button
+  this._readingListCount = 0;
+  this._updateListButton();
+  this._requestReadingListCount();
 
   let url = queryArgs.url;
   let tabId = queryArgs.tabId;
@@ -189,8 +192,8 @@ AboutReader.prototype = {
       case "Reader:Add": {
         let args = JSON.parse(aData);
         if (args.url == this._article.url) {
-          if (this._isReadingListItem != 1) {
-            this._isReadingListItem = 1;
+          if (!this._isReadingListItem) {
+            this._isReadingListItem = true;
             this._updateToggleButton();
           }
         }
@@ -199,27 +202,20 @@ AboutReader.prototype = {
 
       case "Reader:Remove": {
         if (aData == this._article.url) {
-          if (this._isReadingListItem != 0) {
-            this._isReadingListItem = 0;
+          if (this._isReadingListItem) {
+            this._isReadingListItem = false;
             this._updateToggleButton();
           }
         }
         break;
       }
 
-      case "Reader:ListStatusReturn": {
-        let args = JSON.parse(aData);
-        if (args.url == this._article.url) {
-          if (this._isReadingListItem != args.inReadingList) {
-            let isInitialStateChange = (this._isReadingListItem == -1);
-            this._isReadingListItem = args.inReadingList;
-            this._updateToggleButton();
-
-            // Display the toolbar when all its initial component states are known
-            if (isInitialStateChange) {
-              this._setToolbarVisibility(true);
-            }
-          }
+      case "Reader:ListCountReturn":
+      case "Reader:ListCountUpdated":  {
+        let count = parseInt(aData);
+        if (this._readingListCount != count) {
+          this._readingListCount = count;
+          this._updateListButton();
         }
         break;
       }
@@ -240,9 +236,8 @@ AboutReader.prototype = {
         break;
       case "scroll":
         if (!this._scrolled) {
-          let isScrollingUp = this._scrollOffset > aEvent.pageY;
-          this._setToolbarVisibility(isScrollingUp);
-          this._scrollOffset = aEvent.pageY;
+          this._scrolled = true;
+          this._setToolbarVisibility(false);
         }
         break;
       case "popstate":
@@ -260,7 +255,8 @@ AboutReader.prototype = {
       case "unload":
         Services.obs.removeObserver(this, "Reader:Add");
         Services.obs.removeObserver(this, "Reader:Remove");
-        Services.obs.removeObserver(this, "Reader:ListStatusReturn");
+        Services.obs.removeObserver(this, "Reader:ListCountReturn");
+        Services.obs.removeObserver(this, "Reader:ListCountUpdated");
         break;
     }
   },
@@ -268,39 +264,40 @@ AboutReader.prototype = {
   _updateToggleButton: function Reader_updateToggleButton() {
     let classes = this._doc.getElementById("toggle-button").classList;
 
-    if (this._isReadingListItem == 1) {
+    if (this._isReadingListItem) {
       classes.add("on");
     } else {
       classes.remove("on");
     }
   },
 
-  _requestReadingListStatus: function Reader_requestReadingListStatus() {
-    gChromeWin.sendMessageToJava({
-      type: "Reader:ListStatusRequest",
-      url: this._article.url
-    });
+  _updateListButton: function Reader_updateListButton() {
+    let classes = this._doc.getElementById("list-button").classList;
+
+    if (this._readingListCount > 0) {
+      classes.add("on");
+    } else {
+      classes.remove("on");
+    }
+  },
+
+  _requestReadingListCount: function Reader_requestReadingListCount() {
+    gChromeWin.sendMessageToJava({ type: "Reader:ListCountRequest" });
   },
 
   _onReaderToggle: function Reader_onToggle() {
     if (!this._article)
       return;
 
-    this._isReadingListItem = (this._isReadingListItem == 1) ? 0 : 1;
+    this._isReadingListItem = !this._isReadingListItem;
     this._updateToggleButton();
 
-    // Create a relative timestamp for telemetry
-    let uptime = Date.now() - Services.startup.getStartupInfo().linkerInitialized;
-
-    if (this._isReadingListItem == 1) {
+    if (this._isReadingListItem) {
       gChromeWin.Reader.storeArticleInCache(this._article, function(success) {
         dump("Reader:Add (in reader) success=" + success);
 
-        let result = gChromeWin.Reader.READER_ADD_FAILED;
-        if (success) {
-          result = gChromeWin.Reader.READER_ADD_SUCCESS;
-          UITelemetry.addEvent("save.1", "button", uptime, "reader");
-        }
+        let result = (success ? gChromeWin.Reader.READER_ADD_SUCCESS :
+            gChromeWin.Reader.READER_ADD_FAILED);
 
         let json = JSON.stringify({ fromAboutReader: true, url: this._article.url });
         Services.obs.notifyObservers(null, "Reader:Add", json);
@@ -310,18 +307,27 @@ AboutReader.prototype = {
           result: result,
           title: this._article.title,
           url: this._article.url,
-          length: this._article.length,
-          excerpt: this._article.excerpt
         });
       }.bind(this));
     } else {
-      // In addition to removing the article from the cache (handled in
-      // browser.js), sending this message will cause the toggle button to be
-      // updated (handled in this file).
-      Services.obs.notifyObservers(null, "Reader:Remove", this._article.url);
+      gChromeWin.Reader.removeArticleFromCache(this._article.url , function(success) {
+        dump("Reader:Remove (in reader) success=" + success);
 
-      UITelemetry.addEvent("unsave.1", "button", uptime, "reader");
+        Services.obs.notifyObservers(null, "Reader:Remove", this._article.url);
+
+        gChromeWin.sendMessageToJava({
+          type: "Reader:Removed",
+          url: this._article.url
+        });
+      }.bind(this));
     }
+  },
+
+  _onList: function Reader_onList() {
+    if (!this._article || this._readingListCount == 0)
+      return;
+
+    gChromeWin.sendMessageToJava({ type: "Reader:GoToReadingList" });
   },
 
   _onShare: function Reader_onShare() {
@@ -333,10 +339,6 @@ AboutReader.prototype = {
       url: this._article.url,
       title: this._article.title
     });
-
-    // Create a relative timestamp for telemetry
-    let uptime = Date.now() - Services.startup.getStartupInfo().linkerInitialized;
-    UITelemetry.addEvent("share.1", "list", uptime);
   },
 
   _setFontSize: function Reader_setFontSize(newFontSize) {
@@ -453,15 +455,10 @@ AboutReader.prototype = {
     if (!this._toolbarEnabled)
       return;
 
-    // Don't allow visible toolbar until banner state is known
-    if (this._isReadingListItem == -1)
-      return;
-
     if (this._getToolbarVisibility() === visible)
       return;
 
     this._toolbarElement.classList.toggle("toolbar-hidden");
-    this._setSystemUIVisibility(visible);
 
     if (!visible && !this._hasUsedToolbar) {
       this._hasUsedToolbar = Services.prefs.getBoolPref("reader.has_used_toolbar");
@@ -476,13 +473,6 @@ AboutReader.prototype = {
 
   _toggleToolbarVisibility: function Reader_toggleToolbarVisibility(visible) {
     this._setToolbarVisibility(!this._getToolbarVisibility());
-  },
-
-  _setSystemUIVisibility: function Reader_setSystemUIVisibility(visible) {
-    gChromeWin.sendMessageToJava({
-      type: "SystemUI:Visibility",
-      visible: visible
-    });
   },
 
   _loadFromURL: function Reader_loadFromURL(url) {
@@ -590,23 +580,6 @@ AboutReader.prototype = {
     this._doc.title = error;
   },
 
-  // This function is the JS version of Java's StringUtils.stripCommonSubdomains.
-  _stripHost: function Reader_stripHost(host) {
-    if (!host)
-      return host;
-
-    let start = 0;
-
-    if (host.startsWith("www."))
-      start = 4;
-    else if (host.startsWith("m."))
-      start = 2;
-    else if (host.startsWith("mobile."))
-      start = 7;
-
-    return host.substring(start);
-  },
-
   _showContent: function Reader_showContent(article) {
     this._messageElement.style.display = "none";
 
@@ -614,7 +587,7 @@ AboutReader.prototype = {
 
     this._domainElement.href = article.url;
     let articleUri = Services.io.newURI(article.url, null, null);
-    this._domainElement.innerHTML = this._stripHost(articleUri.host);
+    this._domainElement.innerHTML = articleUri.host;
 
     this._creditsElement.innerHTML = article.byline;
 
@@ -632,7 +605,6 @@ AboutReader.prototype = {
     this._maybeSetTextDirection(article);
 
     this._contentElement.style.display = "block";
-    this._requestReadingListStatus();
 
     this._toolbarEnabled = true;
     this._setToolbarVisibility(true);
@@ -703,12 +675,6 @@ AboutReader.prototype = {
           return;
 
         aEvent.stopPropagation();
-
-        // Create a relative timestamp for telemetry
-        let uptime = Date.now() - Services.startup.getStartupInfo().linkerInitialized;
-        // Just pass the ID of the button as an extra and hope the ID doesn't change
-        // unless the context changes
-        UITelemetry.addEvent("action.1", "button", uptime, id);
 
         let items = segmentedButton.children;
         for (let j = items.length - 1; j >= 0; j--) {

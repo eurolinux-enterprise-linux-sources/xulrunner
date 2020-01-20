@@ -3,11 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsPageContentFrame.h"
+#include "nsPageFrame.h"
+#include "nsPlaceholderFrame.h"
 #include "nsCSSFrameConstructor.h"
+#include "nsContainerFrame.h"
+#include "nsHTMLParts.h"
+#include "nsIContent.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsIPresShell.h"
-#include "nsSimplePageSequenceFrame.h"
+#include "nsReadableUtils.h"
+#include "nsSimplePageSequence.h"
+#include "nsDisplayList.h"
 
 nsIFrame*
 NS_NewPageContentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -17,7 +24,7 @@ NS_NewPageContentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPageContentFrame)
 
-nsresult
+NS_IMETHODIMP
 nsPageContentFrame::Reflow(nsPresContext*           aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,
@@ -49,6 +56,8 @@ nsPageContentFrame::Reflow(nsPresContext*           aPresContext,
     nsHTMLReflowState kidReflowState(aPresContext, aReflowState, frame, maxSize);
     kidReflowState.SetComputedHeight(maxSize.height);
 
+    mPD->mPageContentSize = maxSize.width;
+
     // Reflow the page content area
     rv = ReflowChild(frame, aPresContext, aDesiredSize, kidReflowState, 0, 0, 0, aStatus);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -70,17 +79,16 @@ nsPageContentFrame::Reflow(nsPresContext*           aPresContext,
       // The background covers the content area and padding area, so check
       // for children sticking outside the child frame's padding edge
       nscoord xmost = aDesiredSize.ScrollableOverflow().XMost();
-      if (xmost > aDesiredSize.Width()) {
-        nscoord widthToFit = xmost + padding.right +
-          kidReflowState.mStyleBorder->GetComputedBorderWidth(NS_SIDE_RIGHT);
-        float ratio = float(maxSize.width) / widthToFit;
-        NS_ASSERTION(ratio >= 0.0 && ratio < 1.0, "invalid shrink-to-fit ratio");
-        mPD->mShrinkToFitRatio = std::min(mPD->mShrinkToFitRatio, ratio);
+      if (xmost > aDesiredSize.width) {
+        mPD->mPageContentXMost =
+          xmost +
+          kidReflowState.mStyleBorder->GetComputedBorderWidth(NS_SIDE_RIGHT) +
+          padding.right;
       }
     }
 
     // Place and size the child
-    FinishReflowChild(frame, aPresContext, aDesiredSize, &kidReflowState, 0, 0, 0);
+    FinishReflowChild(frame, aPresContext, &kidReflowState, aDesiredSize, 0, 0, 0);
 
     NS_ASSERTION(aPresContext->IsDynamic() || !NS_FRAME_IS_FULLY_COMPLETE(aStatus) ||
                   !frame->GetNextInFlow(), "bad child flow list");
@@ -92,9 +100,9 @@ nsPageContentFrame::Reflow(nsPresContext*           aPresContext,
   NS_ASSERTION(NS_FRAME_IS_COMPLETE(fixedStatus), "fixed frames can be truncated, but not incomplete");
 
   // Return our desired size
-  aDesiredSize.Width() = aReflowState.ComputedWidth();
+  aDesiredSize.width = aReflowState.ComputedWidth();
   if (aReflowState.ComputedHeight() != NS_UNCONSTRAINEDSIZE) {
-    aDesiredSize.Height() = aReflowState.ComputedHeight();
+    aDesiredSize.height = aReflowState.ComputedHeight();
   }
 
   FinishAndStoreOverflow(&aDesiredSize);
@@ -109,8 +117,8 @@ nsPageContentFrame::GetType() const
   return nsGkAtoms::pageContentFrame; 
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsPageContentFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("PageContent"), aResult);

@@ -6,13 +6,18 @@
 #ifndef GFX_PLATFORM_MAC_H
 #define GFX_PLATFORM_MAC_H
 
-#include "nsTArrayForwardDeclare.h"
+#include "nsTArray.h"
 #include "gfxPlatform.h"
 
+#define MAC_OS_X_VERSION_10_4_HEX 0x00001040
+#define MAC_OS_X_VERSION_10_5_HEX 0x00001050
 #define MAC_OS_X_VERSION_10_6_HEX 0x00001060
 #define MAC_OS_X_VERSION_10_7_HEX 0x00001070
 
 #define MAC_OS_X_MAJOR_VERSION_MASK 0xFFFFFFF0U
+
+class gfxTextRun;
+class gfxFontFamily;
 
 namespace mozilla { namespace gfx { class DrawTarget; }}
 
@@ -25,16 +30,14 @@ public:
         return (gfxPlatformMac*) gfxPlatform::GetPlatform();
     }
 
-    virtual already_AddRefed<gfxASurface>
-      CreateOffscreenSurface(const IntSize& size,
-                             gfxContentType contentType) MOZ_OVERRIDE;
-
+    already_AddRefed<gfxASurface> CreateOffscreenSurface(const gfxIntSize& size,
+                                                         gfxASurface::gfxContentType contentType);
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenImageSurface(const gfxIntSize& aSize,
-                                  gfxContentType aContentType);
+                                  gfxASurface::gfxContentType aContentType);
 
     already_AddRefed<gfxASurface> OptimizeImage(gfxImageSurface *aSurface,
-                                                gfxImageFormat format);
+                                                gfxASurface::gfxImageFormat format);
 
     mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -69,6 +72,10 @@ public:
                                         int32_t aRunScript,
                                         nsTArray<const char*>& aFontList);
 
+    // Returns the OS X version as returned from Gestalt(gestaltSystemVersion, ...)
+    // Ex: Mac OS X 10.4.x ==> 0x104x
+    int32_t OSXVersion();
+
     bool UseAcceleratedCanvas();
 
     // lower threshold on font anti-aliasing
@@ -76,14 +83,18 @@ public:
 
     virtual already_AddRefed<gfxASurface>
     GetThebesSurfaceForDrawTarget(mozilla::gfx::DrawTarget *aTarget);
+
+    virtual already_AddRefed<gfxASurface>
+    CreateThebesSurfaceAliasForDrawTarget_hack(mozilla::gfx::DrawTarget *aTarget);
 private:
-    virtual void GetPlatformCMSOutputProfile(void* &mem, size_t &size);
+    virtual qcms_profile* GetPlatformCMSOutputProfile();
 
     virtual bool SupportsOffMainThreadCompositing();
 
     // read in the pref value for the lower threshold on font anti-aliasing
     static uint32_t ReadAntiAliasingThreshold();
 
+    int32_t mOSXVersion;
     uint32_t mFontAntiAliasingThreshold;
 };
 

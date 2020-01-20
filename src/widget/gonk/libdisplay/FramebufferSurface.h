@@ -34,14 +34,13 @@ class HWComposer;
 
 class FramebufferSurface : public ConsumerBase {
 public:
-    FramebufferSurface(int disp, uint32_t width, uint32_t height, uint32_t format, sp<BufferQueue>& bq);
+    FramebufferSurface(int disp, uint32_t width, uint32_t height, uint32_t format, sp<IGraphicBufferAlloc>& alloc);
 
     bool isUpdateOnDemand() const { return false; }
     status_t setUpdateRectangle(const Rect& updateRect);
     status_t compositionComplete();
 
     virtual void dump(String8& result);
-    virtual void dump(String8& result, const char* prefix);
 
     // setReleaseFenceFd stores a fence file descriptor that will signal when the
     // current buffer is no longer being read. This fence will be returned to
@@ -51,9 +50,8 @@ public:
     // when finished with it.
     status_t setReleaseFenceFd(int fenceFd);
 
-    virtual int GetPrevFBAcquireFd();
-
     buffer_handle_t lastHandle;
+    int lastFenceFD;
 private:
     virtual ~FramebufferSurface() { }; // this class cannot be overloaded
 
@@ -76,8 +74,6 @@ private:
     // mCurrentBuffer is the current buffer or NULL to indicate that there is
     // no current buffer.
     sp<GraphicBuffer> mCurrentBuffer;
-
-    android::sp<android::Fence> mPrevFBAcquireFence;
 };
 
 // ---------------------------------------------------------------------------

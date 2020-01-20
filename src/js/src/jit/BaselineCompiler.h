@@ -9,17 +9,25 @@
 
 #ifdef JS_ION
 
-#include "jit/FixedList.h"
-#if defined(JS_CODEGEN_X86)
-# include "jit/x86/BaselineCompiler-x86.h"
-#elif defined(JS_CODEGEN_X64)
-# include "jit/x64/BaselineCompiler-x64.h"
-#elif defined(JS_CODEGEN_ARM)
-# include "jit/arm/BaselineCompiler-arm.h"
-#elif defined(JS_CODEGEN_MIPS)
-# include "jit/mips/BaselineCompiler-mips.h"
+#include "jscntxt.h"
+#include "jscompartment.h"
+#include "IonCode.h"
+#include "jsinfer.h"
+
+#include "vm/Interpreter.h"
+
+#include "IonAllocPolicy.h"
+#include "BaselineJIT.h"
+#include "BaselineIC.h"
+#include "FixedList.h"
+#include "BytecodeAnalysis.h"
+
+#if defined(JS_CPU_X86)
+# include "x86/BaselineCompiler-x86.h"
+#elif defined(JS_CPU_X64)
+# include "x64/BaselineCompiler-x64.h"
 #else
-# error "Unknown architecture!"
+# include "arm/BaselineCompiler-arm.h"
 #endif
 
 namespace js {
@@ -28,11 +36,9 @@ namespace jit {
 #define OPCODE_LIST(_)         \
     _(JSOP_NOP)                \
     _(JSOP_LABEL)              \
+    _(JSOP_NOTEARG)            \
     _(JSOP_POP)                \
     _(JSOP_POPN)               \
-    _(JSOP_DUPAT)              \
-    _(JSOP_ENTERWITH)          \
-    _(JSOP_LEAVEWITH)          \
     _(JSOP_DUP)                \
     _(JSOP_DUP2)               \
     _(JSOP_SWAP)               \
@@ -64,7 +70,6 @@ namespace jit {
     _(JSOP_OBJECT)             \
     _(JSOP_REGEXP)             \
     _(JSOP_LAMBDA)             \
-    _(JSOP_LAMBDA_ARROW)       \
     _(JSOP_BITOR)              \
     _(JSOP_BITXOR)             \
     _(JSOP_BITAND)             \
@@ -97,18 +102,18 @@ namespace jit {
     _(JSOP_INITELEM)           \
     _(JSOP_INITELEM_GETTER)    \
     _(JSOP_INITELEM_SETTER)    \
-    _(JSOP_MUTATEPROTO)        \
     _(JSOP_INITPROP)           \
     _(JSOP_INITPROP_GETTER)    \
     _(JSOP_INITPROP_SETTER)    \
     _(JSOP_ENDINIT)            \
-    _(JSOP_ARRAYPUSH)          \
     _(JSOP_GETELEM)            \
     _(JSOP_SETELEM)            \
     _(JSOP_CALLELEM)           \
+    _(JSOP_ENUMELEM)           \
     _(JSOP_DELELEM)            \
     _(JSOP_IN)                 \
     _(JSOP_GETGNAME)           \
+    _(JSOP_CALLGNAME)          \
     _(JSOP_BINDGNAME)          \
     _(JSOP_SETGNAME)           \
     _(JSOP_SETNAME)            \
@@ -119,18 +124,23 @@ namespace jit {
     _(JSOP_LENGTH)             \
     _(JSOP_GETXPROP)           \
     _(JSOP_GETALIASEDVAR)      \
+    _(JSOP_CALLALIASEDVAR)     \
     _(JSOP_SETALIASEDVAR)      \
     _(JSOP_NAME)               \
+    _(JSOP_CALLNAME)           \
     _(JSOP_BINDNAME)           \
     _(JSOP_DELNAME)            \
     _(JSOP_GETINTRINSIC)       \
+    _(JSOP_CALLINTRINSIC)      \
     _(JSOP_DEFVAR)             \
     _(JSOP_DEFCONST)           \
     _(JSOP_SETCONST)           \
     _(JSOP_DEFFUN)             \
     _(JSOP_GETLOCAL)           \
+    _(JSOP_CALLLOCAL)          \
     _(JSOP_SETLOCAL)           \
     _(JSOP_GETARG)             \
+    _(JSOP_CALLARG)            \
     _(JSOP_SETARG)             \
     _(JSOP_CALL)               \
     _(JSOP_FUNCALL)            \
@@ -147,9 +157,12 @@ namespace jit {
     _(JSOP_FINALLY)            \
     _(JSOP_GOSUB)              \
     _(JSOP_RETSUB)             \
-    _(JSOP_PUSHBLOCKSCOPE)     \
-    _(JSOP_POPBLOCKSCOPE)      \
-    _(JSOP_DEBUGLEAVEBLOCK)    \
+    _(JSOP_ENTERBLOCK)         \
+    _(JSOP_ENTERLET0)          \
+    _(JSOP_ENTERLET1)          \
+    _(JSOP_LEAVEBLOCK)         \
+    _(JSOP_LEAVEBLOCKEXPR)     \
+    _(JSOP_LEAVEFORLETIN)      \
     _(JSOP_EXCEPTION)          \
     _(JSOP_DEBUGGER)           \
     _(JSOP_ARGUMENTS)          \
@@ -162,45 +175,29 @@ namespace jit {
     _(JSOP_ITERNEXT)           \
     _(JSOP_ENDITER)            \
     _(JSOP_CALLEE)             \
+    _(JSOP_POPV)               \
     _(JSOP_SETRVAL)            \
-    _(JSOP_RETRVAL)            \
-    _(JSOP_RETURN)
+    _(JSOP_RETURN)             \
+    _(JSOP_STOP)               \
+    _(JSOP_RETRVAL)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {
     FixedList<Label>            labels_;
-    NonAssertingLabel           return_;
+    HeapLabel *                 return_;
 #ifdef JSGC_GENERATIONAL
-    NonAssertingLabel           postBarrierSlot_;
+    HeapLabel *                 postBarrierSlot_;
 #endif
 
     // Native code offset right before the scope chain is initialized.
     CodeOffsetLabel prologueOffset_;
 
-    // Native code offset right before the frame is popped and the method
-    // returned from.
-    CodeOffsetLabel epilogueOffset_;
-
-    // Native code offset right after debug prologue and epilogue, or
-    // equivalent positions when debug mode is off.
-    CodeOffsetLabel postDebugPrologueOffset_;
-
-    // Whether any on stack arguments are modified.
-    bool modifiesArguments_;
-
     Label *labelOf(jsbytecode *pc) {
-        return &labels_[script->pcToOffset(pc)];
-    }
-
-    // If a script has more |nslots| than this, then emit code to do an
-    // early stack check.
-    static const unsigned EARLY_STACK_CHECK_SLOT_COUNT = 128;
-    bool needsEarlyStackCheck() const {
-        return script->nslots() > EARLY_STACK_CHECK_SLOT_COUNT;
+        return &labels_[pc - script->code];
     }
 
   public:
-    BaselineCompiler(JSContext *cx, TempAllocator &alloc, JSScript *script);
+    BaselineCompiler(JSContext *cx, HandleScript script);
     bool init();
 
     MethodStatus compile();
@@ -213,17 +210,17 @@ class BaselineCompiler : public BaselineCompilerSpecific
 #ifdef JSGC_GENERATIONAL
     bool emitOutOfLinePostBarrierSlot();
 #endif
-    bool emitIC(ICStub *stub, ICEntry::Kind kind);
+    bool emitIC(ICStub *stub, bool isForOp);
     bool emitOpIC(ICStub *stub) {
-        return emitIC(stub, ICEntry::Kind_Op);
+        return emitIC(stub, true);
     }
     bool emitNonOpIC(ICStub *stub) {
-        return emitIC(stub, ICEntry::Kind_NonOp);
+        return emitIC(stub, false);
     }
 
-    bool emitStackCheck(bool earlyCheck=false);
+    bool emitStackCheck();
     bool emitInterruptCheck();
-    bool emitUseCountIncrement(bool allowOsr=true);
+    bool emitUseCountIncrement();
     bool emitArgumentTypeChecks();
     bool emitDebugPrologue();
     bool emitDebugTrap();
@@ -259,6 +256,9 @@ class BaselineCompiler : public BaselineCompilerSpecific
     bool emitInitElemGetterSetter();
 
     bool emitFormalArgAccess(uint32_t arg, bool get);
+
+    bool emitEnterBlock();
+    bool emitLeaveBlock();
 
     bool addPCMappingEntry(bool addIndexEntry);
 

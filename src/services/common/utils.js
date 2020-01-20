@@ -10,68 +10,55 @@ Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/osfile.jsm")
-Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://services-common/log4moz.js");
 
 this.CommonUtils = {
-  /*
-   * Set manipulation methods. These should be lifted into toolkit, or added to
-   * `Set` itself.
-   */
-
-  /**
-   * Return elements of `a` or `b`.
-   */
-  union: function (a, b) {
-    let out = new Set(a);
-    for (let x of b) {
-      out.add(x);
+  exceptionStr: function exceptionStr(e) {
+    if (!e) {
+      return "" + e;
     }
-    return out;
+    let message = e.message ? e.message : e;
+    return message + " " + CommonUtils.stackTrace(e);
   },
 
-  /**
-   * Return elements of `a` that are not present in `b`.
-   */
-  difference: function (a, b) {
-    let out = new Set(a);
-    for (let x of b) {
-      out.delete(x);
-    }
-    return out;
-  },
+  stackTrace: function stackTrace(e) {
+    // Wrapped nsIException
+    if (e.location) {
+      let frame = e.location;
+      let output = [];
+      while (frame) {
+        // Works on frames or exceptions, munges file:// URIs to shorten the paths
+        // FIXME: filename munging is sort of hackish, might be confusing if
+        // there are multiple extensions with similar filenames
+        let str = "<file:unknown>";
 
-  /**
-   * Return elements of `a` that are also in `b`.
-   */
-  intersection: function (a, b) {
-    let out = new Set();
-    for (let x of a) {
-      if (b.has(x)) {
-        out.add(x);
+        let file = frame.filename || frame.fileName;
+        if (file){
+          str = file.replace(/^(?:chrome|file):.*?([^\/\.]+\.\w+)$/, "$1");
+        }
+
+        if (frame.lineNumber){
+          str += ":" + frame.lineNumber;
+        }
+        if (frame.name){
+          str = frame.name + "()@" + str;
+        }
+
+        if (str){
+          output.push(str);
+        }
+        frame = frame.caller;
       }
+      return "Stack trace: " + output.join(" < ");
     }
-    return out;
-  },
+    // Standard JS exception
+    if (e.stack){
+      return "JS Stack trace: " + e.stack.trim().replace(/\n/g, " < ").
+        replace(/@[^@]*?([^\/\.]+\.\w+:)/g, "@$1");
+    }
 
-  /**
-   * Return true if `a` and `b` are the same size, and
-   * every element of `a` is in `b`.
-   */
-  setEqual: function (a, b) {
-    if (a.size != b.size) {
-      return false;
-    }
-    for (let x of a) {
-      if (!b.has(x)) {
-        return false;
-      }
-    }
-    return true;
+    return "No traceback available";
   },
-
-  // Import these from Log.jsm for backward compatibility
-  exceptionStr: Log.exceptionStr,
-  stackTrace: Log.stackTrace,
 
   /**
    * Encode byte string as base64URL (RFC 4648).
@@ -86,7 +73,7 @@ this.CommonUtils = {
     let s = btoa(bytes).replace("+", "-", "g").replace("/", "_", "g");
 
     if (!pad) {
-      s = s.replace("=", "", "g");
+      s = s.replace("=", "");
     }
 
     return s;
@@ -101,7 +88,7 @@ this.CommonUtils = {
     try {
       return Services.io.newURI(URIString, null, null);
     } catch (e) {
-      let log = Log.repository.getLogger("Common.Utils");
+      let log = Log4Moz.repository.getLogger("Common.Utils");
       log.debug("Could not create URI: " + CommonUtils.exceptionStr(e));
       return null;
     }
@@ -209,33 +196,12 @@ this.CommonUtils = {
     return [String.fromCharCode(byte) for each (byte in bytes)].join("");
   },
 
-  stringToByteArray: function stringToByteArray(bytesString) {
-    return [String.charCodeAt(byte) for each (byte in bytesString)];
-  },
-
   bytesAsHex: function bytesAsHex(bytes) {
-    return [("0" + bytes.charCodeAt(byte).toString(16)).slice(-2)
-      for (byte in bytes)].join("");
-  },
-
-  stringAsHex: function stringAsHex(str) {
-    return CommonUtils.bytesAsHex(CommonUtils.encodeUTF8(str));
-  },
-
-  stringToBytes: function stringToBytes(str) {
-    return CommonUtils.hexToBytes(CommonUtils.stringAsHex(str));
-  },
-
-  hexToBytes: function hexToBytes(str) {
-    let bytes = [];
-    for (let i = 0; i < str.length - 1; i += 2) {
-      bytes.push(parseInt(str.substr(i, 2), 16));
+    let hex = "";
+    for (let i = 0; i < bytes.length; i++) {
+      hex += ("0" + bytes[i].charCodeAt().toString(16)).slice(-2);
     }
-    return String.fromCharCode.apply(String, bytes);
-  },
-
-  hexAsString: function hexAsString(hex) {
-    return CommonUtils.decodeUTF8(CommonUtils.hexToBytes(hex));
+    return hex;
   },
 
   /**
@@ -386,8 +352,10 @@ this.CommonUtils = {
    * @return a promise that resolves to the JSON contents of the named file.
    */
   readJSON: function(path) {
-    return OS.File.read(path, { encoding: "utf-8" }).then((data) => {
-      return JSON.parse(data);
+    let decoder = new TextDecoder();
+    let promise = OS.File.read(path);
+    return promise.then(function onSuccess(array) {
+      return JSON.parse(decoder.decode(array));
     });
   },
 
@@ -496,7 +464,7 @@ this.CommonUtils = {
    * @param def
    *        (Number) The default value to use if the preference is not defined.
    * @param log
-   *        (Log.Logger) Logger to write warnings to.
+   *        (Log4Moz.Logger) Logger to write warnings to.
    */
   getEpochPref: function getEpochPref(branch, pref, def=0, log=null) {
     if (!Number.isInteger(def)) {
@@ -539,7 +507,7 @@ this.CommonUtils = {
    *        (Number) The default value (in milliseconds) if the preference is
    *        not defined or invalid.
    * @param log
-   *        (Log.Logger) Logger to write warnings to.
+   *        (Log4Moz.Logger) Logger to write warnings to.
    * @param oldestYear
    *        (Number) Oldest year to accept in read values.
    */

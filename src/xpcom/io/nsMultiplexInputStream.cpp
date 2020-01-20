@@ -33,7 +33,7 @@ class nsMultiplexInputStream MOZ_FINAL : public nsIMultiplexInputStream,
 public:
     nsMultiplexInputStream();
 
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
     NS_DECL_NSIMULTIPLEXINPUTSTREAM
     NS_DECL_NSISEEKABLESTREAM
@@ -60,21 +60,21 @@ private:
     nsresult mStatus;
 };
 
-NS_IMPL_ADDREF(nsMultiplexInputStream)
-NS_IMPL_RELEASE(nsMultiplexInputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsMultiplexInputStream)
+NS_IMPL_THREADSAFE_RELEASE(nsMultiplexInputStream)
 
-NS_IMPL_CLASSINFO(nsMultiplexInputStream, nullptr, nsIClassInfo::THREADSAFE,
+NS_IMPL_CLASSINFO(nsMultiplexInputStream, NULL, nsIClassInfo::THREADSAFE,
                   NS_MULTIPLEXINPUTSTREAM_CID)
 
-NS_IMPL_QUERY_INTERFACE_CI(nsMultiplexInputStream,
-                           nsIMultiplexInputStream,
-                           nsIInputStream,
-                           nsISeekableStream,
-                           nsIIPCSerializableInputStream)
-NS_IMPL_CI_INTERFACE_GETTER(nsMultiplexInputStream,
+NS_IMPL_QUERY_INTERFACE4_CI(nsMultiplexInputStream,
                             nsIMultiplexInputStream,
                             nsIInputStream,
-                            nsISeekableStream)
+                            nsISeekableStream,
+                            nsIIPCSerializableInputStream)
+NS_IMPL_CI_INTERFACE_GETTER3(nsMultiplexInputStream,
+                             nsIMultiplexInputStream,
+                             nsIInputStream,
+                             nsISeekableStream)
 
 nsMultiplexInputStream::nsMultiplexInputStream()
     : mCurrentStream(0),
@@ -117,7 +117,8 @@ NS_IMETHODIMP
 nsMultiplexInputStream::InsertStream(nsIInputStream *aStream, uint32_t aIndex)
 {
     NS_ASSERTION(SeekableStreamAtBeginning(aStream), "Inserted stream not at beginning.");
-    mStreams.InsertElementAt(aIndex, aStream);
+    bool result = mStreams.InsertElementAt(aIndex, aStream);
+    NS_ENSURE_TRUE(result, NS_ERROR_OUT_OF_MEMORY);
     if (mCurrentStream > aIndex ||
         (mCurrentStream == aIndex && mStartedReadingCurrent))
         ++mCurrentStream;
@@ -142,8 +143,7 @@ NS_IMETHODIMP
 nsMultiplexInputStream::GetStream(uint32_t aIndex, nsIInputStream **_retval)
 {
     *_retval = mStreams.SafeElementAt(aIndex, nullptr);
-    if (NS_WARN_IF(!*_retval))
-        return NS_ERROR_NOT_AVAILABLE;
+    NS_ENSURE_TRUE(*_retval, NS_ERROR_NOT_AVAILABLE);
 
     NS_ADDREF(*_retval);
     return NS_OK;
@@ -181,8 +181,7 @@ nsMultiplexInputStream::Available(uint64_t *_retval)
     for (uint32_t i = mCurrentStream; i < len; i++) {
         uint64_t streamAvail;
         rv = mStreams[i]->Available(&streamAvail);
-        if (NS_WARN_IF(NS_FAILED(rv)))
-            return rv;
+        NS_ENSURE_SUCCESS(rv, rv);
         avail += streamAvail;
     }
     *_retval = avail;
@@ -329,8 +328,7 @@ nsMultiplexInputStream::IsNonBlocking(bool *aNonBlocking)
     }
     for (uint32_t i = 0; i < len; ++i) {
         nsresult rv = mStreams[i]->IsNonBlocking(aNonBlocking);
-        if (NS_WARN_IF(NS_FAILED(rv)))
-            return rv;
+        NS_ENSURE_SUCCESS(rv, rv);
         // If one is non-blocking the entire stream becomes non-blocking
         // (except that we don't implement nsIAsyncInputStream, so there's
         //  not much for the caller to do if Read returns "would block")
@@ -369,8 +367,7 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
                 if (i < oldCurrentStream ||
                     (i == oldCurrentStream && oldStartedReadingCurrent)) {
                     rv = stream->Seek(NS_SEEK_SET, 0);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
                     continue;
                 }
                 else {
@@ -386,15 +383,13 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
             }
             else {
                 rv = stream->Tell(&streamPos);
-                if (NS_WARN_IF(NS_FAILED(rv)))
-                    return rv;
+                NS_ENSURE_SUCCESS(rv, rv);
             }
 
             // See if we need to seek current stream forward or backward
             if (remaining < streamPos) {
                 rv = stream->Seek(NS_SEEK_SET, remaining);
-                if (NS_WARN_IF(NS_FAILED(rv)))
-                    return rv;
+                NS_ENSURE_SUCCESS(rv, rv);
 
                 mCurrentStream = i;
                 mStartedReadingCurrent = remaining != 0;
@@ -410,14 +405,12 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
                 else {
                     uint64_t avail;
                     rv = mStreams[i]->Available(&avail);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
 
                     int64_t newPos = XPCOM_MIN(remaining, streamPos + (int64_t)avail);
 
                     rv = stream->Seek(NS_SEEK_SET, newPos);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
 
                     mCurrentStream = i;
                     mStartedReadingCurrent = true;
@@ -443,14 +436,12 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
 
             uint64_t avail;
             rv = mStreams[i]->Available(&avail);
-            if (NS_WARN_IF(NS_FAILED(rv)))
-                return rv;
+            NS_ENSURE_SUCCESS(rv, rv);
 
             int64_t seek = XPCOM_MIN((int64_t)avail, remaining);
 
             rv = stream->Seek(NS_SEEK_CUR, seek);
-            if (NS_WARN_IF(NS_FAILED(rv)))
-                return rv;
+            NS_ENSURE_SUCCESS(rv, rv);
 
             mCurrentStream = i;
             mStartedReadingCurrent = true;
@@ -469,14 +460,12 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
 
             int64_t pos;
             rv = stream->Tell(&pos);
-            if (NS_WARN_IF(NS_FAILED(rv)))
-                return rv;
+            NS_ENSURE_SUCCESS(rv, rv);
 
             int64_t seek = XPCOM_MIN(pos, remaining);
 
             rv = stream->Seek(NS_SEEK_CUR, -seek);
-            if (NS_WARN_IF(NS_FAILED(rv)))
-                return rv;
+            NS_ENSURE_SUCCESS(rv, rv);
 
             mCurrentStream = i;
             mStartedReadingCurrent = seek != -pos;
@@ -506,8 +495,7 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
             if (remaining == 0) {
                 if (i >= oldCurrentStream) {
                     rv = stream->Seek(NS_SEEK_END, 0);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
                 }
                 else {
                     break;
@@ -521,8 +509,7 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
             } else {
                 uint64_t avail;
                 rv = mStreams[i]->Available(&avail);
-                if (NS_WARN_IF(NS_FAILED(rv)))
-                    return rv;
+                NS_ENSURE_SUCCESS(rv, rv);
 
                 streamPos = avail;
             }
@@ -530,8 +517,7 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
             // See if we have enough data in the current stream.
             if (DeprecatedAbs(remaining) < streamPos) {
                 rv = stream->Seek(NS_SEEK_END, remaining);
-                if (NS_WARN_IF(NS_FAILED(rv)))
-                    return rv;
+                NS_ENSURE_SUCCESS(rv, rv);
 
                 mCurrentStream = i;
                 mStartedReadingCurrent = true;
@@ -545,14 +531,12 @@ nsMultiplexInputStream::Seek(int32_t aWhence, int64_t aOffset)
                 } else {
                     int64_t avail;
                     rv = stream->Tell(&avail);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
 
                     int64_t newPos = streamPos + XPCOM_MIN(avail, DeprecatedAbs(remaining));
 
                     rv = stream->Seek(NS_SEEK_END, -newPos);
-                    if (NS_WARN_IF(NS_FAILED(rv)))
-                        return rv;
+                    NS_ENSURE_SUCCESS(rv, rv);
 
                     mCurrentStream = i;
                     mStartedReadingCurrent = true;
@@ -586,13 +570,11 @@ nsMultiplexInputStream::Tell(int64_t *_retval)
     last = mStartedReadingCurrent ? mCurrentStream+1 : mCurrentStream;
     for (i = 0; i < last; ++i) {
         nsCOMPtr<nsISeekableStream> stream = do_QueryInterface(mStreams[i]);
-        if (NS_WARN_IF(!stream))
-            return NS_ERROR_NO_INTERFACE;
+        NS_ENSURE_TRUE(stream, NS_ERROR_NO_INTERFACE);
 
         int64_t pos;
         rv = stream->Tell(&pos);
-        if (NS_WARN_IF(NS_FAILED(rv)))
-            return rv;
+        NS_ENSURE_SUCCESS(rv, rv);
         ret64 += pos;
     }
     *_retval =  ret64;
@@ -629,8 +611,7 @@ nsMultiplexInputStreamConstructor(nsISupports *outer,
 }
 
 void
-nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
-                                  FileDescriptorArray& aFileDescriptors)
+nsMultiplexInputStream::Serialize(InputStreamParams& aParams)
 {
     MultiplexInputStreamParams params;
 
@@ -641,11 +622,20 @@ nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
 
         streams.SetCapacity(streamCount);
         for (uint32_t index = 0; index < streamCount; index++) {
-            InputStreamParams childStreamParams;
-            SerializeInputStream(mStreams[index], childStreamParams,
-                                 aFileDescriptors);
+            nsCOMPtr<nsIIPCSerializableInputStream> serializable =
+                do_QueryInterface(mStreams[index]);
+            NS_ASSERTION(serializable, "Child stream isn't serializable!");
 
-            streams.AppendElement(childStreamParams);
+            if (serializable) {
+                InputStreamParams childStreamParams;
+                serializable->Serialize(childStreamParams);
+
+                NS_ASSERTION(childStreamParams.type() !=
+                                 InputStreamParams::T__None,
+                             "Serialize failed!");
+
+                streams.AppendElement(childStreamParams);
+            }
         }
     }
 
@@ -657,8 +647,7 @@ nsMultiplexInputStream::Serialize(InputStreamParams& aParams,
 }
 
 bool
-nsMultiplexInputStream::Deserialize(const InputStreamParams& aParams,
-                                    const FileDescriptorArray& aFileDescriptors)
+nsMultiplexInputStream::Deserialize(const InputStreamParams& aParams)
 {
     if (aParams.type() !=
             InputStreamParams::TMultiplexInputStreamParams) {
@@ -674,7 +663,7 @@ nsMultiplexInputStream::Deserialize(const InputStreamParams& aParams,
     uint32_t streamCount = streams.Length();
     for (uint32_t index = 0; index < streamCount; index++) {
         nsCOMPtr<nsIInputStream> stream =
-            DeserializeInputStream(streams[index], aFileDescriptors);
+            DeserializeInputStream(streams[index]);
         if (!stream) {
             NS_WARNING("Deserialize failed!");
             return false;

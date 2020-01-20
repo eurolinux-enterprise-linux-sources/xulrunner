@@ -27,8 +27,9 @@ function test() {
   });
 
   function testOpenCloseWindow(aIsPrivate, aTest, aCallback) {
-    whenNewWindowLoaded({ private: aIsPrivate }, function(win) {
-      whenBrowserLoaded(win.gBrowser.selectedBrowser, function() {
+    whenNewWindowLoaded(aIsPrivate, function(win) {
+      win.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+        win.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
         executeSoon(function() {
           // Mark the window with some unique data to be restored later on.
           ss.setWindowValue(win, aTest.key, aTest.value);
@@ -36,13 +37,13 @@ function test() {
           win.close();
           aCallback();
         });
-      });
+      }, true);
       win.gBrowser.selectedBrowser.loadURI(aTest.url);
     });
   }
 
   function testOnWindow(aIsPrivate, aValue, aCallback) {
-    whenNewWindowLoaded({ private: aIsPrivate }, function(win) {
+    whenNewWindowLoaded(aIsPrivate, function(win) {
       windowsToClose.push(win);
       executeSoon(function() checkClosedWindows(aIsPrivate, aValue, aCallback));
     });
@@ -75,13 +76,15 @@ function test() {
     // Wait for the sessionstore.js file to be written before going on.
     // Note: we don't wait for the complete event, since if asyncCopy fails we
     // would timeout.
-    waitForSaveState(function(writing) {
-      ok(writing, "sessionstore.js is being written");
+    Services.obs.addObserver(function (aSubject, aTopic, aData) {
+      Services.obs.removeObserver(arguments.callee, aTopic);
+      info("sessionstore.js is being written");
+
       closedWindowCount = ss.getClosedWindowCount();
       is(closedWindowCount, 0, "Correctly set window count");
 
       executeSoon(aCallback);
-    });
+    }, "sessionstore-state-write", false);
 
     // Remove the sessionstore.js file before setting the interval to 0
     let profilePath = Services.dirsvc.get("ProfD", Ci.nsIFile);
@@ -107,3 +110,10 @@ function test() {
   });
 }
 
+function whenNewWindowLoaded(aIsPrivate, aCallback) {
+  let win = OpenBrowserWindow({private: aIsPrivate});
+  win.addEventListener("load", function onLoad() {
+    win.removeEventListener("load", onLoad, false);
+    aCallback(win);
+  }, false);
+}

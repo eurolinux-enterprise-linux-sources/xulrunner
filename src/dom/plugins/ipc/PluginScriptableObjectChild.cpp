@@ -10,6 +10,10 @@
 
 using namespace mozilla::plugins;
 
+namespace {
+typedef PluginIdentifierChild::StackIdentifier StackIdentifier;
+}
+
 // static
 NPObject*
 PluginScriptableObjectChild::ScriptableAllocate(NPP aInstance,
@@ -582,7 +586,7 @@ PluginScriptableObjectChild::NPObjectDestroyed()
   NS_ASSERTION(LocalObject == mType,
                "ScriptableDeallocate should have handled this for proxies");
   mInvalidated = true;
-  mObject = nullptr;
+  mObject = NULL;
 }
 
 bool
@@ -628,7 +632,7 @@ PluginScriptableObjectChild::AnswerHasMethod(PPluginIdentifierChild* aId,
     return true;
   }
 
-  PluginIdentifierChild::StackIdentifier id(aId);
+  StackIdentifier id(aId);
   *aHasMethod = mObject->_class->hasMethod(mObject, id->ToNPIdentifier());
   return true;
 }
@@ -657,7 +661,7 @@ PluginScriptableObjectChild::AnswerInvoke(PPluginIdentifierChild* aId,
     return true;
   }
 
-  AutoFallibleTArray<NPVariant, 10> convertedArgs;
+  nsAutoTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {
@@ -672,7 +676,7 @@ PluginScriptableObjectChild::AnswerInvoke(PPluginIdentifierChild* aId,
 
   NPVariant result;
   VOID_TO_NPVARIANT(result);
-  PluginIdentifierChild::StackIdentifier id(aId);
+  StackIdentifier id(aId);
   bool success = mObject->_class->invoke(mObject, id->ToNPIdentifier(),
                                          convertedArgs.Elements(), argCount,
                                          &result);
@@ -727,7 +731,7 @@ PluginScriptableObjectChild::AnswerInvokeDefault(const InfallibleTArray<Variant>
     return true;
   }
 
-  AutoFallibleTArray<NPVariant, 10> convertedArgs;
+  nsAutoTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {
@@ -793,7 +797,7 @@ PluginScriptableObjectChild::AnswerHasProperty(PPluginIdentifierChild* aId,
     return true;
   }
 
-  PluginIdentifierChild::StackIdentifier id(aId);
+  StackIdentifier id(aId);
   *aHasProperty = mObject->_class->hasProperty(mObject, id->ToNPIdentifier());
   return true;
 }
@@ -823,7 +827,7 @@ PluginScriptableObjectChild::AnswerGetChildProperty(PPluginIdentifierChild* aId,
     return true;
   }
 
-  PluginIdentifierChild::StackIdentifier stackID(aId);
+  StackIdentifier stackID(aId);
   NPIdentifier id = stackID->ToNPIdentifier();
 
   *aHasProperty = mObject->_class->hasProperty(mObject, id);
@@ -870,7 +874,7 @@ PluginScriptableObjectChild::AnswerSetProperty(PPluginIdentifierChild* aId,
     return true;
   }
 
-  PluginIdentifierChild::StackIdentifier stackID(aId);
+  StackIdentifier stackID(aId);
   NPIdentifier id = stackID->ToNPIdentifier();
 
   if (!mObject->_class->hasProperty(mObject, id)) {
@@ -908,7 +912,7 @@ PluginScriptableObjectChild::AnswerRemoveProperty(PPluginIdentifierChild* aId,
     return true;
   }
 
-  PluginIdentifierChild::StackIdentifier stackID(aId);
+  StackIdentifier stackID(aId);
   NPIdentifier id = stackID->ToNPIdentifier();
   *aSuccess = mObject->_class->hasProperty(mObject, id) ?
               mObject->_class->removeProperty(mObject, id) :
@@ -979,7 +983,7 @@ PluginScriptableObjectChild::AnswerConstruct(const InfallibleTArray<Variant>& aA
     return true;
   }
 
-  AutoFallibleTArray<NPVariant, 10> convertedArgs;
+  nsAutoTArray<NPVariant, 10> convertedArgs;
   uint32_t argCount = aArgs.Length();
 
   if (!convertedArgs.SetLength(argCount)) {

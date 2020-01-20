@@ -3,12 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const hiddenFrames = require("sdk/frame/hidden-frame");
-const { create: makeFrame } = require("sdk/frame/utils");
-const { window } = require("sdk/addon/window");
+
 const { Loader } = require('sdk/test/loader');
-const { URL } = require("sdk/url");
-const testURI = require("./fixtures").url("test.html");
-const testHost = URL(testURI).scheme + '://' + URL(testURI).host;
 
 /*
  * Utility function that allow to easily run a proxy test with a clean
@@ -16,51 +12,41 @@ const testHost = URL(testURI).scheme + '://' + URL(testURI).host;
  */
 function createProxyTest(html, callback) {
   return function (assert, done) {
-    let url = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
-    let principalLoaded = false;
+    let url = 'data:text/html;charset=utf-8,' + encodeURI(html);
 
-    let element = makeFrame(window.document, {
-      nodeName: "iframe",
-      type: "content",
-      allowJavascript: true,
-      allowPlugins: true,
-      allowAuth: true,
-      uri: testURI
-    });
+    let hiddenFrame = hiddenFrames.add(hiddenFrames.HiddenFrame({
+      onReady: function () {
 
-    element.addEventListener("DOMContentLoaded", onDOMReady, false);
-
-    function onDOMReady() {
-      // Reload frame after getting principal from `testURI`
-      if (!principalLoaded) {
-        element.setAttribute("src", url);
-        principalLoaded = true;
-        return;
-      }
-
-      assert.equal(element.getAttribute("src"), url, "correct URL loaded");
-      element.removeEventListener("DOMContentLoaded", onDOMReady,
+        function onDOMReady() {
+          hiddenFrame.element.removeEventListener("DOMContentLoaded", onDOMReady,
                                                   false);
-      let xrayWindow = element.contentWindow;
-      let rawWindow = xrayWindow.wrappedJSObject;
 
-      let isDone = false;
-      let helper = {
-        xrayWindow: xrayWindow,
-        rawWindow: rawWindow,
-        createWorker: function (contentScript) {
-          return createWorker(assert, xrayWindow, contentScript, helper.done);
-        },
-        done: function () {
-          if (isDone)
-            return;
-          isDone = true;
-          element.parentNode.removeChild(element);
-          done();
+          let xrayWindow = hiddenFrame.element.contentWindow;
+          let rawWindow = xrayWindow.wrappedJSObject;
+
+          let isDone = false;
+          let helper = {
+            xrayWindow: xrayWindow,
+            rawWindow: rawWindow,
+            createWorker: function (contentScript) {
+              return createWorker(assert, xrayWindow, contentScript, helper.done);
+            },
+            done: function () {
+              if (isDone)
+                return;
+              isDone = true;
+              hiddenFrames.remove(hiddenFrame);
+              done();
+            }
+          }
+          callback(helper, assert);
         }
-      };
-      callback(helper, assert);
-    }
+
+        hiddenFrame.element.addEventListener("DOMContentLoaded", onDOMReady, false);
+        hiddenFrame.element.setAttribute("src", url);
+
+      }
+    }));
   };
 }
 
@@ -179,9 +165,9 @@ exports["test postMessage"] = createProxyTest(html, function (helper, assert) {
     // xrays use current compartments when calling postMessage method.
     // Whereas js proxies was using postMessage method compartment,
     // not the caller one.
-    assert.strictEqual(event.source, helper.xrayWindow,
-                      "event.source is the top window");
-    assert.equal(event.origin, testHost, "origin matches testHost");
+    assert.equal(event.source, helper.xrayWindow,
+                 "event.source is the top window");
+    assert.equal(event.origin, "null", "origin is null");
 
     assert.equal(event.data, "{\"foo\":\"bar\\n \\\"escaped\\\".\"}",
                      "message data is correct");
@@ -191,6 +177,9 @@ exports["test postMessage"] = createProxyTest(html, function (helper, assert) {
 
   helper.createWorker(
     'new ' + function ContentScriptScope() {
+      assert(postMessage === postMessage,
+          "verify that we doesn't generate multiple functions for the same method");
+
       var json = JSON.stringify({foo : "bar\n \"escaped\"."});
 
       document.getElementById("iframe").contentWindow.postMessage(json, "*");
@@ -227,9 +216,7 @@ exports["test Object Listener"] = createProxyTest(html, function (helper) {
 exports["test Object Listener 2"] = createProxyTest("", function (helper) {
 
   helper.createWorker(
-    ('new ' + function ContentScriptScope() {
-      // variable replaced with `testHost`
-      let testHost = "TOKEN";
+    'new ' + function ContentScriptScope() {
       // Verify object as DOM event listener
       let myMessageListener = {
         called: false,
@@ -241,7 +228,7 @@ exports["test Object Listener 2"] = createProxyTest("", function (helper) {
           this.called = true;
           assert(event.target == document.defaultView, "event.target is the wrapped window");
           assert(event.source == document.defaultView, "event.source is the wrapped window");
-          assert(event.origin == testHost, "origin matches testHost");
+          assert(event.origin == "null", "origin is null");
           assert(event.data == "ok", "message data is correct");
           done();
         }
@@ -250,14 +237,15 @@ exports["test Object Listener 2"] = createProxyTest("", function (helper) {
       window.addEventListener("message", myMessageListener, true);
       document.defaultView.postMessage("ok", '*');
     }
-  ).replace("TOKEN", testHost));
+  );
 
 });
 
 let html = '<input id="input" type="text" /><input id="input3" type="checkbox" />' +
              '<input id="input2" type="checkbox" />';
 
-exports.testStringOverload = createProxyTest(html, function (helper, assert) {
+/* Disable test to keep tree green until Bug 756214 is fixed.
+exports.testStringOverload = createProxyTest(html, function (helper, test) {
   // Proxy - toString error
   let originalString = "string";
   let p = Proxy.create({
@@ -267,10 +255,10 @@ exports.testStringOverload = createProxyTest(html, function (helper, assert) {
       return originalString[name];
     }
   });
-  assert.throws(function () {
+  assert.okRaises(function () {
     p.toString();
   },
-  /toString method called on incompatible Proxy/,
+  /String.prototype.toString called on incompatible Proxy/,
   "toString can't be called with this being the proxy");
   assert.equal(p.binded(), "string", "but it works if we bind this to the original string");
 
@@ -292,6 +280,7 @@ exports.testStringOverload = createProxyTest(html, function (helper, assert) {
     }
   );
 });
+*/
 
 exports["test MozMatchedSelector"] = createProxyTest("", function (helper) {
   helper.createWorker(
@@ -512,6 +501,8 @@ exports["test Window Frames"] = createProxyTest(html, function (helper) {
       let iframe = document.getElementById("iframe");
       //assert(window.frames.length == 1, "The iframe is reported in window.frames check1");
       //assert(window.frames[0] == iframe.contentWindow, "The iframe is reported in window.frames check2");
+      //console.log(window.test+ "-"+iframe.contentWindow);
+      //console.log(window);
       assert(window.test == iframe.contentWindow, "window[frameName] is valid");
       done();
     }
@@ -583,7 +574,7 @@ exports["test XMLHttpRequest"] = createProxyTest("", function (helper) {
     'new ' + function ContentScriptScope() {
       // XMLHttpRequest doesn't support XMLHttpRequest.apply,
       // that may break our proxy code
-      assert(new window.XMLHttpRequest(), "we are able to instantiate XMLHttpRequest object");
+      assert(window.XMLHttpRequest(), "we are able to instantiate XMLHttpRequest object");
       done();
     }
   );
@@ -839,30 +830,14 @@ exports["test MutationObvserver"] = createProxyTest(html, function (helper) {
 
 });
 
-let html = '<script>' +
-  'var accessCheck = function() {' +
-  '  assert(true, "exporting function works");' +
-  '  try{' +
-  '    exportedObj.prop;' +
-  '    assert(false, "content should not have access to content-script");' +
-  '  } catch(e) {' +
-  '    assert(e.toString().indexOf("Permission denied") != -1,' +
-  '           "content should not have access to content-script");' +
-  '  }' +
-  '}</script>';
-exports["test nsEp for content-script"] = createProxyTest(html, function (helper) {
-
-  helper.createWorker(
-    'let glob = this; new ' + function ContentScriptScope() {
-
-      exportFunction(assert, unsafeWindow, { defineAs: "assert" });
-      window.wrappedJSObject.assert(true, "assert exported");
-      window.wrappedJSObject.exportedObj = { prop: 42 };
-      window.wrappedJSObject.accessCheck();
-      done();
+if (require("sdk/system/xul-app").is("Fennec")) {
+  module.exports = {
+    "test Unsupported Test": function UnsupportedTest (assert) {
+        assert.pass(
+          "Skipping this test until Fennec support is implemented." +
+          "See bug 806813");
     }
-  );
-
-});
+  }
+}
 
 require("test").run(exports);

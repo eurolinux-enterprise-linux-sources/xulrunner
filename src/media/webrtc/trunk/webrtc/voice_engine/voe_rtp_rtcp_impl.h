@@ -11,9 +11,9 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOE_RTP_RTCP_IMPL_H
 #define WEBRTC_VOICE_ENGINE_VOE_RTP_RTCP_IMPL_H
 
-#include "webrtc/voice_engine/include/voe_rtp_rtcp.h"
+#include "voe_rtp_rtcp.h"
 
-#include "webrtc/voice_engine/shared_data.h"
+#include "shared_data.h"
 
 namespace webrtc {
 
@@ -40,19 +40,17 @@ public:
 
     virtual int GetRemoteRTCP_CNAME(int channel, char cName[256]);
 
-    virtual int GetRemoteRTCPReceiverInfo(int channel,
-                                          uint32_t& NTPHigh,
-                                          uint32_t& NTPLow,
-                                          uint32_t& receivedPacketCount,
-                                          uint64_t& receivedOctetCount,
-                                          uint32_t& jitter,
-                                          uint16_t& fractionLost,
-                                          uint32_t& cumulativeLost,
-                                          int32_t& rttMs);
+    virtual int GetRemoteRTCPData(int channel,
+                                  unsigned int& NTPHigh,
+                                  unsigned int& NTPLow,
+                                  unsigned int& timestamp,
+                                  unsigned int& playoutTimestamp,
+                                  unsigned int* jitter = NULL,
+                                  unsigned short* fractionLost = NULL);
 
     virtual int SendApplicationDefinedRTCPPacket(
         int channel,
-        unsigned char subType,
+        const unsigned char subType,
         unsigned int name,
         const char* data,
         unsigned short dataLengthInBytes);
@@ -80,8 +78,7 @@ public:
     virtual int GetRTPStatistics(int channel,
                                  unsigned int& averageJitterMs,
                                  unsigned int& maxJitterMs,
-                                 unsigned int& discardedPackets,
-                                 unsigned int& cumulativeLost);
+                                 unsigned int& discardedPackets);
 
     virtual int GetRTCPStatistics(int channel, CallStatistics& stats);
 
@@ -96,11 +93,6 @@ public:
                              int redPayloadtype = -1);
 
     virtual int GetFECStatus(int channel, bool& enabled, int& redPayloadtype);
-
-    //NACK
-    virtual int SetNACKStatus(int channel,
-                              bool enable,
-                              int maxNoPackets);
 
     // Store RTP and RTCP packets and dump to file (compatible with rtpplay)
     virtual int StartRTPDump(int channel,
@@ -132,3 +124,4 @@ private:
 }  // namespace webrtc
 
 #endif    // WEBRTC_VOICE_ENGINE_VOE_RTP_RTCP_IMPL_H
+

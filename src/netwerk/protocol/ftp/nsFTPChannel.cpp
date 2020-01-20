@@ -7,12 +7,33 @@
 #include "nsFTPChannel.h"
 #include "nsFtpConnectionThread.h"  // defines nsFtpState
 
+#include "nsIStreamListener.h"
+#include "nsIServiceManager.h"
 #include "nsThreadUtils.h"
+#include "nsNetUtil.h"
+#include "nsMimeTypes.h"
+#include "nsReadableUtils.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
+#include "nsIStreamConverterService.h"
+#include "nsISocketTransport.h"
+#include "nsURLHelper.h"
 #include "mozilla/Attributes.h"
 
 #if defined(PR_LOGGING)
 extern PRLogModuleInfo* gFTPLog;
 #endif /* PR_LOGGING */
+
+////////////// this needs to move to nspr
+static inline uint32_t
+PRTimeToSeconds(PRTime t_usec)
+{
+    return uint32_t(t_usec / PR_USEC_PER_SEC);
+}
+
+#define NowInSeconds() PRTimeToSeconds(PR_Now())
+////////////// end
+
 
 // There are two transport connections established for an 
 // ftp connection. One is used for the command channel , and
@@ -24,12 +45,12 @@ extern PRLogModuleInfo* gFTPLog;
 
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS_INHERITED(nsFtpChannel,
-                            nsBaseChannel,
-                            nsIUploadChannel,
-                            nsIResumableChannel,
-                            nsIFTPChannel,
-                            nsIProxiedChannel)
+NS_IMPL_ISUPPORTS_INHERITED4(nsFtpChannel,
+                             nsBaseChannel,
+                             nsIUploadChannel,
+                             nsIResumableChannel,
+                             nsIFTPChannel,
+                             nsIProxiedChannel)
 
 //-----------------------------------------------------------------------------
 
@@ -38,7 +59,7 @@ nsFtpChannel::SetUploadStream(nsIInputStream *stream,
                               const nsACString &contentType,
                               int64_t contentLength)
 {
-    NS_ENSURE_TRUE(!Pending(), NS_ERROR_IN_PROGRESS);
+    NS_ENSURE_TRUE(!IsPending(), NS_ERROR_IN_PROGRESS);
 
     mUploadStream = stream;
 
@@ -61,7 +82,7 @@ nsFtpChannel::GetUploadStream(nsIInputStream **stream)
 NS_IMETHODIMP
 nsFtpChannel::ResumeAt(uint64_t aStartPos, const nsACString& aEntityID)
 {
-    NS_ENSURE_TRUE(!Pending(), NS_ERROR_IN_PROGRESS);
+    NS_ENSURE_TRUE(!IsPending(), NS_ERROR_IN_PROGRESS);
     mEntityID = aEntityID;
     mStartPos = aStartPos;
     mResumeRequested = (mStartPos || !mEntityID.IsEmpty());
@@ -138,7 +159,7 @@ public:
         , mTargetThread(do_GetCurrentThread())
     { }
         
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIFTPEVENTSINK
 
     class OnFTPControlLogRunnable : public nsRunnable
@@ -165,7 +186,7 @@ private:
     nsCOMPtr<nsIThread> mTargetThread;
 };
 
-NS_IMPL_ISUPPORTS(FTPEventSinkProxy, nsIFTPEventSink)
+NS_IMPL_THREADSAFE_ISUPPORTS1(FTPEventSinkProxy, nsIFTPEventSink)
 
 NS_IMETHODIMP
 FTPEventSinkProxy::OnFTPControlLog(bool aServer, const char* aMsg)
@@ -195,27 +216,4 @@ nsFtpChannel::GetFTPEventSink(nsCOMPtr<nsIFTPEventSink> &aResult)
         }
     }
     aResult = mFTPEventSink;
-}
-
-void
-nsFtpChannel::ForcePending(bool aForcePending)
-{
-    // Set true here so IsPending will return true.
-    // Required for callback diversion from child back to parent. In such cases
-    // OnStopRequest can be called in the parent before callbacks are diverted
-    // back from the child to the listener in the parent.
-    mForcePending = aForcePending;
-}
-
-NS_IMETHODIMP
-nsFtpChannel::IsPending(bool *result)
-{
-  *result = Pending();
-  return NS_OK;
-}
-
-bool
-nsFtpChannel::Pending() const
-{
-  return nsBaseChannel::Pending() || mForcePending;
 }

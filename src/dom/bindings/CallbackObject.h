@@ -20,16 +20,18 @@
 #include "nsISupports.h"
 #include "nsISupportsImpl.h"
 #include "nsCycleCollectionParticipant.h"
+#include "jsapi.h"
 #include "jswrapper.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/HoldDropJSObjects.h"
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/Util.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsWrapperCache.h"
 #include "nsJSEnvironment.h"
 #include "xpcpublic.h"
+#include "nsLayoutStatics.h"
+#include "js/RootingAPI.h"
 
 namespace mozilla {
 namespace dom {
@@ -46,23 +48,19 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CallbackObject)
 
-  // The caller may pass a global object which will act as an override for the
-  // incumbent script settings object when the callback is invoked (overriding
-  // the entry point computed from aCallback). If no override is required, the
-  // caller should pass null.
-  explicit CallbackObject(JS::Handle<JSObject*> aCallback, nsIGlobalObject *aIncumbentGlobal)
+  explicit CallbackObject(JSObject* aCallback)
   {
-    Init(aCallback, aIncumbentGlobal);
+    Init(aCallback);
   }
 
   virtual ~CallbackObject()
   {
-    DropJSObjects();
+    DropCallback();
   }
 
   JS::Handle<JSObject*> Callback() const
   {
-    JS::ExposeObjectToActiveJS(mCallback);
+    xpc_UnmarkGrayObject(mCallback);
     return CallbackPreserveColor();
   }
 
@@ -73,89 +71,47 @@ public:
    * This should only be called if you are certain that the return value won't
    * be passed into a JS API function and that it won't be stored without being
    * rooted (or otherwise signaling the stored value to the CC).
+   *
+   * This can return a handle because we trace our mCallback.
    */
   JS::Handle<JSObject*> CallbackPreserveColor() const
   {
-    // Calling fromMarkedLocation() is safe because we trace our mCallback, and
-    // because the value of mCallback cannot change after if has been set.
-    return JS::Handle<JSObject*>::fromMarkedLocation(mCallback.address());
-  }
-
-  nsIGlobalObject* IncumbentGlobalOrNull() const
-  {
-    return mIncumbentGlobal;
+    return mCallback;
   }
 
   enum ExceptionHandling {
-    // Report any exception and don't throw it to the caller code.
     eReportExceptions,
-    // Throw an exception to the caller code if the thrown exception is a
-    // binding object for a DOMError from the caller's scope, otherwise report
-    // it.
-    eRethrowContentExceptions,
-    // Throw any exception to the caller code.
     eRethrowExceptions
   };
-
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-  {
-    return aMallocSizeOf(this);
-  }
 
 protected:
   explicit CallbackObject(CallbackObject* aCallbackObject)
   {
-    Init(aCallbackObject->mCallback, aCallbackObject->mIncumbentGlobal);
-  }
-
-  bool operator==(const CallbackObject& aOther) const
-  {
-    JSObject* thisObj =
-      js::UncheckedUnwrap(CallbackPreserveColor());
-    JSObject* otherObj =
-      js::UncheckedUnwrap(aOther.CallbackPreserveColor());
-    return thisObj == otherObj;
+    Init(aCallbackObject->mCallback);
   }
 
 private:
-  inline void Init(JSObject* aCallback, nsIGlobalObject* aIncumbentGlobal)
+  inline void Init(JSObject* aCallback)
   {
-    MOZ_ASSERT(aCallback && !mCallback);
-    // Set script objects before we hold, on the off chance that a GC could
-    // somehow happen in there... (which would be pretty odd, granted).
+    // Set mCallback before we hold, on the off chance that a GC could somehow
+    // happen in there... (which would be pretty odd, granted).
     mCallback = aCallback;
-    if (aIncumbentGlobal) {
-      mIncumbentGlobal = aIncumbentGlobal;
-      mIncumbentJSGlobal = aIncumbentGlobal->GetGlobalJSObject();
-    }
-    mozilla::HoldJSObjects(this);
+    // Make sure we'll be able to drop as needed
+    nsLayoutStatics::AddRef();
+    NS_HOLD_JS_OBJECTS(this, CallbackObject);
   }
 
-  CallbackObject(const CallbackObject&) MOZ_DELETE;
-  CallbackObject& operator =(const CallbackObject&) MOZ_DELETE;
-
 protected:
-  void DropJSObjects()
+  void DropCallback()
   {
-    MOZ_ASSERT_IF(mIncumbentJSGlobal, mCallback);
     if (mCallback) {
       mCallback = nullptr;
-      mIncumbentJSGlobal = nullptr;
-      mozilla::DropJSObjects(this);
+      NS_DROP_JS_OBJECTS(this, CallbackObject);
+      nsLayoutStatics::Release();
     }
   }
 
   JS::Heap<JSObject*> mCallback;
-  // Ideally, we'd just hold a reference to the nsIGlobalObject, since that's
-  // what we need to pass to AutoIncumbentScript. Unfortunately, that doesn't
-  // hold the actual JS global alive. So we maintain an additional pointer to
-  // the JS global itself so that we can trace it.
-  //
-  // At some point we should consider trying to make native globals hold their
-  // scripted global alive, at which point we can get rid of the duplication
-  // here.
-  nsCOMPtr<nsIGlobalObject> mIncumbentGlobal;
-  JS::TenuredHeap<JSObject*> mIncumbentJSGlobal;
 
   class MOZ_STACK_CLASS CallSetup
   {
@@ -166,12 +122,8 @@ protected:
      * non-null.
      */
   public:
-    // If aExceptionHandling == eRethrowContentExceptions then aCompartment
-    // needs to be set to the compartment in which exceptions will be rethrown.
-    CallSetup(CallbackObject* aCallback, ErrorResult& aRv,
-              ExceptionHandling aExceptionHandling,
-              JSCompartment* aCompartment = nullptr,
-              bool aIsJSImplementedWebIDL = false);
+    CallSetup(JS::Handle<JSObject*> aCallable, ErrorResult& aRv,
+              ExceptionHandling aExceptionHandling);
     ~CallSetup();
 
     JSContext* GetContext() const
@@ -183,35 +135,33 @@ protected:
     // We better not get copy-constructed
     CallSetup(const CallSetup&) MOZ_DELETE;
 
-    bool ShouldRethrowException(JS::Handle<JS::Value> aException);
-
     // Members which can go away whenever
     JSContext* mCx;
-
-    // Caller's compartment. This will only have a sensible value if
-    // mExceptionHandling == eRethrowContentExceptions.
-    JSCompartment* mCompartment;
+    nsCOMPtr<nsIScriptContext> mCtx;
 
     // And now members whose construction/destruction order we need to control.
-    Maybe<AutoEntryScript> mAutoEntryScript;
-    Maybe<AutoIncumbentScript> mAutoIncumbentScript;
+
+    // Put our nsAutoMicrotask first, so it gets destroyed after everything else
+    // is gone
+    nsAutoMicroTask mMt;
+
+    nsCxPusher mCxPusher;
 
     // Constructed the rooter within the scope of mCxPusher above, so that it's
     // always within a request during its lifetime.
     Maybe<JS::Rooted<JSObject*> > mRootedCallable;
 
     // Can't construct a JSAutoCompartment without a JSContext either.  Also,
-    // Put mAc after mAutoEntryScript so that we exit the compartment before
-    // we pop the JSContext. Though in practice we'll often manually order
-    // those two things.
+    // Put mAc after mCxPusher so that we exit the compartment before we pop the
+    // JSContext.  Though in practice we'll often manually order those two
+    // things.
     Maybe<JSAutoCompartment> mAc;
 
     // An ErrorResult to possibly re-throw exceptions on and whether
     // we should re-throw them.
     ErrorResult& mErrorResult;
     const ExceptionHandling mExceptionHandling;
-    JS::ContextOptions mSavedJSContextOptions;
-    const bool mIsMainThread;
+    uint32_t mSavedJSContextOptions;
   };
 };
 
@@ -333,7 +283,11 @@ public:
       return false;
     }
 
-    return *GetWebIDLCallback() == *aOtherCallback;
+    JSObject* thisObj =
+      js::UncheckedUnwrap(GetWebIDLCallback()->CallbackPreserveColor());
+    JSObject* otherObj =
+      js::UncheckedUnwrap(aOtherCallback->CallbackPreserveColor());
+    return thisObj == otherObj;
   }
 
   bool operator==(XPCOMCallbackT* aOtherCallback) const
@@ -373,7 +327,28 @@ public:
       nsRefPtr<WebIDLCallbackT> callback = GetWebIDLCallback();
       return callback.forget();
     }
-    return nullptr;
+
+    XPCOMCallbackT* callback = GetXPCOMCallback();
+    if (!callback) {
+      return nullptr;
+    }
+
+    nsCOMPtr<nsIXPConnectWrappedJS> wrappedJS = do_QueryInterface(callback);
+    if (!wrappedJS) {
+      return nullptr;
+    }
+
+    AutoSafeJSContext cx;
+
+    JS::Rooted<JSObject*> obj(cx, wrappedJS->GetJSObject());
+    if (!obj) {
+      return nullptr;
+    }
+
+    JSAutoCompartment ac(cx, obj);
+
+    nsRefPtr<WebIDLCallbackT> newCallback = new WebIDLCallbackT(obj);
+    return newCallback.forget();
   }
 
 private:

@@ -26,13 +26,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "yarr/YarrInterpreter.h"
+#include "YarrInterpreter.h"
 
-#include "jscntxt.h"
-
-#include "yarr/Yarr.h"
-#include "yarr/YarrCanonicalizeUCS2.h"
-#include "yarr/BumpPointerAllocator.h"
+#include "Yarr.h"
+#include "YarrCanonicalizeUCS2.h"
+#include "BumpPointerAllocator.h"
 
 using namespace WTF;
 
@@ -1009,12 +1007,6 @@ public:
                     }
                 }
             } else {
-                // Avoid a topcrash before it occurs.
-                if (!backTrack->lastContext) {
-                    ASSERT(!"Tripped Bug 856796!");
-                    return JSRegExpErrorInternal;
-                }
-
                 resetMatches(term, context);
                 popParenthesesDisjunctionContext(backTrack);
                 freeParenthesesDisjunctionContext(context);
@@ -1059,12 +1051,6 @@ public:
                         recordParenthesesMatch(term, context);
                     }
                     return JSRegExpMatch;
-                }
-
-                // Avoid a topcrash before it occurs.
-                if (!backTrack->lastContext) {
-                    ASSERT(!"Tripped Bug 856796!");
-                    return JSRegExpErrorInternal;
                 }
 
                 // pop a match off the stack
@@ -1134,7 +1120,7 @@ public:
         ASSERT(context->term < static_cast<int>(disjunction->terms.size()));
 
         // Prevent jank resulting from getting stuck in Yarr for a long time.
-        if (!CheckForInterrupt(this->cx))
+        if (!JS_CHECK_OPERATION_LIMIT(this->cx))
             return JSRegExpErrorInternal;
 
         switch (currentTerm().type) {
@@ -1282,7 +1268,7 @@ public:
         case ByteTerm::TypeUncheckInput:
             input.uncheckInput(currentTerm().checkInputCount);
             MATCH_NEXT();
-
+                
         case ByteTerm::TypeDotStarEnclosure:
             if (matchDotStarEnclosure(currentTerm(), context))
                 return JSRegExpMatch;
@@ -1296,7 +1282,7 @@ public:
         ASSERT(context->term < static_cast<int>(disjunction->terms.size()));
 
         // Prevent jank resulting from getting stuck in Yarr for a long time.
-        if (!CheckForInterrupt(this->cx))
+        if (!JS_CHECK_OPERATION_LIMIT(this->cx))
             return JSRegExpErrorInternal;
 
         switch (currentTerm().type) {
@@ -1514,7 +1500,7 @@ public:
         emitDisjunction(m_pattern.m_body);
         regexEnd();
 
-        return adoptPtr(newOrCrash<BytecodePattern>(m_bodyDisjunction.release(), m_allParenthesesInfo, Ref<YarrPattern>(m_pattern), allocator));
+        return adoptPtr(js_new<BytecodePattern>(m_bodyDisjunction.release(), m_allParenthesesInfo, Ref<YarrPattern>(m_pattern), allocator));
     }
 
     void checkInput(unsigned count)
@@ -1526,7 +1512,7 @@ public:
     {
         m_bodyDisjunction->terms.append(ByteTerm::UncheckInput(count));
     }
-
+    
     void assertionBOL(unsigned inputPosition)
     {
         m_bodyDisjunction->terms.append(ByteTerm::BOL(inputPosition));
@@ -1677,10 +1663,10 @@ public:
 #ifndef NDEBUG
     void dumpDisjunction(ByteDisjunction* disjunction)
     {
-        dataLogF("ByteDisjunction(%p):\n\t", (void *)disjunction);
+        dataLog("ByteDisjunction(%p):\n\t", (void *)disjunction);
         for (unsigned i = 0; i < disjunction->terms.size(); ++i)
-            dataLogF("{ %d } ", disjunction->terms[i].type);
-        dataLogF("\n");
+            dataLog("{ %d } ", disjunction->terms[i].type);
+        dataLog("\n");
     }
 #endif
 
@@ -1745,7 +1731,7 @@ public:
         unsigned subpatternId = parenthesesBegin.atom.subpatternId;
 
         unsigned numSubpatterns = lastSubpatternId - subpatternId + 1;
-        ByteDisjunction* parenthesesDisjunction = newOrCrash<ByteDisjunction>(numSubpatterns, callFrameSize);
+        ByteDisjunction* parenthesesDisjunction = js_new<ByteDisjunction>(numSubpatterns, callFrameSize);
 
         parenthesesDisjunction->terms.reserve(endTerm - beginTerm + 1);
         parenthesesDisjunction->terms.append(ByteTerm::SubpatternBegin());
@@ -1809,7 +1795,7 @@ public:
 
     void regexBegin(unsigned numSubpatterns, unsigned callFrameSize, bool onceThrough)
     {
-        m_bodyDisjunction = adoptPtr(newOrCrash<ByteDisjunction>(numSubpatterns, callFrameSize));
+        m_bodyDisjunction = adoptPtr(js_new<ByteDisjunction>(numSubpatterns, callFrameSize));
         m_bodyDisjunction->terms.append(ByteTerm::BodyAlternativeBegin(onceThrough));
         m_bodyDisjunction->terms[0].frameLocation = 0;
         m_currentAlternativeIndex = 0;

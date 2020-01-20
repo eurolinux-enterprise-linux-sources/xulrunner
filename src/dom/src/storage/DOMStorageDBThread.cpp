@@ -20,7 +20,6 @@
 #include "mozIStorageFunction.h"
 #include "nsIObserverService.h"
 #include "nsIVariant.h"
-#include "mozilla/IOInterposer.h"
 #include "mozilla/Services.h"
 
 // How long we collect write oprerations
@@ -36,6 +35,22 @@ namespace dom {
 
 DOMStorageDBBridge::DOMStorageDBBridge()
 {
+  mUsages.Init();
+}
+
+DOMStorageUsage*
+DOMStorageDBBridge::GetScopeUsage(const nsACString& aScope)
+{
+  DOMStorageUsage* usage;
+  if (mUsages.Get(aScope, &usage)) {
+    return usage;
+  }
+
+  usage = new DOMStorageUsage(aScope);
+  AsyncGetUsage(usage);
+  mUsages.Put(aScope, usage);
+
+  return usage;
 }
 
 
@@ -43,7 +58,6 @@ DOMStorageDBThread::DOMStorageDBThread()
 : mThread(nullptr)
 , mMonitor("DOMStorageThreadMonitor")
 , mStopIOThread(false)
-, mWALModeEnabled(false)
 , mDBReady(false)
 , mStatus(NS_OK)
 , mWorkerStatements(mWorkerConnection)
@@ -52,6 +66,7 @@ DOMStorageDBThread::DOMStorageDBThread()
 , mFlushImmediately(false)
 , mPriorityCounter(0)
 {
+  mScopesHavingData.Init();
 }
 
 nsresult
@@ -79,7 +94,7 @@ DOMStorageDBThread::Init()
   MonitorAutoLock monitor(mMonitor);
 
   mThread = PR_CreateThread(PR_USER_THREAD, &DOMStorageDBThread::ThreadFunc, this,
-                            PR_PRIORITY_LOW, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD,
+                            PR_PRIORITY_LOW, PR_LOCAL_THREAD, PR_JOINABLE_THREAD,
                             262144);
   if (!mThread) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -127,7 +142,7 @@ DOMStorageDBThread::SyncPreload(DOMStorageCacheBridge* aCache, bool aForceSync)
   // Bypass sync load when an update is pending in the queue to write, we would
   // get incosistent data in the cache.  Also don't allow sync main-thread preload
   // when DB open and init is still pending on the background thread.
-  if (mDBReady && mWALModeEnabled) {
+  if (mWALModeEnabled && mDBReady) {
     bool pendingTasks;
     {
       MonitorAutoLock monitor(mMonitor);
@@ -280,11 +295,9 @@ void
 DOMStorageDBThread::ThreadFunc(void* aArg)
 {
   PR_SetCurrentThreadName("localStorage DB");
-  mozilla::IOInterposer::RegisterCurrentThread();
 
   DOMStorageDBThread* thread = static_cast<DOMStorageDBThread*>(aArg);
   thread->ThreadFunc();
-  mozilla::IOInterposer::UnregisterCurrentThread();
 }
 
 void
@@ -346,7 +359,7 @@ class nsReverseStringSQLFunction MOZ_FINAL : public mozIStorageFunction
   NS_DECL_MOZISTORAGEFUNCTION
 };
 
-NS_IMPL_ISUPPORTS(nsReverseStringSQLFunction, mozIStorageFunction)
+NS_IMPL_ISUPPORTS1(nsReverseStringSQLFunction, mozIStorageFunction)
 
 NS_IMETHODIMP
 nsReverseStringSQLFunction::OnFunctionCall(
@@ -664,7 +677,7 @@ DOMStorageDBThread::TimeUntilFlush()
     return 0; // Do it now regardless the timeout.
   }
 
-  static_assert(PR_INTERVAL_NO_TIMEOUT != 0,
+  MOZ_STATIC_ASSERT(PR_INTERVAL_NO_TIMEOUT != 0,
       "PR_INTERVAL_NO_TIMEOUT must be non-zero");
 
   if (!mDirtyEpoch) {
@@ -842,7 +855,7 @@ DOMStorageDBThread::DBOperation::Perform(DOMStorageDBThread* aThread)
     rv = stmt->ExecuteStep(&exists);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    int64_t usage = 0;
+    int64_t usage;
     if (exists) {
       rv = stmt->GetInt64(0, &usage);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -1013,6 +1026,8 @@ DOMStorageDBThread::DBOperation::Finalize(nsresult aRv)
 DOMStorageDBThread::PendingOperations::PendingOperations()
 : mFlushFailureCount(0)
 {
+  mClears.Init();
+  mUpdates.Init();
 }
 
 bool

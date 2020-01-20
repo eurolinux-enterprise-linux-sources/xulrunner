@@ -6,33 +6,41 @@
 #ifndef nsHttpConnectionMgr_h__
 #define nsHttpConnectionMgr_h__
 
+#include "nsHttpConnectionInfo.h"
 #include "nsHttpConnection.h"
 #include "nsHttpTransaction.h"
+#include "NullHttpTransaction.h"
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
 #include "nsAutoPtr.h"
 #include "mozilla/ReentrantMonitor.h"
+#include "nsISocketTransportService.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/net/DashboardTypes.h"
 
 #include "nsIObserver.h"
 #include "nsITimer.h"
+#include "nsIX509Cert3.h"
+
+class nsHttpPipeline;
 
 class nsIHttpUpgradeListener;
 
 namespace mozilla {
 namespace net {
 class EventTokenBucket;
-struct HttpRetParams;
+}
+}
 
 //-----------------------------------------------------------------------------
 
 class nsHttpConnectionMgr : public nsIObserver
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
 
     // parameter names
@@ -105,8 +113,7 @@ public:
     // connection manager, nor is the submitter obligated to actually submit a
     // real transaction for this connectionInfo.
     nsresult SpeculativeConnect(nsHttpConnectionInfo *,
-                                nsIInterfaceRequestor *,
-                                uint32_t caps = 0);
+                                nsIInterfaceRequestor *);
 
     // called when a connection is done processing a transaction.  if the
     // connection can be reused then it will be added to the idle list, else
@@ -126,7 +133,7 @@ public:
 
     // called from main thread to post a new request token bucket
     // to the socket thread
-    nsresult UpdateRequestTokenBucket(EventTokenBucket *aBucket);
+    nsresult UpdateRequestTokenBucket(mozilla::net::EventTokenBucket *aBucket);
 
     // Pipielining Interfaces and Datatypes
 
@@ -227,7 +234,7 @@ public:
 
     bool     SupportsPipelining(nsHttpConnectionInfo *);
 
-    bool GetConnectionData(nsTArray<HttpRetParams> *);
+    bool GetConnectionData(nsTArray<mozilla::net::HttpRetParams> *);
 
     void ResetIPFamilyPreference(nsHttpConnectionInfo *);
 
@@ -269,7 +276,7 @@ private:
         nsTArray<nsHttpTransaction*> mPendingQ;    // pending transaction queue
         nsTArray<nsHttpConnection*>  mActiveConns; // active connections
         nsTArray<nsHttpConnection*>  mIdleConns;   // idle persistent connections
-        nsTArray<nsHalfOpenSocket*>  mHalfOpens;   // half open connections
+        nsTArray<nsHalfOpenSocket*>  mHalfOpens;
 
         // calculate the number of half open sockets that have not had at least 1
         // connection complete
@@ -324,7 +331,7 @@ private:
         int16_t                   mPipeliningClassPenalty[nsAHttpTransaction::CLASS_MAX];
 
         // for calculating penalty repair credits
-        TimeStamp        mLastCreditTime;
+        mozilla::TimeStamp        mLastCreditTime;
 
         // Spdy sometimes resolves the address in the socket manager in order
         // to re-coalesce sharded HTTP hosts. The dotted decimal address is
@@ -340,7 +347,7 @@ private:
         // The value of a recevied SPDY settings type 5 previously received
         // for this connection entry and the time it was set.
         uint32_t            mSpdyCWND;
-        TimeStamp  mSpdyCWNDTimeStamp;
+        mozilla::TimeStamp  mSpdyCWNDTimeStamp;
 
         // To have the UsingSpdy flag means some host with the same connection
         // entry has done NPN=spdy/* at some point. It does not mean every
@@ -382,7 +389,7 @@ private:
     class nsConnectionHandle : public nsAHttpConnection
     {
     public:
-        NS_DECL_THREADSAFE_ISUPPORTS
+        NS_DECL_ISUPPORTS
         NS_DECL_NSAHTTPCONNECTION(mConn)
 
         nsConnectionHandle(nsHttpConnection *conn) { NS_ADDREF(mConn = conn); }
@@ -400,7 +407,7 @@ private:
                                        public nsITimerCallback
     {
     public:
-        NS_DECL_THREADSAFE_ISUPPORTS
+        NS_DECL_ISUPPORTS
         NS_DECL_NSIOUTPUTSTREAMCALLBACK
         NS_DECL_NSITRANSPORTEVENTSINK
         NS_DECL_NSIINTERFACEREQUESTOR
@@ -420,7 +427,7 @@ private:
         void     SetupBackupTimer();
         void     CancelBackupTimer();
         void     Abandon();
-        double   Duration(TimeStamp epoch);
+        double   Duration(mozilla::TimeStamp epoch);
         nsISocketTransport *SocketTransport() { return mSocketTransport; }
         nsISocketTransport *BackupTransport() { return mBackupTransport; }
 
@@ -449,8 +456,8 @@ private:
         // more connections that are needed.)
         bool                           mSpeculative;
 
-        TimeStamp             mPrimarySynStarted;
-        TimeStamp             mBackupSynStarted;
+        mozilla::TimeStamp             mPrimarySynStarted;
+        mozilla::TimeStamp             mBackupSynStarted;
 
         // for syn retry
         nsCOMPtr<nsITimer>             mSynTimer;
@@ -466,7 +473,7 @@ private:
     // NOTE: these members may be accessed from any thread (use mReentrantMonitor)
     //-------------------------------------------------------------------------
 
-    ReentrantMonitor    mReentrantMonitor;
+    mozilla::ReentrantMonitor    mReentrantMonitor;
     nsCOMPtr<nsIEventTarget>     mSocketThreadTarget;
 
     // connection limits
@@ -508,7 +515,7 @@ private:
     nsresult BuildPipeline(nsConnectionEntry *,
                            nsAHttpTransaction *,
                            nsHttpPipeline **);
-    bool     RestrictConnections(nsConnectionEntry *, bool = false);
+    bool     RestrictConnections(nsConnectionEntry *);
     nsresult ProcessNewTransaction(nsHttpTransaction *);
     nsresult EnsureSocketThreadTarget();
     void     ClosePersistentConnections(nsConnectionEntry *ent);
@@ -629,7 +636,6 @@ private:
     // Disabled when there are no active or half open connections.
     nsCOMPtr<nsITimer> mTimeoutTick;
     bool mTimeoutTickArmed;
-    uint32_t mTimeoutTickNext;
 
     //
     // the connection table
@@ -658,7 +664,5 @@ private:
                                               void *closure);
     nsCString mLogData;
 };
-
-}} // namespace mozilla::net
 
 #endif // !nsHttpConnectionMgr_h__

@@ -11,7 +11,6 @@ using mozilla::WeakPtr;
 class C : public SupportsWeakPtr<C>
 {
   public:
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(C)
     int num;
     void act() {}
 };
@@ -38,13 +37,12 @@ Example()
   // Destroying the underlying object clears weak pointers to it.
   delete ptr;
 
-  MOZ_RELEASE_ASSERT(!weak, "Deleting |ptr| clears weak pointers to it.");
-  MOZ_RELEASE_ASSERT(!other, "Deleting |ptr| clears all weak pointers to it.");
+  MOZ_ASSERT(!weak, "Deleting |ptr| clears weak pointers to it.");
+  MOZ_ASSERT(!other, "Deleting |ptr| clears all weak pointers to it.");
 }
 
 struct A : public SupportsWeakPtr<A>
 {
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(A)
     int data;
 };
 
@@ -63,13 +61,13 @@ main()
   WeakPtr<A> ptr = a->asWeakPtr();
   {
       WeakPtr<A> ptr2 = a->asWeakPtr();
-      MOZ_RELEASE_ASSERT(ptr->data == 5);
+      MOZ_ASSERT(ptr->data == 5);
       WeakPtr<A> ptr3 = a->asWeakPtr();
-      MOZ_RELEASE_ASSERT(ptr->data == 5);
+      MOZ_ASSERT(ptr->data == 5);
   }
 
   delete a;
-  MOZ_RELEASE_ASSERT(!ptr);
+  MOZ_ASSERT(!ptr);
 
   delete a2;
 

@@ -6,14 +6,11 @@
 
 if CONFIG['MOZ_WIDGET_GTK'] and CONFIG['MOZ_X11']:
     PROGRAM = 'screentopng'
-    SOURCES += [
+    CPP_SOURCES += [
         'gdk-screenshot.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     PROGRAM = 'screenshot'
-    SOURCES += [
+    CPP_SOURCES += [
         'win32-screenshot.cpp',
     ]
-    USE_STATIC_LIBS = True
-    if CONFIG['GNU_CC']:
-        WIN32_EXE_LDFLAGS += ['-municode']

@@ -12,15 +12,15 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGGElement::WrapNode(JSContext *aCx)
+SVGGElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGGElementBinding::Wrap(aCx, this);
+  return SVGGElementBinding::Wrap(aCx, aScope, this);
 }
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGGElement::SVGGElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGGElement::SVGGElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGGraphicsElement(aNodeInfo)
 {
 }

@@ -5,6 +5,7 @@
 
 #include "NotificationController.h"
 
+#include "Accessible-inl.h"
 #include "DocAccessible-inl.h"
 #include "TextLeafAccessible.h"
 #include "TextUpdater.h"
@@ -15,6 +16,10 @@
 using namespace mozilla;
 using namespace mozilla::a11y;
 
+// Defines the number of selection add/remove events in the queue when they
+// aren't packed into single selection within event.
+const unsigned int kSelChangeCountToPack = 5;
+
 ////////////////////////////////////////////////////////////////////////////////
 // NotificationCollector
 ////////////////////////////////////////////////////////////////////////////////
@@ -24,6 +29,8 @@ NotificationController::NotificationController(DocAccessible* aDocument,
   EventQueue(aDocument), mObservingState(eNotObservingRefresh),
   mPresShell(aPresShell)
 {
+  mTextHash.Init();
+
   // Schedule initial accessible tree construction.
   ScheduleProcessing();
 }
@@ -40,8 +47,6 @@ NotificationController::~NotificationController()
 
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(NotificationController)
 NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(NotificationController)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(NotificationController)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NotificationController)
   if (tmp->mDocument)
@@ -408,8 +413,8 @@ NotificationController::ContentInsertion::
   return haveToUpdate;
 }
 
-NS_IMPL_CYCLE_COLLECTION(NotificationController::ContentInsertion,
-                         mContainer)
+NS_IMPL_CYCLE_COLLECTION_1(NotificationController::ContentInsertion,
+                           mContainer)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(NotificationController::ContentInsertion,
                                      AddRef)

@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "nscore.h"
 
@@ -12,7 +12,6 @@
 #include "nsCRT.h"
 #include "nsFont.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/gfx/2D.h"
 
 #include "gfxPlatform.h"
 #include "qcms.h"
@@ -51,15 +50,6 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
     false, 0 },
   { "ui.useOverlayScrollbars",
     eIntID_UseOverlayScrollbars,
-    false, 0 },
-  { "ui.scrollbarDisplayOnMouseMove",
-    eIntID_ScrollbarDisplayOnMouseMove,
-    false, 0 },
-  { "ui.scrollbarFadeBeginDelay",
-    eIntID_ScrollbarFadeBeginDelay,
-    false, 0 },
-  { "ui.scrollbarFadeDuration",
-    eIntID_ScrollbarFadeDuration,
     false, 0 },
   { "ui.showHideScrollbars",
     eIntID_ShowHideScrollbars,
@@ -111,9 +101,6 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
     false, 0 },
   { "ui.tooltipDelay",
     eIntID_TooltipDelay,
-    false, 0 },
-  { "ui.physicalHomeButton",
-    eIntID_PhysicalHomeButton,
     false, 0 },
 };
 
@@ -222,6 +209,7 @@ const char nsXPLookAndFeel::sColorPrefs[][38] =
   "ui.-moz-mac-menutextdisable",
   "ui.-moz-mac-menutextselect",
   "ui.-moz_mac_disabledtoolbartext",
+  "ui.-moz-mac-alternateprimaryhighlight",
   "ui.-moz-mac-secondaryhighlight",
   "ui.-moz-win-mediatext",
   "ui.-moz-win-communicationstext",
@@ -320,7 +308,7 @@ nsXPLookAndFeel::ColorPrefChanged (unsigned int index, const char *prefName)
   }
   if (!colorStr.IsEmpty()) {
     nscolor thecolor;
-    if (colorStr[0] == char16_t('#')) {
+    if (colorStr[0] == PRUnichar('#')) {
       if (NS_HexToRGB(nsDependentString(colorStr, 1), &thecolor)) {
         int32_t id = NS_PTR_TO_INT32(index);
         CACHE_COLOR(id, thecolor);
@@ -372,7 +360,7 @@ nsXPLookAndFeel::InitColorFromPref(int32_t i)
     return;
   }
   nscolor thecolor;
-  if (colorStr[0] == char16_t('#')) {
+  if (colorStr[0] == PRUnichar('#')) {
     nsAutoString hexString;
     colorStr.Right(hexString, colorStr.Length() - 1);
     if (NS_HexToRGB(hexString, &thecolor)) {
@@ -384,7 +372,7 @@ nsXPLookAndFeel::InitColorFromPref(int32_t i)
 }
 
 // static
-void
+int
 nsXPLookAndFeel::OnPrefChanged(const char* aPref, void* aClosure)
 {
 
@@ -395,23 +383,25 @@ nsXPLookAndFeel::OnPrefChanged(const char* aPref, void* aClosure)
   for (i = 0; i < ArrayLength(sIntPrefs); ++i) {
     if (prefName.Equals(sIntPrefs[i].name)) {
       IntPrefChanged(&sIntPrefs[i]);
-      return;
+      return 0;
     }
   }
 
   for (i = 0; i < ArrayLength(sFloatPrefs); ++i) {
     if (prefName.Equals(sFloatPrefs[i].name)) {
       FloatPrefChanged(&sFloatPrefs[i]);
-      return;
+      return 0;
     }
   }
 
   for (i = 0; i < ArrayLength(sColorPrefs); ++i) {
     if (prefName.Equals(sColorPrefs[i])) {
       ColorPrefChanged(i, sColorPrefs[i]);
-      return;
+      return 0;
     }
   }
+
+  return 0;
 }
 
 //
@@ -733,7 +723,7 @@ LookAndFeel::GetFont(FontID aID, nsString& aName, gfxFontStyle& aStyle,
 }
 
 // static
-char16_t
+PRUnichar
 LookAndFeel::GetPasswordCharacter()
 {
   return nsLookAndFeel::GetInstance()->GetPasswordCharacterImpl();

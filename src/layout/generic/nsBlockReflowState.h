@@ -10,10 +10,10 @@
 
 #include "nsFloatManager.h"
 #include "nsLineBox.h"
+#include "nsFrameList.h"
 #include "nsHTMLReflowState.h"
 
 class nsBlockFrame;
-class nsFrameList;
 class nsOverflowContinuationTracker;
 
   // block reflow state flags
@@ -40,8 +40,7 @@ public:
                      nsPresContext* aPresContext,
                      nsBlockFrame* aFrame,
                      bool aTopMarginRoot, bool aBottomMarginRoot,
-                     bool aBlockNeedsFloatManager,
-                     nscoord aConsumedHeight = NS_INTRINSICSIZE);
+                     bool aBlockNeedsFloatManager);
 
   /**
    * Get the available reflow space (the area not occupied by floats)
@@ -93,7 +92,7 @@ public:
 
   bool IsAdjacentWithTop() const {
     return mY ==
-      ((mFlags & BRS_ISFIRSTINFLOW) ? mReflowState.ComputedPhysicalBorderPadding().top : 0);
+      ((mFlags & BRS_ISFIRSTINFLOW) ? mReflowState.mComputedBorderPadding.top : 0);
   }
 
   /**
@@ -101,7 +100,7 @@ public:
    * we are not the first in flow.
    */
   nsMargin BorderPadding() const {
-    nsMargin result = mReflowState.ComputedPhysicalBorderPadding();
+    nsMargin result = mReflowState.mComputedBorderPadding;
     if (!(mFlags & BRS_ISFIRSTINFLOW)) {
       result.top = 0;
       if (mFlags & BRS_ISOVERFLOWCONTAINER) {
@@ -110,11 +109,6 @@ public:
     }
     return result;
   }
-
-  /**
-   * Retrieve the height "consumed" by any previous-in-flows.
-   */
-  nscoord GetConsumedHeight();
 
   // Reconstruct the previous bottom margin that goes above |aLine|.
   void ReconstructMarginAbove(nsLineList::iterator aLine);
@@ -188,7 +182,6 @@ public:
   // mContentArea.height is not NS_UNCONSTRAINEDSIZE; otherwise
   // coordinate overflow may occur.
   nsRect mContentArea;
-  nscoord mContainerWidth;
 
   // Continuation out-of-flow float frames that need to move to our
   // next in flow are placed here during reflow.  It's a pointer to
@@ -263,9 +256,6 @@ public:
   int16_t mFlags;
  
   uint8_t mFloatBreakType;
-
-  // The amount of computed height "consumed" by previous-in-flows.
-  nscoord mConsumedHeight;
 
   void SetFlag(uint32_t aFlag, bool aValue)
   {

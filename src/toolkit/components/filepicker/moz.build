@@ -5,12 +5,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 if CONFIG['MOZ_XUL'] and \
-    CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('android', 'qt', 'cocoa', 'windows'):
-        XPIDL_MODULE = 'filepicker'
+    CONFIG['MOZ_WIDGET_TOOLKIT'] not in ('android', 'qt', 'os2', 'cocoa', 'windows'):
+        MODULE = 'filepicker'
+        LIBRARY_NAME = 'fileview'
         XPIDL_SOURCES += [
             'nsIFileView.idl',
         ]
-        SOURCES += [
+        CPP_SOURCES += [
             'nsFileView.cpp',
         ]
         EXTRA_COMPONENTS += [
@@ -19,9 +20,3 @@ if CONFIG['MOZ_XUL'] and \
         EXTRA_PP_COMPONENTS += [
             'nsFilePicker.manifest',
         ]
-        XPCSHELL_TESTS_MANIFESTS += [
-            'test/unit/xpcshell.ini',
-        ]
-        FINAL_LIBRARY = 'xul'
-
-JAR_MANIFESTS += ['jar.mn']

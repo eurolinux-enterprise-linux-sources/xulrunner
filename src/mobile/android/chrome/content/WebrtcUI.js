@@ -3,11 +3,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-XPCOMUtils.defineLazyModuleGetter(this, "Notifications", "resource://gre/modules/Notifications.jsm");
-
 var WebrtcUI = {
-  _notificationId: null,
-
   observe: function(aSubject, aTopic, aData) {
     if (aTopic === "getUserMedia:request") {
       this.handleRequest(aSubject, aTopic, aData);
@@ -21,17 +17,24 @@ var WebrtcUI = {
     }
   },
 
+  get notificationId() {
+    delete this.notificationId;
+    return this.notificationId = uuidgen.generateUUID().toString();
+  },
+
   notify: function() {
     let windows = MediaManagerService.activeMediaCaptureWindows;
     let count = windows.Count();
     let msg = {};
     if (count == 0) {
-      if (this._notificationId) {
-        Notifications.cancel(this._notificationId);
-        this._notificationId = null;
+      msg = {
+        type: "Notification:Hide",
+        id: this.notificationId
       }
     } else {
-      let notificationOptions = {
+      msg = {
+        type: "Notification:Show",
+        id: this.notificationId,
         title: Strings.brand.GetStringFromName("brandShortName"),
         when: null, // hide the date row
         light: [0xFF9500FF, 1000, 1000],
@@ -50,42 +53,40 @@ var WebrtcUI = {
       }
 
       if (cameraActive && audioActive) {
-        notificationOptions.message = Strings.browser.GetStringFromName("getUserMedia.sharingCameraAndMicrophone.message2");
-        notificationOptions.icon = "drawable:alert_mic_camera";
+        msg.text = Strings.browser.GetStringFromName("getUserMedia.sharingCameraAndMicrophone.message2");
+        msg.smallicon = "drawable:alert_mic_camera";
       } else if (cameraActive) {
-        notificationOptions.message = Strings.browser.GetStringFromName("getUserMedia.sharingCamera.message2");
-        notificationOptions.icon = "drawable:alert_camera";
+        msg.text = Strings.browser.GetStringFromName("getUserMedia.sharingCamera.message2");
+        msg.smallicon = "drawable:alert_camera";
       } else if (audioActive) {
-        notificationOptions.message = Strings.browser.GetStringFromName("getUserMedia.sharingMicrophone.message2");
-        notificationOptions.icon = "drawable:alert_mic";
+        msg.text = Strings.browser.GetStringFromName("getUserMedia.sharingMicrophone.message2");
+        msg.smallicon = "drawable:alert_mic";
       } else {
         // somethings wrong. lets throw
         throw "Couldn't find any cameras or microphones being used"
       }
 
-      if (this._notificationId)
-          Notifications.update(this._notificationId, notificationOptions);
-      else
-        this._notificationId = Notifications.create(notificationOptions);
       if (count > 1)
         msg.count = count;
     }
+
+    sendMessageToJava(msg);
   },
 
   handleRequest: function handleRequest(aSubject, aTopic, aData) {
-    let constraints = aSubject.getConstraints();
-    let contentWindow = Services.wm.getOuterWindowWithId(aSubject.windowID);
+    let { windowID: windowID, callID: callID } = JSON.parse(aData);
 
-    contentWindow.navigator.mozGetUserMediaDevices(
-      constraints,
+    let contentWindow = Services.wm.getOuterWindowWithId(windowID);
+    let params = aSubject.QueryInterface(Ci.nsIMediaStreamOptions);
+
+    Services.wm.getMostRecentWindow(null).navigator.mozGetUserMediaDevices(
       function (devices) {
-        WebrtcUI.prompt(contentWindow, aSubject.callID, constraints.audio,
-                        constraints.video, devices);
+        WebrtcUI.prompt(windowID, callID, params.audio, params.video, devices);
       },
       function (error) {
         Cu.reportError(error);
-      },
-      aSubject.innerWindowID);
+      }
+    );
   },
 
   getDeviceButtons: function(audioDevices, videoDevices, aCallID) {
@@ -124,10 +125,7 @@ var WebrtcUI = {
         // if this is a Camera input, convert the name to something readable
         let res = /Camera\ \d+,\ Facing (front|back)/.exec(device.name);
         if (res)
-          return Strings.browser.GetStringFromName("getUserMedia." + aType + "." + res[1] + "Camera");
-
-        if (device.name.startsWith("&") && device.name.endsWith(";"))
-          return Strings.browser.GetStringFromName(device.name.substring(1, device.name.length -1));
+          return Strings.browser.GetStringFromName("getUserMedia." + aType + "." + res[1]);
 
         if (device.name.trim() == "") {
           defaultCount++;
@@ -157,8 +155,7 @@ var WebrtcUI = {
     }
   },
 
-  prompt: function prompt(aContentWindow, aCallID, aAudioRequested,
-                          aVideoRequested, aDevices) {
+  prompt: function prompt(aWindowID, aCallID, aAudioRequested, aVideoRequested, aDevices) {
     let audioDevices = [];
     let videoDevices = [];
     for (let device of aDevices) {
@@ -185,7 +182,8 @@ var WebrtcUI = {
     else
       return;
 
-    let host = aContentWindow.document.documentURIObject.host;
+    let contentWindow = Services.wm.getOuterWindowWithId(aWindowID);
+    let host = contentWindow.document.documentURIObject.host;
     let requestor = BrowserApp.manifest ? "'" + BrowserApp.manifest.name  + "'" : host;
     let message = Strings.browser.formatStringFromName("getUserMedia.share" + requestType + ".message", [ requestor ], 1);
 

@@ -47,17 +47,10 @@ public:
   NS_IMETHOD
   InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
-  virtual nsresult
+  NS_IMETHOD
   AttributeChanged(int32_t         aNameSpaceID,
                    nsIAtom*        aAttribute,
                    int32_t         aModType) MOZ_OVERRIDE;
-
-  virtual bool
-  IsMrowLike() MOZ_OVERRIDE
-  {
-    return mFrames.FirstChild() != mFrames.LastChild() ||
-           !mFrames.FirstChild();
-  }
 
 protected:
   nsMathMLmsqrtFrame(nsStyleContext* aContext);

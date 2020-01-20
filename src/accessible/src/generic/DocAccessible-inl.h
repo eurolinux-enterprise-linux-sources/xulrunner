@@ -11,7 +11,6 @@
 #include "nsAccessibilityService.h"
 #include "NotificationController.h"
 #include "States.h"
-#include "nsIScrollableFrame.h"
 
 #ifdef A11Y_LOG
 #include "Logging.h"
@@ -114,13 +113,6 @@ DocAccessible::MaybeNotifyOfValueChange(Accessible* aAccessible)
   a11y::role role = aAccessible->Role();
   if (role == roles::ENTRY || role == roles::COMBOBOX)
     FireDelayedEvent(nsIAccessibleEvent::EVENT_VALUE_CHANGE, aAccessible);
-}
-
-inline Accessible*
-DocAccessible::GetAccessibleEvenIfNotInMapOrContainer(nsINode* aNode) const
-{
-  Accessible* acc = GetAccessibleEvenIfNotInMap(aNode);
-  return acc ? acc : GetContainerAccessible(aNode);
 }
 
 } // namespace a11y

@@ -52,8 +52,9 @@ notification[type="critical"] {
 }
 
 .messageCloseButton {
-  padding-left: 11px;
-  padding-right: 11px;
+  list-style-image: url("moz-icon://stock/gtk-close?size=menu");
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 /* Popup notification */
@@ -62,14 +63,10 @@ notification[type="critical"] {
   max-width: 24em;
 }
 
-.popup-notification-learnmore-link {
-  margin-top: 1em !important;
-}
-
-.popup-notification-learnmore-link:not([href]) {
-  display: none;
-}
-
 .popup-notification-button-container {
   margin-top: 17px;
+}
+
+.popup-notification-closeitem {
+  list-style-image: url("moz-icon://stock/gtk-close?size=menu");
 }

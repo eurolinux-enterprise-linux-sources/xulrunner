@@ -29,9 +29,12 @@ NS_IMPL_RELEASE_INHERITED(HTMLSharedListElement, Element)
 
 // QueryInterface implementation for nsHTMLSharedListElement
 NS_INTERFACE_MAP_BEGIN(HTMLSharedListElement)
+  NS_HTML_CONTENT_INTERFACES_AMBIGUOUS(nsGenericHTMLElement,
+                                       nsIDOMHTMLOListElement)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLOListElement, ol)
+  NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLDListElement, dl)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLUListElement, ul)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
+NS_ELEMENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLSharedListElement)
@@ -89,9 +92,8 @@ HTMLSharedListElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-void
-HTMLSharedListElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                             nsRuleData* aData)
+static void
+MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(List)) {
     nsCSSValue* listStyleType = aData->ValueForListStyleType();
@@ -143,16 +145,16 @@ HTMLSharedListElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLSharedListElement::WrapNode(JSContext *aCx)
+HTMLSharedListElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   if (mNodeInfo->Equals(nsGkAtoms::ol)) {
-    return HTMLOListElementBinding::Wrap(aCx, this);
+    return HTMLOListElementBinding::Wrap(aCx, aScope, this);
   }
   if (mNodeInfo->Equals(nsGkAtoms::dl)) {
-    return HTMLDListElementBinding::Wrap(aCx, this);
+    return HTMLDListElementBinding::Wrap(aCx, aScope, this);
   }
   MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::ul));
-  return HTMLUListElementBinding::Wrap(aCx, this);
+  return HTMLUListElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

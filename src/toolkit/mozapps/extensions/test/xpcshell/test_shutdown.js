@@ -16,9 +16,7 @@ const IGNORE_PRIVATE = ["AddonAuthor", "AddonCompatibilityOverride",
                         "registerProvider", "unregisterProvider",
                         "addStartupChange", "removeStartupChange",
                         "recordTimestamp", "recordSimpleMeasure",
-                        "recordException", "getSimpleMeasures", "simpleTimer",
-                        "setTelemetryDetails", "getTelemetryDetails",
-                        "callNoUpdateListeners"];
+                        "getSimpleMeasures"];
 
 function test_functions() {
   for (let prop in AddonManager) {

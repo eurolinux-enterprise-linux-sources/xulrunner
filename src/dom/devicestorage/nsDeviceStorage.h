@@ -29,6 +29,7 @@ class nsPIDOMWindow;
 #include "prtime.h"
 #include "DeviceStorage.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/StaticPtr.h"
 
 namespace mozilla {
@@ -50,12 +51,7 @@ enum DeviceStorageRequestType {
     DEVICE_STORAGE_REQUEST_WATCH,
     DEVICE_STORAGE_REQUEST_FREE_SPACE,
     DEVICE_STORAGE_REQUEST_USED_SPACE,
-    DEVICE_STORAGE_REQUEST_AVAILABLE,
-    DEVICE_STORAGE_REQUEST_STATUS,
-    DEVICE_STORAGE_REQUEST_FORMAT,
-    DEVICE_STORAGE_REQUEST_MOUNT,
-    DEVICE_STORAGE_REQUEST_UNMOUNT,
-    DEVICE_STORAGE_REQUEST_CREATEFD
+    DEVICE_STORAGE_REQUEST_AVAILABLE
 };
 
 class DeviceStorageUsedSpaceCache MOZ_FINAL
@@ -79,7 +75,7 @@ public:
 
       NS_IMETHOD Run() MOZ_OVERRIDE
       {
-        nsRefPtr<DeviceStorageUsedSpaceCache::CacheEntry> cacheEntry;
+        mozilla::RefPtr<DeviceStorageUsedSpaceCache::CacheEntry> cacheEntry;
         cacheEntry = mCache->GetCacheEntry(mStorageName);
         if (cacheEntry) {
           cacheEntry->mDirty = true;
@@ -93,8 +89,8 @@ public:
 
   void Invalidate(const nsAString& aStorageName)
   {
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(mIOThread);
+    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+    NS_ASSERTION(mIOThread, "Null mIOThread!");
 
     nsRefPtr<InvalidateRunnable> r = new InvalidateRunnable(this, aStorageName);
     mIOThread->Dispatch(r, NS_DISPATCH_NORMAL);
@@ -102,8 +98,8 @@ public:
 
   void Dispatch(nsIRunnable* aRunnable)
   {
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(mIOThread);
+    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+    NS_ASSERTION(mIOThread, "Null mIOThread!");
 
     mIOThread->Dispatch(aRunnable, NS_DISPATCH_NORMAL);
   }
@@ -119,13 +115,9 @@ public:
 private:
   friend class InvalidateRunnable;
 
-  struct CacheEntry
+  class CacheEntry : public mozilla::RefCounted<CacheEntry> 
   {
-    // Technically, this doesn't need to be threadsafe, but the implementation
-    // of the non-thread safe one causes ASSERTS due to the underlying thread
-    // associated with a LazyIdleThread changing from time to time.
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DeviceStorageUsedSpaceCache::CacheEntry)
-
+  public:
     bool mDirty;
     nsString mStorageName;
     int64_t  mFreeBytes;
@@ -134,9 +126,9 @@ private:
     uint64_t mMusicUsedSize;
     uint64_t mTotalUsedSize;
   };
-  already_AddRefed<CacheEntry> GetCacheEntry(const nsAString& aStorageName);
+  mozilla::TemporaryRef<CacheEntry> GetCacheEntry(const nsAString& aStorageName);
 
-  nsTArray<nsRefPtr<CacheEntry>> mCacheEntries;
+  nsTArray<mozilla::RefPtr<CacheEntry> > mCacheEntries;
 
   nsCOMPtr<nsIThread> mIOThread;
 
@@ -198,7 +190,7 @@ public:
   // DOMCursor
   virtual void Continue(mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
 
-  nsDOMDeviceStorageCursor(nsPIDOMWindow* aWindow,
+  nsDOMDeviceStorageCursor(nsIDOMWindow* aWindow,
                            nsIPrincipal* aPrincipal,
                            DeviceStorageFile* aFile,
                            PRTime aSince);
@@ -208,8 +200,7 @@ public:
   bool mOkToCallContinue;
   PRTime mSince;
 
-  virtual bool Recv__delete__(const bool& allow,
-                              const InfallibleTArray<PermissionChoice>& choices) MOZ_OVERRIDE;
+  virtual bool Recv__delete__(const bool& allow) MOZ_OVERRIDE;
   virtual void IPDLRelease() MOZ_OVERRIDE;
 
   void GetStorageType(nsAString & aType);

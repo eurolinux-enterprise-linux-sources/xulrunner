@@ -64,9 +64,9 @@ public:
 
   virtual void RefreshImpl();
 
-  virtual char16_t GetPasswordCharacterImpl()
+  virtual PRUnichar GetPasswordCharacterImpl()
   {
-    return char16_t('*');
+    return PRUnichar('*');
   }
 
   virtual bool GetEchoPasswordImpl()
@@ -91,7 +91,7 @@ protected:
   virtual nsresult NativeGetColor(ColorID aID, nscolor &aResult) = 0;
   bool IsSpecialColor(ColorID aID, nscolor &aColor);
 
-  static void OnPrefChanged(const char* aPref, void* aClosure);
+  static int OnPrefChanged(const char* aPref, void* aClosure);
 
   static bool sInitialized;
   static nsLookAndFeelIntPref sIntPrefs[];

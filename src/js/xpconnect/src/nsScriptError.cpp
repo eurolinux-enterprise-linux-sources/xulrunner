@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,13 +9,12 @@
  */
 
 #include "xpcprivate.h"
-#include "jsprf.h"
 #include "nsGlobalWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsILoadContext.h"
 #include "nsIDocShell.h"
 
-NS_IMPL_ISUPPORTS(nsScriptError, nsIConsoleMessage, nsIScriptError)
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsScriptError, nsIConsoleMessage, nsIScriptError)
 
 nsScriptError::nsScriptError()
     :  mMessage(),
@@ -37,7 +35,7 @@ nsScriptError::~nsScriptError() {}
 
 // nsIConsoleMessage methods
 NS_IMETHODIMP
-nsScriptError::GetMessageMoz(char16_t **result) {
+nsScriptError::GetMessageMoz(PRUnichar **result) {
     nsresult rv;
 
     nsAutoCString message;
@@ -105,10 +103,7 @@ nsScriptError::Init(const nsAString& message,
                     const char *category)
 {
     return InitWithWindowID(message, sourceName, sourceLine, lineNumber,
-                            columnNumber, flags,
-                            category ? nsDependentCString(category)
-                                     : EmptyCString(),
-                            0);
+                            columnNumber, flags, category, 0);
 }
 
 NS_IMETHODIMP
@@ -118,7 +113,7 @@ nsScriptError::InitWithWindowID(const nsAString& message,
                                 uint32_t lineNumber,
                                 uint32_t columnNumber,
                                 uint32_t flags,
-                                const nsACString& category,
+                                const char *category,
                                 uint64_t aInnerWindowID)
 {
     mMessage.Assign(message);
@@ -127,7 +122,7 @@ nsScriptError::InitWithWindowID(const nsAString& message,
     mSourceLine.Assign(sourceLine);
     mColumnNumber = columnNumber;
     mFlags = flags;
-    mCategory = category;
+    mCategory.Assign(category);
     mTimeStamp = JS_Now() / 1000;
     mInnerWindowID = aInnerWindowID;
 

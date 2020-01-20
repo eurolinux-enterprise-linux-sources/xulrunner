@@ -42,13 +42,8 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-protected:
-  virtual JSObject* GetWrapperPreserveColorInternal() MOZ_OVERRIDE
-  {
-    return nsWrapperCache::GetWrapperPreserveColor();
-  }
-public:
+  virtual JSObject* WrapObject(JSContext* cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // nsIDOMHTMLOptionsCollection interface
   NS_DECL_NSIDOMHTMLOPTIONSCOLLECTION
@@ -127,17 +122,9 @@ public:
                           int32_t aStartIndex, bool aForward,
                           int32_t* aIndex);
 
-  HTMLOptionElement* GetNamedItem(const nsAString& aName)
-  {
-    bool dummy;
-    return NamedGetter(aName, dummy);
-  }
-  HTMLOptionElement* NamedGetter(const nsAString& aName, bool& aFound);
-  virtual Element*
-  GetFirstNamedElement(const nsAString& aName, bool& aFound) MOZ_OVERRIDE
-  {
-    return NamedGetter(aName, aFound);
-  }
+  HTMLOptionElement* GetNamedItem(const nsAString& aName) const;
+  virtual JSObject* NamedItem(JSContext* aCx, const nsAString& aName,
+                              ErrorResult& error) MOZ_OVERRIDE;
 
   void Add(const HTMLOptionOrOptGroupElement& aElement,
            const Nullable<HTMLElementOrLong>& aBefore,
@@ -150,8 +137,7 @@ public:
   {
     aError = SetOption(aIndex, aOption);
   }
-  virtual void GetSupportedNames(unsigned aFlags,
-                                 nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
 
 private:
   /** The list of options (holds strong references).  This is infallible, so

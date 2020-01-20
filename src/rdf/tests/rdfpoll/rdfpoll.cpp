@@ -37,7 +37,6 @@
 #include "plstr.h"
 #include "nsEmbedString.h"
 #include "nsNetCID.h"
-#include "prtime.h"
 
 ////////////////////////////////////////////////////////////////////////
 // CIDs
@@ -70,7 +69,7 @@ Observer::Observer()
 {
 }
 
-NS_IMPL_ISUPPORTS(Observer, nsIRDFObserver)
+NS_IMPL_ISUPPORTS1(Observer, nsIRDFObserver)
 
 static nsresult
 rdf_WriteOp(const char* aOp,

@@ -6,20 +6,11 @@
 #include <dlfcn.h>
 #include <stdio.h>
 
-#include "nsDebug.h"
-#include "mozilla/NullPtr.h"
-
 #include "GStreamerLoader.h"
 
 #define LIBGSTREAMER 0
 #define LIBGSTAPP 1
 #define LIBGSTVIDEO 2
-
-#ifdef __OpenBSD__
-#define LIB_GST_SUFFIX ".so"
-#else
-#define LIB_GST_SUFFIX ".so.0"
-#endif
 
 namespace mozilla {
 
@@ -40,11 +31,6 @@ namespace mozilla {
 GstBuffer * gst_buffer_ref_impl(GstBuffer *buf);
 void gst_buffer_unref_impl(GstBuffer *buf);
 void gst_message_unref_impl(GstMessage *msg);
-void gst_caps_unref_impl(GstCaps *caps);
-
-#if GST_VERSION_MAJOR == 1
-void gst_sample_unref_impl(GstSample *sample);
-#endif
 
 bool
 load_gstreamer()
@@ -58,7 +44,7 @@ load_gstreamer()
     return true;
   }
 
-  void *gstreamerLib = nullptr;
+  void *gstreamerLib = NULL;
   guint major = 0;
   guint minor = 0;
   guint micro, nano;
@@ -71,25 +57,23 @@ load_gstreamer()
   if (major == GST_VERSION_MAJOR && minor == GST_VERSION_MINOR) {
     gstreamerLib = RTLD_DEFAULT;
   } else {
-    gstreamerLib = dlopen("libgstreamer-" GST_API_VERSION LIB_GST_SUFFIX, RTLD_NOW | RTLD_LOCAL);
+    gstreamerLib = dlopen("libgstreamer-0.10.so.0", RTLD_NOW | RTLD_LOCAL);
   }
 
-  void *handles[3] = {
+  void *handles[] = {
     gstreamerLib,
-    dlopen("libgstapp-" GST_API_VERSION LIB_GST_SUFFIX, RTLD_NOW | RTLD_LOCAL),
-    dlopen("libgstvideo-" GST_API_VERSION LIB_GST_SUFFIX, RTLD_NOW | RTLD_LOCAL)
+    dlopen("libgstapp-0.10.so.0", RTLD_NOW | RTLD_LOCAL),
+    dlopen("libgstvideo-0.10.so.0", RTLD_NOW | RTLD_LOCAL)
   };
 
   for (size_t i = 0; i < sizeof(handles) / sizeof(handles[0]); i++) {
     if (!handles[i]) {
-      NS_WARNING("Couldn't link gstreamer libraries");
       goto fail;
     }
   }
 
 #define GST_FUNC(lib, symbol) \
   if (!(symbol = (typeof(symbol))dlsym(handles[lib], #symbol))) { \
-    NS_WARNING("Couldn't link symbol " #symbol); \
     goto fail; \
   }
 #define REPLACE_FUNC(symbol) symbol = symbol##_impl;
@@ -127,20 +111,6 @@ void
 gst_message_unref_impl(GstMessage *msg)
 {
   gst_mini_object_unref(GST_MINI_OBJECT_CAST(msg));
-}
-
-#if GST_VERSION_MAJOR == 1
-void
-gst_sample_unref_impl(GstSample *sample)
-{
-  gst_mini_object_unref(GST_MINI_OBJECT_CAST(sample));
-}
-#endif
-
-void
-gst_caps_unref_impl(GstCaps *caps)
-{
-  gst_mini_object_unref(GST_MINI_OBJECT_CAST(caps));
 }
 
 }

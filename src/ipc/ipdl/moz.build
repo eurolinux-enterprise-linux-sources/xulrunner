@@ -7,10 +7,12 @@
 if CONFIG['MOZ_IPDL_TESTS']:
     DIRS += ['test']
 
-FAIL_ON_WARNINGS = True
+MODULE = 'ipdlgen'
 
-include('/ipc/chromium/chromium-config.mozbuild')
+CPP_SOURCES += [
+    '$(PROTOCOLS:%.ipdl=%.cpp)',
+    '$(PROTOCOLS:%.ipdl=%Child.cpp)',
+    '$(PROTOCOLS:%.ipdl=%Parent.cpp)',
+    '$(PROTOCOLS:%.ipdlh=%.cpp)',
+]
 
-FINAL_LIBRARY = 'xul'
-
-GENERATED_INCLUDES += ['/ipc/ipdl/_ipdlheaders']

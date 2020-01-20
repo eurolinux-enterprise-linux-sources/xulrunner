@@ -7,18 +7,13 @@
 #include <string.h>
 #include "GStreamerReader.h"
 #include "GStreamerMozVideoBuffer.h"
-#include "ImageContainer.h"
 
 namespace mozilla {
 
 static GstMozVideoBuffer *gst_moz_video_buffer_copy(GstMozVideoBuffer* self);
 static void gst_moz_video_buffer_finalize(GstMozVideoBuffer* self);
 
-// working around GTK+ bug https://bugzilla.gnome.org/show_bug.cgi?id=723899
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
 G_DEFINE_TYPE(GstMozVideoBuffer, gst_moz_video_buffer, GST_TYPE_BUFFER);
-#pragma GCC diagnostic pop
 
 static void
 gst_moz_video_buffer_class_init(GstMozVideoBufferClass* klass)
@@ -53,7 +48,7 @@ gst_moz_video_buffer_copy(GstMozVideoBuffer* self)
 {
   GstMozVideoBuffer* copy;
 
-  g_return_val_if_fail(GST_IS_MOZ_VIDEO_BUFFER(self), nullptr);
+  g_return_val_if_fail(GST_IS_MOZ_VIDEO_BUFFER(self), NULL);
 
   copy = gst_moz_video_buffer_new();
 
@@ -99,7 +94,7 @@ gst_moz_video_buffer_set_data(GstMozVideoBuffer* self, GstMozVideoBufferData* da
 GstMozVideoBufferData*
 gst_moz_video_buffer_get_data(const GstMozVideoBuffer* self)
 {
-  g_return_val_if_fail(GST_IS_MOZ_VIDEO_BUFFER(self), nullptr);
+  g_return_val_if_fail(GST_IS_MOZ_VIDEO_BUFFER(self), NULL);
 
   return self->data;
 }

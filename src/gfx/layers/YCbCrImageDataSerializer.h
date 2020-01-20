@@ -6,18 +6,16 @@
 #ifndef MOZILLA_LAYERS_BLOBYCBCRSURFACE_H
 #define MOZILLA_LAYERS_BLOBYCBCRSURFACE_H
 
-#include <stddef.h>                     // for size_t
-#include <stdint.h>                     // for uint8_t, uint32_t
-#include "ImageTypes.h"                 // for StereoMode
-#include "mozilla/Attributes.h"         // for MOZ_STACK_CLASS
-#include "mozilla/RefPtr.h"             // for TemporaryRef
-#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/DebugOnly.h"
+
+#include "base/basictypes.h"
+#include "Shmem.h"
+#include "gfxPoint.h"
 
 namespace mozilla {
-namespace gfx {
-class DataSourceSurface;
+namespace ipc {
+  class Shmem;
 }
-
 namespace layers {
 
 class Image;
@@ -30,7 +28,7 @@ class Image;
 class YCbCrImageDataDeserializerBase
 {
 public:
-  bool IsValid() const { return mIsValid; }
+  bool IsValid();
 
   /**
    * Returns the Y channel data pointer.
@@ -57,48 +55,22 @@ public:
   /**
    * Returns the dimensions of the Y Channel.
    */
-  gfx::IntSize GetYSize();
+  gfxIntSize GetYSize();
 
   /**
    * Returns the dimensions of the Cb and Cr Channel.
    */
-  gfx::IntSize GetCbCrSize();
-
-  /**
-   * Stereo mode for the image.
-   */
-  StereoMode GetStereoMode();
+  gfxIntSize GetCbCrSize();
 
   /**
    * Return a pointer to the begining of the data buffer.
    */
   uint8_t* GetData();
-
-  /**
-   * This function is meant as a helper to know how much shared memory we need
-   * to allocate in a shmem in order to place a shared YCbCr image blob of
-   * given dimensions.
-   */
-  static size_t ComputeMinBufferSize(const gfx::IntSize& aYSize,
-                                     uint32_t aYStride,
-                                     const gfx::IntSize& aCbCrSize,
-                                     uint32_t aCbCrStride);
-  static size_t ComputeMinBufferSize(const gfx::IntSize& aYSize,
-                                     const gfx::IntSize& aCbCrSize);
-  static size_t ComputeMinBufferSize(uint32_t aSize);
-
 protected:
-  YCbCrImageDataDeserializerBase(uint8_t* aData, size_t aDataSize)
-    : mData (aData)
-    , mDataSize(aDataSize)
-    , mIsValid(false)
-  {}
-
-  void Validate();
+  YCbCrImageDataDeserializerBase(uint8_t* aData)
+  : mData (aData) {}
 
   uint8_t* mData;
-  size_t mDataSize;
-  bool mIsValid;
 };
 
 /**
@@ -116,38 +88,33 @@ protected:
 class MOZ_STACK_CLASS YCbCrImageDataSerializer : public YCbCrImageDataDeserializerBase
 {
 public:
-  YCbCrImageDataSerializer(uint8_t* aData, size_t aDataSize)
-    : YCbCrImageDataDeserializerBase(aData, aDataSize)
-  {
-    // a serializer needs to be usable before correct buffer info has been written to it
-    mIsValid = !!mData;
-  }
+  YCbCrImageDataSerializer(uint8_t* aData) : YCbCrImageDataDeserializerBase(aData) {}
+
+  /**
+   * This function is meant as a helper to know how much shared memory we need
+   * to allocate in a shmem in order to place a shared YCbCr image blob of
+   * given dimensions.
+   */
+  static size_t ComputeMinBufferSize(const gfx::IntSize& aYSize,
+                                     const gfx::IntSize& aCbCrSize);
+  static size_t ComputeMinBufferSize(const gfxIntSize& aYSize,
+                                     const gfxIntSize& aCbCrSize);
+  static size_t ComputeMinBufferSize(uint32_t aSize);
 
   /**
    * Write the image informations in the buffer for given dimensions.
    * The provided pointer should point to the beginning of the (chunk of)
    * buffer on which we want to store the image.
    */
-  void InitializeBufferInfo(uint32_t aYOffset,
-                            uint32_t aCbOffset,
-                            uint32_t aCrOffset,
-                            uint32_t aYStride,
-                            uint32_t aCbCrStride,
-                            const gfx::IntSize& aYSize,
-                            const gfx::IntSize& aCbCrSize,
-                            StereoMode aStereoMode);
-  void InitializeBufferInfo(uint32_t aYStride,
-                            uint32_t aCbCrStride,
-                            const gfx::IntSize& aYSize,
-                            const gfx::IntSize& aCbCrSize,
-                            StereoMode aStereoMode);
   void InitializeBufferInfo(const gfx::IntSize& aYSize,
-                            const gfx::IntSize& aCbCrSize,
-                            StereoMode aStereoMode);
+                            const gfx::IntSize& aCbCrSize);
+  void InitializeBufferInfo(const gfxIntSize& aYSize,
+                            const gfxIntSize& aCbCrSize);
+
   bool CopyData(const uint8_t* aYData,
                 const uint8_t* aCbData, const uint8_t* aCrData,
-                gfx::IntSize aYSize, uint32_t aYStride,
-                gfx::IntSize aCbCrSize, uint32_t aCbCrStride,
+                gfxIntSize aYSize, uint32_t aYStride,
+                gfxIntSize aCbCrSize, uint32_t aCbCrStride,
                 uint32_t aYSkip, uint32_t aCbCrSkip);
 };
 
@@ -166,18 +133,7 @@ public:
 class MOZ_STACK_CLASS YCbCrImageDataDeserializer : public YCbCrImageDataDeserializerBase
 {
 public:
-  YCbCrImageDataDeserializer(uint8_t* aData, size_t aDataSize)
-    : YCbCrImageDataDeserializerBase(aData, aDataSize)
-  {
-    Validate();
-  }
-
-  /**
-   * Convert the YCbCr data into RGB and return a DataSourceSurface.
-   * This is a costly operation, so use it only when YCbCr compositing is
-   * not supported.
-   */
-  TemporaryRef<gfx::DataSourceSurface> ToDataSourceSurface();
+  YCbCrImageDataDeserializer(uint8_t* aData) : YCbCrImageDataDeserializerBase(aData) {}
 };
 
 } // namespace

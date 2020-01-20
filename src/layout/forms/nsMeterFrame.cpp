@@ -5,10 +5,11 @@
 
 #include "nsMeterFrame.h"
 
+#include "nsIDOMHTMLMeterElement.h"
 #include "nsIContent.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsNodeInfoManager.h"
@@ -17,15 +18,11 @@
 #include "nsContentUtils.h"
 #include "nsFormControlFrame.h"
 #include "nsFontMetrics.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/dom/HTMLMeterElement.h"
 #include "nsContentList.h"
-#include "nsStyleSet.h"
-#include "nsThemeConstants.h"
+#include "mozilla/dom/Element.h"
+#include "nsContentList.h"
 #include <algorithm>
 
-using mozilla::dom::Element;
-using mozilla::dom::HTMLMeterElement;
 
 nsIFrame*
 NS_NewMeterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -62,14 +59,22 @@ nsMeterFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   // Get the NodeInfoManager and tag necessary to create the meter bar div.
   nsCOMPtr<nsIDocument> doc = mContent->GetDocument();
 
+  nsCOMPtr<nsINodeInfo> nodeInfo;
+  nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::div, nullptr,
+                                                 kNameSpaceID_XHTML,
+                                                 nsIDOMNode::ELEMENT_NODE);
+  NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
+
   // Create the div.
-  mBarDiv = doc->CreateHTMLElement(nsGkAtoms::div);
+  nsresult rv = NS_NewHTMLElement(getter_AddRefs(mBarDiv), nodeInfo.forget(),
+                                  mozilla::dom::NOT_FROM_PARSER);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   // Associate ::-moz-meter-bar pseudo-element to the anonymous child.
   nsCSSPseudoElements::Type pseudoType = nsCSSPseudoElements::ePseudo_mozMeterBar;
   nsRefPtr<nsStyleContext> newStyleContext = PresContext()->StyleSet()->
     ResolvePseudoElementStyle(mContent->AsElement(), pseudoType,
-                              StyleContext(), mBarDiv->AsElement());
+                              StyleContext());
 
   if (!aElements.AppendElement(ContentInfo(mBarDiv, newStyleContext))) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -91,7 +96,7 @@ NS_QUERYFRAME_HEAD(nsMeterFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 
-nsresult nsMeterFrame::Reflow(nsPresContext*           aPresContext,
+NS_IMETHODIMP nsMeterFrame::Reflow(nsPresContext*           aPresContext,
                                    nsHTMLReflowMetrics&     aDesiredSize,
                                    const nsHTMLReflowState& aReflowState,
                                    nsReflowStatus&          aStatus)
@@ -113,10 +118,10 @@ nsresult nsMeterFrame::Reflow(nsPresContext*           aPresContext,
 
   ReflowBarFrame(barFrame, aPresContext, aReflowState, aStatus);
 
-  aDesiredSize.Width() = aReflowState.ComputedWidth() +
-                       aReflowState.ComputedPhysicalBorderPadding().LeftRight();
-  aDesiredSize.Height() = aReflowState.ComputedHeight() +
-                        aReflowState.ComputedPhysicalBorderPadding().TopBottom();
+  aDesiredSize.width = aReflowState.ComputedWidth() +
+                       aReflowState.mComputedBorderPadding.LeftRight();
+  aDesiredSize.height = aReflowState.ComputedHeight() +
+                        aReflowState.mComputedBorderPadding.TopBottom();
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   ConsiderChildOverflow(aDesiredSize.mOverflowAreas, barFrame);
@@ -141,17 +146,19 @@ nsMeterFrame::ReflowBarFrame(nsIFrame*                aBarFrame,
                                        NS_UNCONSTRAINEDSIZE));
   nscoord size = vertical ? aReflowState.ComputedHeight()
                           : aReflowState.ComputedWidth();
-  nscoord xoffset = aReflowState.ComputedPhysicalBorderPadding().left;
-  nscoord yoffset = aReflowState.ComputedPhysicalBorderPadding().top;
+  nscoord xoffset = aReflowState.mComputedBorderPadding.left;
+  nscoord yoffset = aReflowState.mComputedBorderPadding.top;
 
   // NOTE: Introduce a new function getPosition in the content part ?
-  HTMLMeterElement* meterElement = static_cast<HTMLMeterElement*>(mContent);
+  double position, max, min, value;
+  nsCOMPtr<nsIDOMHTMLMeterElement> meterElement =
+    do_QueryInterface(mContent);
 
-  double max = meterElement->Max();
-  double min = meterElement->Min();
-  double value = meterElement->Value();
+  meterElement->GetMax(&max);
+  meterElement->GetMin(&min);
+  meterElement->GetValue(&value);
 
-  double position = max - min;
+  position = max - min;
   position = position != 0 ? (value - min) / position : 1;
 
   size = NSToCoordRound(size * position);
@@ -165,28 +172,28 @@ nsMeterFrame::ReflowBarFrame(nsIFrame*                aBarFrame,
     // We want the bar to begin at the bottom.
     yoffset += aReflowState.ComputedHeight() - size;
 
-    size -= reflowState.ComputedPhysicalMargin().TopBottom() +
-            reflowState.ComputedPhysicalBorderPadding().TopBottom();
+    size -= reflowState.mComputedMargin.TopBottom() +
+            reflowState.mComputedBorderPadding.TopBottom();
     size = std::max(size, 0);
     reflowState.SetComputedHeight(size);
   } else {
-    size -= reflowState.ComputedPhysicalMargin().LeftRight() +
-            reflowState.ComputedPhysicalBorderPadding().LeftRight();
+    size -= reflowState.mComputedMargin.LeftRight() +
+            reflowState.mComputedBorderPadding.LeftRight();
     size = std::max(size, 0);
     reflowState.SetComputedWidth(size);
   }
 
-  xoffset += reflowState.ComputedPhysicalMargin().left;
-  yoffset += reflowState.ComputedPhysicalMargin().top;
+  xoffset += reflowState.mComputedMargin.left;
+  yoffset += reflowState.mComputedMargin.top;
 
-  nsHTMLReflowMetrics barDesiredSize(reflowState);
+  nsHTMLReflowMetrics barDesiredSize;
   ReflowChild(aBarFrame, aPresContext, barDesiredSize, reflowState, xoffset,
               yoffset, 0, aStatus);
-  FinishReflowChild(aBarFrame, aPresContext, barDesiredSize, &reflowState,
+  FinishReflowChild(aBarFrame, aPresContext, &reflowState, barDesiredSize,
                     xoffset, yoffset, 0);
 }
 
-nsresult
+NS_IMETHODIMP
 nsMeterFrame::AttributeChanged(int32_t  aNameSpaceID,
                                nsIAtom* aAttribute,
                                int32_t  aModType)
@@ -271,12 +278,3 @@ nsMeterFrame::ShouldUseNativeStyle() const
                                                  NS_AUTHOR_SPECIFIED_BORDER | NS_AUTHOR_SPECIFIED_BACKGROUND);
 }
 
-Element*
-nsMeterFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
-{
-  if (aType == nsCSSPseudoElements::ePseudo_mozMeterBar) {
-    return mBarDiv;
-  }
-
-  return nsContainerFrame::GetPseudoElement(aType);
-}

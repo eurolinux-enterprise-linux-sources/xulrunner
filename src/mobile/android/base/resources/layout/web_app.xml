@@ -53,8 +53,4 @@
 
     </RelativeLayout>
 
-    <ViewStub android:id="@+id/toast_stub"
-              android:layout="@layout/button_toast"
-              style="@style/Toast"/>
-
 </RelativeLayout>

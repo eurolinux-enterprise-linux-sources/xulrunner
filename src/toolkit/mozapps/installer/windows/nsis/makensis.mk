@@ -8,14 +8,13 @@ endif
 
 include $(MOZILLA_DIR)/toolkit/mozapps/installer/signing.mk
 
-ABS_CONFIG_DIR := $(abspath $(CONFIG_DIR))
+ABS_CONFIG_DIR := $(shell pwd)/$(CONFIG_DIR)
 
 SFX_MODULE ?= $(error SFX_MODULE is not defined)
 
 TOOLKIT_NSIS_FILES = \
 	common.nsh \
 	locale.nlf \
-	locale-fonts.nsh \
 	locale-rtl.nlf \
 	locales.nsi \
 	overrides.nsh \

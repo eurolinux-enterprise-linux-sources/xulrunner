@@ -23,11 +23,22 @@
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/NullPtr.h"
-#include "mozilla/Move.h"
 
-#include "nsDebug.h" // for |NS_ABORT_IF_FALSE|, |NS_ASSERTION|
-#include "nsISupportsUtils.h" // for |nsresult|, |NS_ADDREF|, |NS_GET_TEMPLATE_IID| et al
-#include "nscore.h" // for |NS_COM_GLUE|
+  // Wrapping includes can speed up compiles (see "Large Scale C++ Software Design")
+#ifndef nsDebug_h___
+#include "nsDebug.h"
+  // for |NS_ABORT_IF_FALSE|, |NS_ASSERTION|
+#endif
+
+#ifndef nsISupportsUtils_h__
+#include "nsISupportsUtils.h"
+  // for |nsresult|, |NS_ADDREF|, |NS_GET_TEMPLATE_IID| et al
+#endif
+
+#ifndef nscore_h___
+#include "nscore.h"
+  // for |NS_COM_GLUE|
+#endif
 
 #include "nsCycleCollectionNoteChild.h"
 
@@ -58,6 +69,16 @@
 //#define NSCAP_FEATURE_TEST_NONNULL_QUERY_SUCCEEDS
 #endif
 
+  /*
+    |...TEST_DONTQUERY_CASES| and |...DEBUG_PTR_TYPES| introduce some code that is 
+    problematic on a select few of our platforms, e.g., QNX.  Therefore, I'm providing
+    a mechanism by which these features can be explicitly disabled from the command-line.
+  */
+
+#ifdef NSCAP_DISABLE_TEST_DONTQUERY_CASES
+  #undef NSCAP_FEATURE_TEST_DONTQUERY_CASES
+#endif
+
 #ifdef __GNUC__
   // Our use of nsCOMPtr_base::mRawPtr violates the C++ standard's aliasing
   // rules. Mark it with the may_alias attribute so that gcc 3.3 and higher
@@ -78,7 +99,7 @@
     The following three macros (|NSCAP_ADDREF|, |NSCAP_RELEASE|, and |NSCAP_LOG_ASSIGNMENT|)
       allow external clients the ability to add logging or other interesting debug facilities.
       In fact, if you want |nsCOMPtr| to participate in the standard logging facility, you
-      provide (e.g., in "nsISupportsImpl.h") suitable definitions
+      provide (e.g., in "nsTraceRefcnt.h") suitable definitions
 
         #define NSCAP_ADDREF(this, ptr)         NS_ADDREF(ptr)
         #define NSCAP_RELEASE(this, ptr)        NS_RELEASE(ptr)
@@ -107,12 +128,6 @@
   #define NSCAP_LOG_RELEASE(this, ptr)
 #endif
 
-namespace mozilla {
-
-struct unused_t;
-
-} // namespace mozilla
-
 template <class T>
 struct already_AddRefed
     /*
@@ -131,56 +146,24 @@ struct already_AddRefed
       |nsCOMPtr_helper|.
     */
   {
-    /*
-     * Prohibit all one-argument overloads but already_AddRefed(T*) and
-     * already_AddRefed(decltype(nullptr)), and funnel the nullptr case through
-     * the T* constructor.
-     */
-    template<typename N>
-    already_AddRefed(N,
-                     typename mozilla::EnableIf<mozilla::IsNullPointer<N>::value,
-                                                int>::Type dummy = 0)
+#ifdef MOZ_HAVE_CXX11_NULLPTR
+    /* We use decltype(nullptr) instead of std::nullptr_t because the standard
+     * library might be old, and to save including <cstddef>.  All compilers
+     * that support nullptr seem to support decltype. */
+    already_AddRefed(decltype(nullptr) aNullPtr)
       : mRawPtr(nullptr)
     {
-      // nothing else to do here
     }
 
+    explicit
+#endif
     already_AddRefed( T* aRawPtr )
-      : mRawPtr(aRawPtr)
-    {
-      // nothing else to do here
-    }
+        : mRawPtr(aRawPtr)
+      {
+        // nothing else to do here
+      }
 
-    // Disallowed.  Use move semantics instead.
-    already_AddRefed(const already_AddRefed<T>& aOther) MOZ_DELETE;
-
-    already_AddRefed(already_AddRefed<T>&& aOther)
-      : mRawPtr(aOther.take())
-    {
-      // nothing else to do here
-    }
-
-    ~already_AddRefed()
-    {
-      MOZ_ASSERT(!mRawPtr);
-    }
-
-    // Specialize the unused operator<< for already_AddRefed, to allow
-    // nsCOMPtr<nsIFoo> foo;
-    // unused << foo.forget();
-    friend void operator<<(const mozilla::unused_t& unused,
-                           const already_AddRefed<T>& rhs)
-    {
-      auto mutableAlreadyAddRefed = const_cast<already_AddRefed<T>*>(&rhs);
-      unused << mutableAlreadyAddRefed->take();
-    }
-
-    MOZ_WARN_UNUSED_RESULT T* take()
-    {
-      T* rawPtr = mRawPtr;
-      mRawPtr = nullptr;
-      return rawPtr;
-    }
+    T* get() const { return mRawPtr; }
 
     /**
      * This helper is useful in cases like
@@ -201,7 +184,7 @@ struct already_AddRefed
     operator already_AddRefed<U>()
     {
       U* tmp = mRawPtr;
-      mRawPtr = nullptr;
+      mRawPtr = NULL;
       return already_AddRefed<U>(tmp);
     }
 
@@ -231,13 +214,32 @@ struct already_AddRefed
       return already_AddRefed<U>(tmp);
     }
 
-  private:
     T* mRawPtr;
   };
 
 template <class T>
 inline
-already_AddRefed<T>
+const already_AddRefed<T>
+getter_AddRefs( T* aRawPtr )
+    /*
+      ...makes typing easier, because it deduces the template type, e.g., 
+      you write |dont_AddRef(fooP)| instead of |already_AddRefed<IFoo>(fooP)|.
+    */
+  {
+    return already_AddRefed<T>(aRawPtr);
+  }
+
+template <class T>
+inline
+const already_AddRefed<T>
+getter_AddRefs( const already_AddRefed<T> aAlreadyAddRefedPtr )
+  {
+    return aAlreadyAddRefedPtr;
+  }
+
+template <class T>
+inline
+const already_AddRefed<T>
 dont_AddRef( T* aRawPtr )
   {
     return already_AddRefed<T>(aRawPtr);
@@ -245,10 +247,10 @@ dont_AddRef( T* aRawPtr )
 
 template <class T>
 inline
-already_AddRefed<T>&&
-dont_AddRef( already_AddRefed<T>&& aAlreadyAddRefedPtr )
+const already_AddRefed<T>
+dont_AddRef( const already_AddRefed<T> aAlreadyAddRefedPtr )
   {
-    return mozilla::Move(aAlreadyAddRefedPtr);
+    return aAlreadyAddRefedPtr;
   }
 
 
@@ -578,43 +580,23 @@ class nsCOMPtr MOZ_FINAL
           NSCAP_ASSERT_NO_QUERY_NEEDED();
         }
 
-      nsCOMPtr( already_AddRefed<T>& aSmartPtr )
-            : NSCAP_CTOR_BASE(aSmartPtr.take())
-          // construct from |already_AddRefed|
+      nsCOMPtr( const already_AddRefed<T>& aSmartPtr )
+            : NSCAP_CTOR_BASE(aSmartPtr.mRawPtr)
+          // construct from |dont_AddRef(expr)|
         {
-          NSCAP_LOG_ASSIGNMENT(this, mRawPtr);
-          NSCAP_ASSERT_NO_QUERY_NEEDED();
-        }
-
-      nsCOMPtr( already_AddRefed<T>&& aSmartPtr )
-            : NSCAP_CTOR_BASE(aSmartPtr.take())
-          // construct from |otherComPtr.forget()|
-        {
-          NSCAP_LOG_ASSIGNMENT(this, mRawPtr);
+          NSCAP_LOG_ASSIGNMENT(this, aSmartPtr.mRawPtr);
           NSCAP_ASSERT_NO_QUERY_NEEDED();
         }
 
       template<typename U>
-      nsCOMPtr( already_AddRefed<U>& aSmartPtr )
-            : NSCAP_CTOR_BASE(static_cast<T*>(aSmartPtr.take()))
-          // construct from |already_AddRefed|
+      nsCOMPtr( const already_AddRefed<U>& aSmartPtr )
+            : NSCAP_CTOR_BASE(static_cast<T*>(aSmartPtr.mRawPtr))
+          // construct from |dont_AddRef(expr)|
         {
           // But make sure that U actually inherits from T
-          static_assert(mozilla::IsBaseOf<T, U>::value,
-                        "U is not a subclass of T");
-          NSCAP_LOG_ASSIGNMENT(this, static_cast<T*>(mRawPtr));
-          NSCAP_ASSERT_NO_QUERY_NEEDED();
-        }
-
-      template<typename U>
-      nsCOMPtr( already_AddRefed<U>&& aSmartPtr )
-            : NSCAP_CTOR_BASE(static_cast<T*>(aSmartPtr.take()))
-          // construct from |otherComPtr.forget()|
-        {
-          // But make sure that U actually inherits from T
-          static_assert(mozilla::IsBaseOf<T, U>::value,
-                        "U is not a subclass of T");
-          NSCAP_LOG_ASSIGNMENT(this, static_cast<T*>(mRawPtr));
+          MOZ_STATIC_ASSERT((mozilla::IsBaseOf<T, U>::value),
+                            "U is not a subclass of T");
+          NSCAP_LOG_ASSIGNMENT(this, static_cast<T*>(aSmartPtr.mRawPtr));
           NSCAP_ASSERT_NO_QUERY_NEEDED();
         }
 
@@ -698,26 +680,13 @@ class nsCOMPtr MOZ_FINAL
 
       template<typename U>
       nsCOMPtr<T>&
-      operator=( already_AddRefed<U>& rhs )
-          // assign from |already_AddRefed|
+      operator=( const already_AddRefed<U>& rhs )
+          // assign from |dont_AddRef(expr)|
         {
           // Make sure that U actually inherits from T
-          static_assert(mozilla::IsBaseOf<T, U>::value,
-                        "U is not a subclass of T");
-          assign_assuming_AddRef(static_cast<T*>(rhs.take()));
-          NSCAP_ASSERT_NO_QUERY_NEEDED();
-          return *this;
-        }
-
-      template<typename U>
-      nsCOMPtr<T>&
-      operator=( already_AddRefed<U>&& rhs )
-          // assign from |otherComPtr.forget()|
-        {
-          // Make sure that U actually inherits from T
-          static_assert(mozilla::IsBaseOf<T, U>::value,
-                        "U is not a subclass of T");
-          assign_assuming_AddRef(static_cast<T*>(rhs.take()));
+          MOZ_STATIC_ASSERT((mozilla::IsBaseOf<T, U>::value),
+                            "U is not a subclass of T");
+          assign_assuming_AddRef(static_cast<T*>(rhs.mRawPtr));
           NSCAP_ASSERT_NO_QUERY_NEEDED();
           return *this;
         }
@@ -952,18 +921,11 @@ class nsCOMPtr<nsISupports>
           NSCAP_LOG_ASSIGNMENT(this, aRawPtr);
         }
 
-      nsCOMPtr( already_AddRefed<nsISupports>& aSmartPtr )
-            : nsCOMPtr_base(aSmartPtr.take())
-          // construct from |already_AddRefed|
+      nsCOMPtr( const already_AddRefed<nsISupports>& aSmartPtr )
+            : nsCOMPtr_base(aSmartPtr.mRawPtr)
+          // construct from |dont_AddRef(expr)|
         {
-          NSCAP_LOG_ASSIGNMENT(this, mRawPtr);
-        }
-
-      nsCOMPtr( already_AddRefed<nsISupports>&& aSmartPtr )
-            : nsCOMPtr_base(aSmartPtr.take())
-          // construct from |otherComPtr.forget()|
-        {
-          NSCAP_LOG_ASSIGNMENT(this, mRawPtr);
+          NSCAP_LOG_ASSIGNMENT(this, aSmartPtr.mRawPtr);
         }
 
       nsCOMPtr( const nsQueryInterface qi )
@@ -1043,18 +1005,10 @@ class nsCOMPtr<nsISupports>
         }
 
       nsCOMPtr<nsISupports>&
-      operator=( already_AddRefed<nsISupports>& rhs )
-          // assign from |already_AddRefed|
+      operator=( const already_AddRefed<nsISupports>& rhs )
+          // assign from |dont_AddRef(expr)|
         {
-          assign_assuming_AddRef(rhs.take());
-          return *this;
-        }
-
-      nsCOMPtr<nsISupports>&
-      operator=( already_AddRefed<nsISupports>&& rhs )
-          // assign from |otherComPtr.forget()|
-        {
-          assign_assuming_AddRef(rhs.take());
+          assign_assuming_AddRef(rhs.mRawPtr);
           return *this;
         }
 
@@ -1399,6 +1353,12 @@ class nsGetterAddRefs
         {
           return reinterpret_cast<void**>(mTargetSmartPtr.StartAssignment());
         }
+
+      operator nsISupports**()
+        {
+          return reinterpret_cast<nsISupports**>(mTargetSmartPtr.StartAssignment());
+        }
+
       operator T**()
         {
           return mTargetSmartPtr.StartAssignment();

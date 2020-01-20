@@ -8,8 +8,8 @@
 #define dom_plugins_PluginScriptableObjectParent_h 1
 
 #include "mozilla/plugins/PPluginScriptableObjectParent.h"
-#include "mozilla/plugins/PluginMessageUtils.h"
 
+#include "jsapi.h"
 #include "npfunctions.h"
 #include "npruntime.h"
 
@@ -23,7 +23,7 @@ class PPluginIdentifierParent;
 struct ParentNPObject : NPObject
 {
   ParentNPObject()
-    : NPObject(), parent(nullptr), invalidated(false) { }
+    : NPObject(), parent(NULL), invalidated(false) { }
 
   // |parent| is always valid as long as the actor is alive. Once the actor is
   // destroyed this will be set to null.
@@ -47,56 +47,56 @@ public:
 
   virtual bool
   AnswerHasMethod(PPluginIdentifierParent* aId,
-                  bool* aHasMethod) MOZ_OVERRIDE;
+                  bool* aHasMethod);
 
   virtual bool
   AnswerInvoke(PPluginIdentifierParent* aId,
                const InfallibleTArray<Variant>& aArgs,
                Variant* aResult,
-               bool* aSuccess) MOZ_OVERRIDE;
+               bool* aSuccess);
 
   virtual bool
   AnswerInvokeDefault(const InfallibleTArray<Variant>& aArgs,
                       Variant* aResult,
-                      bool* aSuccess) MOZ_OVERRIDE;
+                      bool* aSuccess);
 
   virtual bool
   AnswerHasProperty(PPluginIdentifierParent* aId,
-                    bool* aHasProperty) MOZ_OVERRIDE;
+                    bool* aHasProperty);
 
   virtual bool
   AnswerGetParentProperty(PPluginIdentifierParent* aId,
                           Variant* aResult,
-                          bool* aSuccess) MOZ_OVERRIDE;
+                          bool* aSuccess);
 
   virtual bool
   AnswerSetProperty(PPluginIdentifierParent* aId,
                     const Variant& aValue,
-                    bool* aSuccess) MOZ_OVERRIDE;
+                    bool* aSuccess);
 
   virtual bool
   AnswerRemoveProperty(PPluginIdentifierParent* aId,
-                       bool* aSuccess) MOZ_OVERRIDE;
+                       bool* aSuccess);
 
   virtual bool
   AnswerEnumerate(InfallibleTArray<PPluginIdentifierParent*>* aProperties,
-                  bool* aSuccess) MOZ_OVERRIDE;
+                  bool* aSuccess);
 
   virtual bool
   AnswerConstruct(const InfallibleTArray<Variant>& aArgs,
                   Variant* aResult,
-                  bool* aSuccess) MOZ_OVERRIDE;
+                  bool* aSuccess);
 
   virtual bool
   AnswerNPN_Evaluate(const nsCString& aScript,
                      Variant* aResult,
-                     bool* aSuccess) MOZ_OVERRIDE;
+                     bool* aSuccess);
 
   virtual bool
-  RecvProtect() MOZ_OVERRIDE;
+  RecvProtect();
 
   virtual bool
-  RecvUnprotect() MOZ_OVERRIDE;
+  RecvUnprotect();
 
   static const NPClass*
   GetClass()
@@ -137,10 +137,10 @@ public:
     return mType;
   }
 
-  bool GetPropertyHelper(NPIdentifier aName,
-                         bool* aHasProperty,
-                         bool* aHasMethod,
-                         NPVariant* aResult);
+  JSBool GetPropertyHelper(NPIdentifier aName,
+                           bool* aHasProperty,
+                           bool* aHasMethod,
+                           NPVariant* aResult);
 
 private:
   static NPObject*

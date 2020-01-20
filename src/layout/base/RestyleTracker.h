@@ -8,17 +8,19 @@
  * of what nodes restyles need to happen on and so forth.
  */
 
-#ifndef mozilla_RestyleTracker_h
-#define mozilla_RestyleTracker_h
+#ifndef mozilla_css_RestyleTracker_h
+#define mozilla_css_RestyleTracker_h
 
 #include "mozilla/dom/Element.h"
 #include "nsDataHashtable.h"
 #include "nsIFrame.h"
+#include "nsTPriorityQueue.h"
 #include "mozilla/SplayTree.h"
 
-namespace mozilla {
+class nsCSSFrameConstructor;
 
-class RestyleManager;
+namespace mozilla {
+namespace css {
 
 /** 
  * Helper class that collects a list of frames that need
@@ -28,30 +30,6 @@ class RestyleManager;
 class OverflowChangedTracker
 {
 public:
-  enum ChangeKind {
-    /**
-     * The frame was explicitly added as a result of
-     * nsChangeHint_UpdatePostTransformOverflow and hence may have had a style
-     * change that changes its geometry relative to parent, without reflowing.
-     */
-    TRANSFORM_CHANGED,
-    /**
-     * The overflow areas of children have changed
-     * and we need to call UpdateOverflow on the frame.
-     */
-    CHILDREN_CHANGED,
-    /**
-     * The overflow areas of children have changed
-     * and we need to call UpdateOverflow on the frame.
-     * Also call UpdateOverflow on the parent even if the
-     * overflow areas of the frame does not change.
-     */
-    CHILDREN_AND_PARENT_CHANGED
-  };
-
-  OverflowChangedTracker() :
-    mSubtreeRoot(nullptr)
-  {}
 
   ~OverflowChangedTracker()
   {
@@ -69,18 +47,11 @@ public:
    * If the overflow area changes, then UpdateOverflow will also
    * be called on the parent.
    */
-  void AddFrame(nsIFrame* aFrame, ChangeKind aChangeKind) {
+  void AddFrame(nsIFrame* aFrame) {
     uint32_t depth = aFrame->GetDepthInFrameTree();
-    Entry *entry = nullptr;
-    if (!mEntryList.empty()) {
-      entry = mEntryList.find(Entry(aFrame, depth));
-    }
-    if (entry == nullptr) {
-      // Add new entry.
-      mEntryList.insert(new Entry(aFrame, depth, aChangeKind));
-    } else {
-      // Update the existing entry if the new value is stronger.
-      entry->mChangeKind = std::max(entry->mChangeKind, aChangeKind);
+    if (mEntryList.empty() ||
+        !mEntryList.contains(Entry(aFrame, depth, true))) {
+      mEntryList.insert(new Entry(aFrame, depth, true));
     }
   }
 
@@ -93,18 +64,9 @@ public:
     }
 
     uint32_t depth = aFrame->GetDepthInFrameTree();
-    if (mEntryList.find(Entry(aFrame, depth))) {
-      delete mEntryList.remove(Entry(aFrame, depth));
+    if (mEntryList.contains(Entry(aFrame, depth, false))) {
+      delete mEntryList.remove(Entry(aFrame, depth, false));
     }
-  }
-
-  /**
-   * Set the subtree root to limit overflow updates. This must be set if and
-   * only if currently reflowing aSubtreeRoot, to ensure overflow changes will
-   * still propagate correctly.
-   */
-  void SetSubtreeRoot(const nsIFrame* aSubtreeRoot) {
-    mSubtreeRoot = aSubtreeRoot;
   }
 
   /**
@@ -116,59 +78,33 @@ public:
   void Flush() {
     while (!mEntryList.empty()) {
       Entry *entry = mEntryList.removeMin();
+
       nsIFrame *frame = entry->mFrame;
 
-      bool overflowChanged = false;
-      if (entry->mChangeKind == CHILDREN_AND_PARENT_CHANGED) {
-        // Need to union the overflow areas of the children.
-        // Always update the parent, even if the overflow does not change.
-        frame->UpdateOverflow();
-        overflowChanged = true;
-      } else if (entry->mChangeKind == CHILDREN_CHANGED) {
-        // Need to union the overflow areas of the children.
-        // Only update the parent if the overflow changes.
-        overflowChanged = frame->UpdateOverflow();
-      } else {
-        // Take a faster path that doesn't require unioning the overflow areas
-        // of our children.
-
-#ifdef DEBUG
-        bool hasInitialOverflowPropertyApplied = false;
-        frame->Properties().Get(nsIFrame::DebugInitialOverflowPropertyApplied(),
-                                 &hasInitialOverflowPropertyApplied);
-        NS_ASSERTION(hasInitialOverflowPropertyApplied,
-                     "InitialOverflowProperty must be set first.");
-#endif
-
-        nsOverflowAreas* overflow = 
-          static_cast<nsOverflowAreas*>(frame->Properties().Get(nsIFrame::InitialOverflowProperty()));
-        if (overflow) {
+      bool updateParent = false;
+      if (entry->mInitial) {
+        nsOverflowAreas* pre = static_cast<nsOverflowAreas*>
+          (frame->Properties().Get(frame->PreTransformOverflowAreasProperty()));
+        if (pre) {
           // FinishAndStoreOverflow will change the overflow areas passed in,
           // so make a copy.
-          nsOverflowAreas overflowCopy = *overflow;
-          frame->FinishAndStoreOverflow(overflowCopy, frame->GetSize());
-        } else {
-          nsRect bounds(nsPoint(0, 0), frame->GetSize());
-          nsOverflowAreas boundsOverflow;
-          boundsOverflow.SetAllTo(bounds);
-          frame->FinishAndStoreOverflow(boundsOverflow, bounds.Size());
+          nsOverflowAreas overflowAreas = *pre;
+          frame->FinishAndStoreOverflow(overflowAreas, frame->GetSize());
+          // We can't tell if the overflow changed, so update the parent regardless
+          updateParent = true;
         }
-
-        // We can't tell if the overflow changed, so be conservative
-        overflowChanged = true;
       }
 
-      // If the frame style changed (e.g. positioning offsets)
-      // then we need to update the parent with the overflow areas of its
-      // children.
-      if (overflowChanged) {
+      // If the overflow changed, then we want to also update the parent's
+      // overflow. We always update the parent for initial frames.
+      if (!updateParent) {
+        updateParent = frame->UpdateOverflow() || entry->mInitial;
+      }
+      if (updateParent) {
         nsIFrame *parent = frame->GetParent();
-        if (parent && parent != mSubtreeRoot) {
-          Entry* parentEntry = mEntryList.find(Entry(parent, entry->mDepth - 1));
-          if (parentEntry) {
-            parentEntry->mChangeKind = std::max(parentEntry->mChangeKind, CHILDREN_CHANGED);
-          } else {
-            mEntryList.insert(new Entry(parent, entry->mDepth - 1, CHILDREN_CHANGED));
+        if (parent) {
+          if (!mEntryList.contains(Entry(parent, entry->mDepth - 1, false))) {
+            mEntryList.insert(new Entry(parent, entry->mDepth - 1, false));
           }
         }
       }
@@ -179,10 +115,16 @@ public:
 private:
   struct Entry : SplayTreeNode<Entry>
   {
-    Entry(nsIFrame* aFrame, uint32_t aDepth, ChangeKind aChangeKind = CHILDREN_CHANGED)
+    Entry(nsIFrame* aFrame, bool aInitial)
+      : mFrame(aFrame)
+      , mDepth(aFrame->GetDepthInFrameTree())
+      , mInitial(aInitial)
+    {}
+    
+    Entry(nsIFrame* aFrame, uint32_t aDepth, bool aInitial)
       : mFrame(aFrame)
       , mDepth(aDepth)
-      , mChangeKind(aChangeKind)
+      , mInitial(aInitial)
     {}
 
     bool operator==(const Entry& aOther) const
@@ -216,14 +158,15 @@ private:
     nsIFrame* mFrame;
     /* Depth in the frame tree */
     uint32_t mDepth;
-    ChangeKind mChangeKind;
+    /**
+     * True if the frame had the actual style change, and we
+     * want to check for pre-transform overflow areas.
+     */
+    bool mInitial;
   };
 
   /* A list of frames to process, sorted by their depth in the frame tree */
   SplayTree<Entry, Entry> mEntryList;
-
-  /* Don't update overflow of this frame or its ancestors. */
-  const nsIFrame* mSubtreeRoot;
 };
 
 class RestyleTracker {
@@ -248,8 +191,9 @@ public:
                     "Shouldn't have both root flags");
   }
 
-  void Init(RestyleManager* aRestyleManager) {
-    mRestyleManager = aRestyleManager;
+  void Init(nsCSSFrameConstructor* aFrameConstructor) {
+    mFrameConstructor = aFrameConstructor;
+    mPendingRestyles.Init();
   }
 
   uint32_t Count() const {
@@ -332,7 +276,7 @@ private:
   // will include one flag from ELEMENT_PENDING_RESTYLE_FLAGS and one flag
   // that's not in ELEMENT_PENDING_RESTYLE_FLAGS.
   uint32_t mRestyleBits;
-  RestyleManager* mRestyleManager; // Owns us
+  nsCSSFrameConstructor* mFrameConstructor; // Owns us
   // A hashtable that maps elements to RestyleData structs.  The
   // values only make sense if the element's current document is our
   // document and it has our RestyleBit() flag set.  In particular,
@@ -415,6 +359,7 @@ inline bool RestyleTracker::AddPendingRestyle(Element* aElement,
   return hadRestyleLaterSiblings;
 }
 
+} // namespace css
 } // namespace mozilla
 
-#endif /* mozilla_RestyleTracker_h */
+#endif /* mozilla_css_RestyleTracker_h */

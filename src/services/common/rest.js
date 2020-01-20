@@ -9,7 +9,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 this.EXPORTED_SYMBOLS = [
   "RESTRequest",
   "RESTResponse",
-  "TokenAuthenticatedRESTRequest",
+  "TokenAuthenticatedRESTRequest"
 ];
 
 #endif
@@ -17,7 +17,7 @@ this.EXPORTED_SYMBOLS = [
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-common/utils.js");
 
 XPCOMUtils.defineLazyModuleGetter(this, "CryptoUtils",
@@ -91,9 +91,9 @@ this.RESTRequest = function RESTRequest(uri) {
   this.uri = uri;
 
   this._headers = {};
-  this._log = Log.repository.getLogger(this._logName);
+  this._log = Log4Moz.repository.getLogger(this._logName);
   this._log.level =
-    Log.Level[Prefs.get("log.logger.rest.request")];
+    Log4Moz.Level[Prefs.get("log.logger.rest.request")];
 }
 RESTRequest.prototype = {
 
@@ -145,11 +145,6 @@ RESTRequest.prototype = {
   IN_PROGRESS: 2,
   COMPLETED:   4,
   ABORTED:     8,
-
-  /**
-   * HTTP status text of response
-   */
-  statusText: null,
 
   /**
    * Request timeout (in seconds, though decimal values can be used for
@@ -314,7 +309,7 @@ RESTRequest.prototype = {
       }
 
       this._log.debug(method + " Length: " + data.length);
-      if (this._log.level <= Log.Level.Trace) {
+      if (this._log.level <= Log4Moz.Level.Trace) {
         this._log.trace(method + " Body: " + data);
       }
 
@@ -449,7 +444,7 @@ RESTRequest.prototype = {
     this._log.debug(this.method + " " + uri + " " + this.response.status);
 
     // Additionally give the full response body when Trace logging.
-    if (this._log.level <= Log.Level.Trace) {
+    if (this._log.level <= Log4Moz.Level.Trace) {
       this._log.trace(this.method + " body: " + this.response.body);
     }
 
@@ -598,9 +593,9 @@ RESTRequest.prototype = {
  * the RESTRequest.
  */
 this.RESTResponse = function RESTResponse() {
-  this._log = Log.repository.getLogger(this._logName);
+  this._log = Log4Moz.repository.getLogger(this._logName);
   this._log.level =
-    Log.Level[Prefs.get("log.logger.rest.response")];
+    Log4Moz.Level[Prefs.get("log.logger.rest.response")];
 }
 RESTResponse.prototype = {
 
@@ -617,7 +612,8 @@ RESTResponse.prototype = {
   get status() {
     let status;
     try {
-      status = this.request.channel.responseStatus;
+      let channel = this.request.channel.QueryInterface(Ci.nsIHttpChannel);
+      status = channel.responseStatus;
     } catch (ex) {
       this._log.debug("Caught exception fetching HTTP status code:" +
                       CommonUtils.exceptionStr(ex));
@@ -628,28 +624,13 @@ RESTResponse.prototype = {
   },
 
   /**
-   * HTTP status text
-   */
-  get statusText() {
-    let statusText;
-    try {
-      statusText = this.request.channel.responseStatusText;
-    } catch (ex) {
-      this._log.debug("Caught exception fetching HTTP status text:" +
-                      CommonUtils.exceptionStr(ex));
-      return null;
-    }
-    delete this.statusText;
-    return this.statusText = statusText;
-  },
-
-  /**
    * Boolean flag that indicates whether the HTTP status code is 2xx or not.
    */
   get success() {
     let success;
     try {
-      success = this.request.channel.requestSucceeded;
+      let channel = this.request.channel.QueryInterface(Ci.nsIHttpChannel);
+      success = channel.requestSucceeded;
     } catch (ex) {
       this._log.debug("Caught exception fetching HTTP success flag:" +
                       CommonUtils.exceptionStr(ex));
@@ -723,4 +704,3 @@ TokenAuthenticatedRESTRequest.prototype = {
     );
   },
 };
-

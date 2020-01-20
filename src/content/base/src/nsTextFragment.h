@@ -5,18 +5,17 @@
 /*
  * A class which represents a fragment of text (eg inside a text
  * node); if only codepoints below 256 are used, the text is stored as
- * a char*; otherwise the text is stored as a char16_t*
+ * a char*; otherwise the text is stored as a PRUnichar*
  */
 
 #ifndef nsTextFragment_h___
 #define nsTextFragment_h___
 
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
 
 #include "nsString.h"
 #include "nsReadableUtils.h"
-#include "nsISupportsImpl.h"
+#include "nsTraceRefcnt.h"
 
 class nsString;
 class nsCString;
@@ -53,12 +52,12 @@ public:
 
   /**
    * Change the contents of this fragment to be a copy of the
-   * the argument fragment, or to "" if unable to allocate enough memory.
+   * the argument fragment.
    */
   nsTextFragment& operator=(const nsTextFragment& aOther);
 
   /**
-   * Return true if this fragment is represented by char16_t data
+   * Return true if this fragment is represented by PRUnichar data
    */
   bool Is2b() const
   {
@@ -76,9 +75,9 @@ public:
   }
 
   /**
-   * Get a pointer to constant char16_t data.
+   * Get a pointer to constant PRUnichar data.
    */
-  const char16_t *Get2b() const
+  const PRUnichar *Get2b() const
   {
     NS_ASSERTION(Is2b(), "not 2b text"); 
     return m2b;
@@ -112,40 +111,23 @@ public:
    * buffer. If aUpdateBidi is true, contents of the fragment will be scanned,
    * and mState.mIsBidi will be turned on if it includes any Bidi characters.
    */
-  bool SetTo(const char16_t* aBuffer, int32_t aLength, bool aUpdateBidi);
+  void SetTo(const PRUnichar* aBuffer, int32_t aLength, bool aUpdateBidi);
 
   /**
    * Append aData to the end of this fragment. If aUpdateBidi is true, contents
    * of the fragment will be scanned, and mState.mIsBidi will be turned on if
    * it includes any Bidi characters.
    */
-  bool Append(const char16_t* aBuffer, uint32_t aLength, bool aUpdateBidi);
+  void Append(const PRUnichar* aBuffer, uint32_t aLength, bool aUpdateBidi);
 
   /**
    * Append the contents of this string fragment to aString
    */
   void AppendTo(nsAString& aString) const {
-    if (!AppendTo(aString, mozilla::fallible_t())) {
-      NS_ABORT_OOM(GetLength());
-    }
-  }
-
-  /**
-   * Append the contents of this string fragment to aString
-   * @return false if an out of memory condition is detected, true otherwise
-   */
-  bool AppendTo(nsAString& aString,
-                const mozilla::fallible_t&) const NS_WARN_UNUSED_RESULT {
     if (mState.mIs2b) {
-      bool ok = aString.Append(m2b, mState.mLength, mozilla::fallible_t());
-      if (!ok) {
-        return false;
-      }
-
-      return true;
+      aString.Append(m2b, mState.mLength);
     } else {
-      return AppendASCIItoUTF16(Substring(m1b, mState.mLength), aString,
-                                mozilla::fallible_t());
+      AppendASCIItoUTF16(Substring(m1b, mState.mLength), aString);
     }
   }
 
@@ -155,31 +137,10 @@ public:
    * @param aLength the length of the substring
    */
   void AppendTo(nsAString& aString, int32_t aOffset, int32_t aLength) const {
-    if (!AppendTo(aString, aOffset, aLength, mozilla::fallible_t())) {
-      NS_ABORT_OOM(aLength);
-    }
-  }
-
-  /**
-   * Append a substring of the contents of this string fragment to aString.
-   * @param aString the string in which to append
-   * @param aOffset where to start the substring in this text fragment
-   * @param aLength the length of the substring
-   * @return false if an out of memory condition is detected, true otherwise
-   */
-  bool AppendTo(nsAString& aString, int32_t aOffset, int32_t aLength,
-                const mozilla::fallible_t&) const NS_WARN_UNUSED_RESULT
-  {
     if (mState.mIs2b) {
-      bool ok = aString.Append(m2b + aOffset, aLength, mozilla::fallible_t());
-      if (!ok) {
-        return false;
-      }
-
-      return true;
+      aString.Append(m2b + aOffset, aLength);
     } else {
-      return AppendASCIItoUTF16(Substring(m1b + aOffset, aLength), aString,
-                                mozilla::fallible_t());
+      AppendASCIItoUTF16(Substring(m1b + aOffset, aLength), aString);
     }
   }
 
@@ -189,13 +150,13 @@ public:
    * lie within the fragments data. The fragments data is converted if
    * necessary.
    */
-  void CopyTo(char16_t *aDest, int32_t aOffset, int32_t aCount);
+  void CopyTo(PRUnichar *aDest, int32_t aOffset, int32_t aCount);
 
   /**
    * Return the character in the text-fragment at the given
-   * index. This always returns a char16_t.
+   * index. This always returns a PRUnichar.
    */
-  char16_t CharAt(int32_t aIndex) const
+  PRUnichar CharAt(int32_t aIndex) const
   {
     NS_ASSERTION(uint32_t(aIndex) < mState.mLength, "bad index");
     return mState.mIs2b ? m2b[aIndex] : static_cast<unsigned char>(m1b[aIndex]);
@@ -213,7 +174,7 @@ public:
     uint32_t mLength : 29;
   };
 
-  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
 private:
   void ReleaseText();
@@ -222,10 +183,10 @@ private:
    * Scan the contents of the fragment and turn on mState.mIsBidi if it
    * includes any Bidi characters.
    */
-  void UpdateBidiFlag(const char16_t* aBuffer, uint32_t aLength);
+  void UpdateBidiFlag(const PRUnichar* aBuffer, uint32_t aLength);
  
   union {
-    char16_t *m2b;
+    PRUnichar *m2b;
     const char *m1b; // This is const since it can point to shared data
   };
 

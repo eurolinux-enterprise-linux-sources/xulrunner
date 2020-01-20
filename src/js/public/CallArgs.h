@@ -38,32 +38,12 @@
 #include "js/RootingAPI.h"
 #include "js/Value.h"
 
+struct JSContext;
+class JSObject;
+
 /* Typedef for native functions called by the JS VM. */
-typedef bool
+typedef JSBool
 (* JSNative)(JSContext *cx, unsigned argc, JS::Value *vp);
-
-/* Typedef for native functions that may be called in parallel. */
-typedef bool
-(* JSParallelNative)(js::ForkJoinContext *cx, unsigned argc, JS::Value *vp);
-
-/*
- * Typedef for native functions that may be called either in parallel or
- * sequential execution.
- */
-typedef bool
-(* JSThreadSafeNative)(js::ThreadSafeContext *cx, unsigned argc, JS::Value *vp);
-
-/*
- * Convenience wrappers for passing in ThreadSafeNative to places that expect
- * a JSNative or a JSParallelNative.
- */
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSNativeThreadSafeWrapper(JSContext *cx, unsigned argc, JS::Value *vp);
-
-template <JSThreadSafeNative threadSafeNative>
-inline bool
-JSParallelNativeThreadSafeWrapper(js::ForkJoinContext *cx, unsigned argc, JS::Value *vp);
 
 /*
  * Compute |this| for the |vp| inside a JSNative, either boxing primitives or
@@ -86,7 +66,7 @@ extern JS_PUBLIC_DATA(const HandleValue) UndefinedHandleValue;
  * return value for a function call.  The principal way to create a
  * CallReceiver is using JS::CallReceiverFromVp:
  *
- *   static bool
+ *   static JSBool
  *   FunctionReturningThis(JSContext *cx, unsigned argc, JS::Value *vp)
  *   {
  *       JS::CallReceiver rec = JS::CallReceiverFromVp(vp);
@@ -118,11 +98,6 @@ extern JS_PUBLIC_DATA(const HandleValue) UndefinedHandleValue;
 
 namespace detail {
 
-#ifdef JS_DEBUG
-extern JS_PUBLIC_API(void)
-CheckIsValidConstructible(Value v);
-#endif
-
 enum UsedRval { IncludeUsedRval, NoUsedRval };
 
 template<UsedRval WantUsedRval>
@@ -147,7 +122,7 @@ class MOZ_STACK_CLASS UsedRvalBase<NoUsedRval>
 
 template<UsedRval WantUsedRval>
 class MOZ_STACK_CLASS CallReceiverBase : public UsedRvalBase<
-#ifdef JS_DEBUG
+#ifdef DEBUG
         WantUsedRval
 #else
         NoUsedRval
@@ -194,14 +169,6 @@ class MOZ_STACK_CLASS CallReceiverBase : public UsedRvalBase<
             return thisv();
 
         return JS_ComputeThis(cx, base());
-    }
-
-    bool isConstructing() const {
-#ifdef JS_DEBUG
-        if (this->usedRval_)
-            CheckIsValidConstructible(calleev());
-#endif
-        return argv_[-1].isMagic();
     }
 
     /*
@@ -279,7 +246,7 @@ CallReceiverFromVp(Value *vp)
  * the function call's arguments.  The principal way to create a CallArgs is
  * like so, using JS::CallArgsFromVp:
  *
- *   static bool
+ *   static JSBool
  *   FunctionReturningArgcTimesArg0(JSContext *cx, unsigned argc, JS::Value *vp)
  *   {
  *       JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
@@ -314,7 +281,13 @@ class MOZ_STACK_CLASS CallArgsBase :
     unsigned length() const { return argc_; }
 
     /* Returns the i-th zero-indexed argument. */
-    MutableHandleValue operator[](unsigned i) const {
+    Value &operator[](unsigned i) const {
+        MOZ_ASSERT(i < argc_);
+        return this->argv_[i];
+    }
+
+    /* Returns a mutable handle for the i-th zero-indexed argument. */
+    MutableHandleValue handleAt(unsigned i) const {
         MOZ_ASSERT(i < argc_);
         return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
     }
@@ -323,7 +296,15 @@ class MOZ_STACK_CLASS CallArgsBase :
      * Returns the i-th zero-indexed argument, or |undefined| if there's no
      * such argument.
      */
-    HandleValue get(unsigned i) const {
+    Value get(unsigned i) const {
+        return i < length() ? this->argv_[i] : UndefinedValue();
+    }
+
+    /*
+     * Returns the i-th zero-indexed argument as a handle, or |undefined| if
+     * there's no such argument.
+     */
+    HandleValue handleOrUndefinedAt(unsigned i) const {
         return i < length()
                ? HandleValue::fromMarkedLocation(&this->argv_[i])
                : UndefinedHandleValue;
@@ -388,7 +369,11 @@ CallArgsFromSp(unsigned argc, Value *sp)
  * take a const JS::CallArgs&.
  */
 
+#define JS_CALLEE(cx,vp)        ((vp)[0])
 #define JS_THIS_OBJECT(cx,vp)   (JSVAL_TO_OBJECT(JS_THIS(cx,vp)))
+#define JS_ARGV(cx,vp)          ((vp) + 2)
+#define JS_RVAL(cx,vp)          (*(vp))
+#define JS_SET_RVAL(cx,vp,v)    (*(vp) = (v))
 
 /*
  * Note: if this method returns null, an error has occurred and must be

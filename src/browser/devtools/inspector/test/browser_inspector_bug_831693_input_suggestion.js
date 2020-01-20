@@ -87,10 +87,11 @@ function test()
   }
 
   function checkState(event) {
-    inspector.searchSuggestions._lastQuery.then(() => {
+    executeSoon(function() {
       let [key, suggestions] = keyStates[state];
       let actualSuggestions = popup.getItems();
-      is(popup.isOpen ? actualSuggestions.length: 0, suggestions.length,
+      is(popup._panel.state == "open" || popup._panel.state == "showing"
+         ? actualSuggestions.length: 0, suggestions.length,
          "There are expected number of suggestions at " + state + "th step.");
       actualSuggestions = actualSuggestions.reverse();
       for (let i = 0; i < suggestions.length; i++) {

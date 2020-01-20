@@ -6,11 +6,8 @@
 #ifndef GFX_IMAGESURFACE_H
 #define GFX_IMAGESURFACE_H
 
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/RefPtr.h"
 #include "gfxASurface.h"
-#include "nsAutoPtr.h"
-#include "nsSize.h"
+#include "gfxPoint.h"
 
 // ARGB -- raw buffer.. wont be changed.. good for storing data.
 
@@ -18,7 +15,6 @@ class gfxSubimageSurface;
 
 namespace mozilla {
 namespace gfx {
-class DataSourceSurface;
 class SourceSurface;
 }
 }
@@ -104,18 +100,6 @@ public:
      */
     bool CopyFrom (mozilla::gfx::SourceSurface *aSurface);
 
-    /**
-     * Fast copy to a source surface; returns TRUE if successful, FALSE otherwise
-     * Assumes that the format of this surface is compatible with aSurface
-     */
-    bool CopyTo (mozilla::gfx::SourceSurface *aSurface);
-
-    /**
-     * Copy to a Moz2D DataSourceSurface.
-     * Marked as virtual so that browsercomps can access this method.
-     */
-    virtual mozilla::TemporaryRef<mozilla::gfx::DataSourceSurface> CopyToB8G8R8A8DataSourceSurface();
-
     /* return new Subimage with pointing to original image starting from aRect.pos
      * and size of aRect.size. New subimage keeping current image reference
      */
@@ -129,9 +113,9 @@ public:
 
     static long ComputeStride(const gfxIntSize&, gfxImageFormat);
 
-    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+    virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
         MOZ_OVERRIDE;
-    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+    virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
         MOZ_OVERRIDE;
     virtual bool SizeOfIsMeasured() const MOZ_OVERRIDE;
 
@@ -164,8 +148,7 @@ protected:
     friend class gfxImageSurface;
     gfxSubimageSurface(gfxImageSurface* aParent,
                        unsigned char* aData,
-                       const gfxIntSize& aSize,
-                       gfxImageFormat aFormat);
+                       const gfxIntSize& aSize);
 private:
     nsRefPtr<gfxImageSurface> mParent;
 };

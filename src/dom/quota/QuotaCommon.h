@@ -10,7 +10,7 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
-#include "nsString.h"
+#include "nsStringGlue.h"
 #include "nsTArray.h"
 
 #define BEGIN_QUOTA_NAMESPACE \
@@ -20,19 +20,16 @@
 #define USING_QUOTA_NAMESPACE \
   using namespace mozilla::dom::quota;
 
-#define DSSTORE_FILE_NAME ".DS_Store"
-#define PERMISSION_STORAGE_UNLIMITED "indexedDB-unlimited"
-
 BEGIN_QUOTA_NAMESPACE
 
+#ifdef DEBUG
 void
 AssertIsOnIOThread();
-
-void
-AssertCurrentThreadOwnsQuotaMutex();
-
-bool
-IsOnIOThread();
+#else
+inline void
+AssertIsOnIOThread()
+{ }
+#endif
 
 END_QUOTA_NAMESPACE
 

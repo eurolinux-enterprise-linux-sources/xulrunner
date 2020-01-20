@@ -23,8 +23,8 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * 
  * ***** END LICENSE BLOCK ***** */
 
 #ifndef assembler_assembler_AssemblerBuffer_h
@@ -42,7 +42,6 @@
 #include <stdarg.h>
 #include "jsfriendapi.h"
 #include "jsopcode.h"
-#include "jsutil.h"
 
 #include "jit/IonSpewer.h"
 #include "js/RootingAPI.h"
@@ -58,30 +57,32 @@
 namespace JSC {
 
     class AssemblerBuffer {
-        static const size_t inlineCapacity = 256;
+        static const int inlineCapacity = 256;
     public:
         AssemblerBuffer()
             : m_buffer(m_inlineBuffer)
             , m_capacity(inlineCapacity)
             , m_size(0)
-            , m_allocSize(0)
             , m_oom(false)
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+            , m_skipInline(js::TlsPerThreadData.get(), &m_inlineBuffer)
+#endif
         {
         }
 
         ~AssemblerBuffer()
         {
             if (m_buffer != m_inlineBuffer)
-                js_free(m_buffer);
+                free(m_buffer);
         }
 
-        void ensureSpace(size_t space)
+        void ensureSpace(int space)
         {
             if (m_size > m_capacity - space)
                 grow();
         }
 
-        bool isAligned(size_t alignment) const
+        bool isAligned(int alignment) const
         {
             return !(m_size & (alignment - 1));
         }
@@ -140,14 +141,9 @@ namespace JSC {
             return m_buffer;
         }
 
-        size_t size() const
+        int size() const
         {
             return m_size;
-        }
-
-        size_t allocSize() const
-        {
-            return m_allocSize;
         }
 
         bool oom() const
@@ -166,9 +162,7 @@ namespace JSC {
                 return 0;
             }
 
-            m_allocSize = js::AlignBytes(m_size, sizeof(void *));
-
-            void* result = allocator->alloc(m_allocSize, poolp, kind);
+            void* result = allocator->alloc(m_size, poolp, kind);
             if (!result) {
                 *poolp = NULL;
                 return 0;
@@ -186,7 +180,7 @@ namespace JSC {
         }
 
     protected:
-        void append(const char* data, size_t size)
+        void append(const char* data, int size)
         {
             if (m_size > m_capacity - size)
                 grow(size);
@@ -213,34 +207,25 @@ namespace JSC {
          * See also the |executableAllocAndCopy| and |buffer| methods.
          */
 
-        void grow(size_t extraCapacity = 0)
+        void grow(int extraCapacity = 0)
         {
-            char* newBuffer;
-
             /*
              * If |extraCapacity| is zero (as it almost always is) this is an
              * allocator-friendly doubling growth strategy.
              */
-            size_t doubleCapacity = m_capacity + m_capacity;
+            int newCapacity = m_capacity + m_capacity + extraCapacity;
+            char* newBuffer;
 
-            // Check for overflow.
-            if (doubleCapacity < m_capacity) {
-                m_size = 0;
-                m_oom = true;
-                return;
-            }
-
-            size_t newCapacity = doubleCapacity + extraCapacity;
-
-            // Check for overflow.
-            if (newCapacity < doubleCapacity) {
+            // Do not allow offsets to grow beyond INT_MAX / 2. This mirrors
+            // Assembler-shared.h.
+            if (newCapacity >= INT_MAX / 2) {
                 m_size = 0;
                 m_oom = true;
                 return;
             }
 
             if (m_buffer == m_inlineBuffer) {
-                newBuffer = static_cast<char*>(js_malloc(newCapacity));
+                newBuffer = static_cast<char*>(malloc(newCapacity));
                 if (!newBuffer) {
                     m_size = 0;
                     m_oom = true;
@@ -248,7 +233,7 @@ namespace JSC {
                 }
                 memcpy(newBuffer, m_buffer, m_size);
             } else {
-                newBuffer = static_cast<char*>(js_realloc(m_buffer, newCapacity));
+                newBuffer = static_cast<char*>(realloc(m_buffer, newCapacity));
                 if (!newBuffer) {
                     m_size = 0;
                     m_oom = true;
@@ -262,10 +247,20 @@ namespace JSC {
 
         char m_inlineBuffer[inlineCapacity];
         char* m_buffer;
-        size_t m_capacity;
-        size_t m_size;
-        size_t m_allocSize;
+        int m_capacity;
+        int m_size;
         bool m_oom;
+
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+        /*
+         * GC Pointers baked into the code can get stored on the stack here
+         * through the inline assembler buffer. We need to protect these from
+         * being poisoned by the rooting analysis, however, they do not need to
+         * actually be traced: the compiler is only allowed to bake in
+         * non-nursery-allocated pointers, such as Shapes.
+         */
+        js::SkipRoot m_skipInline;
+#endif
     };
 
     class GenericAssembler

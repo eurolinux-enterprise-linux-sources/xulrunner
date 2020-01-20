@@ -82,7 +82,7 @@ function test() {
   const testURL2 = "http://mochi.test:8888/browser/" +
     "browser/components/sessionstore/test/browser_248970_b_sample.html";
 
-  whenNewWindowLoaded({ private: false }, function(aWin) {
+  whenNewWindowLoaded(false, function(aWin) {
     windowsToClose.push(aWin);
 
     // get closed tab count
@@ -119,12 +119,12 @@ function test() {
       // verify tab: (A), in undo list
       let tab_A_restored = test(function() ss.undoCloseTab(aWin, 0));
       ok(tab_A_restored, "a tab is in undo list");
-      whenTabRestored(tab_A_restored, function() {
+      whenBrowserLoaded(tab_A_restored.linkedBrowser, function() {
         is(testURL, tab_A_restored.linkedBrowser.currentURI.spec,
            "it's the same tab that we expect");
         aWin.gBrowser.removeTab(tab_A_restored);
 
-        whenNewWindowLoaded({ private: true }, function(aWin) {
+        whenNewWindowLoaded(true, function(aWin) {
           windowsToClose.push(aWin);
 
           // setup a state for tab (B) so we can check that its duplicated
@@ -137,14 +137,14 @@ function test() {
 
           let tab_B = aWin.gBrowser.addTab(testURL2);
           ss.setTabState(tab_B, JSON.stringify(state1));
-          whenTabRestored(tab_B, function() {
+          whenBrowserLoaded(tab_B.linkedBrowser, function() {
             // populate tab: (B) with different form data
             for (let item in fieldList)
               setFormValue(tab_B, item, fieldList[item]);
 
             // duplicate tab: (B)
             let tab_C = aWin.gBrowser.duplicateTab(tab_B);
-            whenTabRestored(tab_C, function() {
+            whenBrowserLoaded(tab_C.linkedBrowser, function() {
               // verify the correctness of the duplicated tab
               is(ss.getTabValue(tab_C, key1), value1,
                 "tab successfully duplicated - correct state");

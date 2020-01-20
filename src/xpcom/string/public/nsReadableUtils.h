@@ -2,7 +2,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-// IWYU pragma: private, include "nsString.h"
 
 #ifndef nsReadableUtils_h___
 #define nsReadableUtils_h___
@@ -12,11 +11,13 @@
    * According to our conventions, they should be |NS_xxx|.
    */
 
+#ifndef nsAString_h___
 #include "nsAString.h"
+#endif
 
-#include "nsTArrayForwardDeclare.h"
+template<class E> class nsTArray;
 
-inline size_t Distance( const nsReadingIterator<char16_t>& start, const nsReadingIterator<char16_t>& end )
+inline size_t Distance( const nsReadingIterator<PRUnichar>& start, const nsReadingIterator<PRUnichar>& end )
   {
     return end.get() - start.get();
   }
@@ -28,39 +29,28 @@ inline size_t Distance( const nsReadingIterator<char>& start, const nsReadingIte
 void LossyCopyUTF16toASCII( const nsAString& aSource, nsACString& aDest );
 void CopyASCIItoUTF16( const nsACString& aSource, nsAString& aDest );
 
-void LossyCopyUTF16toASCII( const char16_t* aSource, nsACString& aDest );
+void LossyCopyUTF16toASCII( const PRUnichar* aSource, nsACString& aDest );
 void CopyASCIItoUTF16( const char* aSource, nsAString& aDest );
 
 void CopyUTF16toUTF8( const nsAString& aSource, nsACString& aDest );
 void CopyUTF8toUTF16( const nsACString& aSource, nsAString& aDest );
 
-void CopyUTF16toUTF8( const char16_t* aSource, nsACString& aDest );
+void CopyUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest );
 void CopyUTF8toUTF16( const char* aSource, nsAString& aDest );
 
 void LossyAppendUTF16toASCII( const nsAString& aSource, nsACString& aDest );
 void AppendASCIItoUTF16( const nsACString& aSource, nsAString& aDest );
-bool AppendASCIItoUTF16( const nsACString& aSource, nsAString& aDest,
-                         const mozilla::fallible_t& ) NS_WARN_UNUSED_RESULT;
 
-void LossyAppendUTF16toASCII( const char16_t* aSource, nsACString& aDest );
+void LossyAppendUTF16toASCII( const PRUnichar* aSource, nsACString& aDest );
 void AppendASCIItoUTF16( const char* aSource, nsAString& aDest );
 
 void AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest );
-bool AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest,
-                        const mozilla::fallible_t& ) NS_WARN_UNUSED_RESULT;
 void AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest );
 bool AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest,
                         const mozilla::fallible_t& ) NS_WARN_UNUSED_RESULT;
 
-void AppendUTF16toUTF8( const char16_t* aSource, nsACString& aDest );
+void AppendUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest );
 void AppendUTF8toUTF16( const char* aSource, nsAString& aDest );
-
-#ifdef MOZ_USE_CHAR16_WRAPPER
-inline void AppendUTF16toUTF8( char16ptr_t aSource, nsACString& aDest )
-  {
-    return AppendUTF16toUTF8(static_cast<const char16_t*>(aSource), aDest);
-  }
-#endif
 
   /**
    * Returns a new |char| buffer containing a zero-terminated copy of |aSource|.
@@ -97,7 +87,7 @@ char* ToNewCString( const nsACString& aSource );
    * The new buffer is zero-terminated, but that may not help you if |aSource| 
    * contains embedded nulls.
    *
-   * @param aSource a UTF-16 string (made of char16_t's)
+   * @param aSource a UTF-16 string (made of PRUnichar's)
    * @param aUTF8Count the number of 8-bit units that was returned
    * @return a new |char| buffer you must free with |nsMemory::Free|.
    */
@@ -106,35 +96,35 @@ char* ToNewUTF8String( const nsAString& aSource, uint32_t *aUTF8Count = nullptr 
 
 
   /**
-   * Returns a new |char16_t| buffer containing a zero-terminated copy of 
+   * Returns a new |PRUnichar| buffer containing a zero-terminated copy of 
    * |aSource|.
    *
-   * Allocates and returns a new |char16_t| buffer which you must free with 
+   * Allocates and returns a new |PRUnichar| buffer which you must free with 
    * |nsMemory::Free|.
    * The new buffer is zero-terminated, but that may not help you if |aSource| 
    * contains embedded nulls.
    *
    * @param aSource a UTF-16 string
-   * @return a new |char16_t| buffer you must free with |nsMemory::Free|.
+   * @return a new |PRUnichar| buffer you must free with |nsMemory::Free|.
    */
-char16_t* ToNewUnicode( const nsAString& aSource );
+PRUnichar* ToNewUnicode( const nsAString& aSource );
 
 
   /**
-   * Returns a new |char16_t| buffer containing a zero-terminated copy of |aSource|.
+   * Returns a new |PRUnichar| buffer containing a zero-terminated copy of |aSource|.
    *
-   * Allocates and returns a new |char16_t| buffer which you must free with |nsMemory::Free|.
+   * Allocates and returns a new |PRUnichar| buffer which you must free with |nsMemory::Free|.
    * Performs an encoding conversion by 0-padding 8-bit wide characters up to 16-bits wide while copying |aSource| to your new buffer.
    * This conversion is not well defined; but it reproduces legacy string behavior.
    * The new buffer is zero-terminated, but that may not help you if |aSource| contains embedded nulls.
    *
    * @param aSource an 8-bit wide string (a C-string, NOT UTF-8)
-   * @return a new |char16_t| buffer you must free with |nsMemory::Free|.
+   * @return a new |PRUnichar| buffer you must free with |nsMemory::Free|.
    */
-char16_t* ToNewUnicode( const nsACString& aSource );
+PRUnichar* ToNewUnicode( const nsACString& aSource );
 
   /**
-   * Returns the required length for a char16_t buffer holding
+   * Returns the required length for a PRUnichar buffer holding
    * a copy of aSource, using UTF-8 to UTF-16 conversion.
    * The length does NOT include any space for zero-termination.
    *
@@ -149,7 +139,7 @@ uint32_t CalcUTF8ToUnicodeLength( const nsACString& aSource );
    * strings.
    * The copied string will be zero-terminated! Any embedded nulls will be
    * copied nonetheless. It is the caller's responsiblity to ensure the buffer
-   * is large enough to hold the string copy plus one char16_t for
+   * is large enough to hold the string copy plus one PRUnichar for
    * zero-termination!
    *
    * @see CalcUTF8ToUnicodeLength( const nsACString& )
@@ -161,12 +151,12 @@ uint32_t CalcUTF8ToUnicodeLength( const nsACString& aSource );
    *                    were copied
    * @return aBuffer pointer, for convenience 
    */
-char16_t* UTF8ToUnicodeBuffer( const nsACString& aSource,
-                                char16_t *aBuffer,
+PRUnichar* UTF8ToUnicodeBuffer( const nsACString& aSource,
+                                PRUnichar *aBuffer,
                                 uint32_t *aUTF16Count = nullptr );
 
   /**
-   * Returns a new |char16_t| buffer containing a zero-terminated copy
+   * Returns a new |PRUnichar| buffer containing a zero-terminated copy
    * of |aSource|.
    *
    * Allocates and returns a new |char| buffer which you must free with
@@ -177,26 +167,26 @@ char16_t* UTF8ToUnicodeBuffer( const nsACString& aSource,
    *
    * @param aSource an 8-bit wide string, UTF-8 encoded
    * @param aUTF16Count the number of 16-bit units that was returned
-   * @return a new |char16_t| buffer you must free with |nsMemory::Free|.
+   * @return a new |PRUnichar| buffer you must free with |nsMemory::Free|.
    *         (UTF-16 encoded)
    */
-char16_t* UTF8ToNewUnicode( const nsACString& aSource, uint32_t *aUTF16Count = nullptr );
+PRUnichar* UTF8ToNewUnicode( const nsACString& aSource, uint32_t *aUTF16Count = nullptr );
 
   /**
    * Copies |aLength| 16-bit code units from the start of |aSource| to the
-   * |char16_t| buffer |aDest|.
+   * |PRUnichar| buffer |aDest|.
    *
    * After this operation |aDest| is not null terminated.
    *
    * @param aSource a UTF-16 string
    * @param aSrcOffset start offset in the source string
-   * @param aDest a |char16_t| buffer
+   * @param aDest a |PRUnichar| buffer
    * @param aLength the number of 16-bit code units to copy
    * @return pointer to destination buffer - identical to |aDest|
    */
-char16_t* CopyUnicodeTo( const nsAString& aSource,
+PRUnichar* CopyUnicodeTo( const nsAString& aSource,
                                  uint32_t aSrcOffset,
-                                 char16_t* aDest,
+                                 PRUnichar* aDest,
                                  uint32_t aLength );
 
 
@@ -348,14 +338,14 @@ bool RFindInReadable( const nsACString& aPattern, nsACString::const_iterator&, n
    * point to the match.  If no match was found, returns |false| and 
    * makes |aSearchStart == aSearchEnd|.
    */
-bool FindCharInReadable( char16_t aChar, nsAString::const_iterator& aSearchStart, const nsAString::const_iterator& aSearchEnd );
+bool FindCharInReadable( PRUnichar aChar, nsAString::const_iterator& aSearchStart, const nsAString::const_iterator& aSearchEnd );
 bool FindCharInReadable( char aChar, nsACString::const_iterator& aSearchStart, const nsACString::const_iterator& aSearchEnd );
 
     /**
     * Finds the number of occurences of |aChar| in the string |aStr|
     */
 uint32_t CountCharInReadable( const nsAString& aStr,
-                                     char16_t aChar );
+                                     PRUnichar aChar );
 uint32_t CountCharInReadable( const nsACString& aStr,
                                      char aChar );
 

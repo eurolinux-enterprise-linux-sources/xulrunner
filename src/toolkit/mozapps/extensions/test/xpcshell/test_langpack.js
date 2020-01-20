@@ -27,11 +27,6 @@ registerDirectory("XREAppDist", distroDir.parent);
 var chrome = Components.classes["@mozilla.org/chrome/chrome-registry;1"]
   .getService(Components.interfaces.nsIXULChromeRegistry);
 
-function do_unregister_manifest() {
-  let path = getFileForAddon(profileDir, "langpack-x-testing@tests.mozilla.org");
-  Components.manager.removeBootstrappedManifestLocation(path);
-}
-
 function do_check_locale_not_registered(provider) {
   let didThrow = false;
   try {
@@ -82,8 +77,7 @@ function run_test_1() {
       "onInstallEnded",
     ], function() {
       do_check_true(addon.hasResource("install.rdf"));
-      // spin to let the startup complete
-      do_execute_soon(check_test_1);
+      check_test_1();
     });
     install.install();
   });
@@ -147,7 +141,7 @@ function run_test_2() {
       do_check_true(newb1.userDisabled);
       do_check_false(newb1.isActive);
 
-      do_execute_soon(run_test_3);
+      run_test_3();
     });
   });
 }
@@ -200,7 +194,7 @@ function run_test_4() {
       do_check_false(newb1.userDisabled);
       do_check_true(newb1.isActive);
 
-      do_execute_soon(run_test_5);
+      run_test_5();
     });
   });
 }
@@ -208,7 +202,6 @@ function run_test_4() {
 // Tests that a restart shuts down and restarts the add-on
 function run_test_5() {
   shutdownManager();
-  do_unregister_manifest();
   // check chrome reg that language pack is not registered
   do_check_locale_not_registered("test-langpack");
   startupManager(false);
@@ -250,8 +243,7 @@ function check_test_7() {
   // check chrome reg that language pack is not registered
   do_check_locale_not_registered("test-langpack");
 
-  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org",
-   callback_soon(function(b1) {
+  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org", function(b1) {
     do_check_eq(b1, null);
 
     restartManager();
@@ -259,9 +251,9 @@ function check_test_7() {
     AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org", function(newb1) {
       do_check_eq(newb1, null);
 
-      do_execute_soon(run_test_8);
+      run_test_8();
     });
-  }));
+  });
 }
 
 // Tests that a locale detected in the profile starts working immediately
@@ -272,8 +264,7 @@ function run_test_8() {
 
   startupManager(false);
 
-  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org",
-   callback_soon(function(b1) {
+  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org", function(b1) {
     do_check_neq(b1, null);
     do_check_eq(b1.version, "1.0");
     do_check_false(b1.appDisabled);
@@ -285,7 +276,6 @@ function run_test_8() {
     do_check_false(b1.hasResource("bootstrap.js"));
 
     shutdownManager();
-    do_unregister_manifest();
     // check chrome reg that language pack is not registered
     do_check_locale_not_registered("test-langpack");
     startupManager(false);
@@ -302,9 +292,9 @@ function run_test_8() {
 
       b2.uninstall();
       ensure_test_completed();
-      do_execute_soon(run_test_9);
+      run_test_9();
     });
-  }));
+  });
 }
 
 // Tests that a locale from distribution/extensions gets installed and starts
@@ -315,7 +305,7 @@ function run_test_9() {
   gAppInfo.version = "2.0";
   startupManager(true);
 
-  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org", callback_soon(function(b1) {
+  AddonManager.getAddonByID("langpack-x-testing@tests.mozilla.org", function(b1) {
     do_check_neq(b1, null);
     do_check_eq(b1.version, "1.0");
     do_check_false(b1.appDisabled);
@@ -327,7 +317,6 @@ function run_test_9() {
     do_check_false(b1.hasResource("bootstrap.js"));
 
     shutdownManager();
-    do_unregister_manifest();
     // check chrome reg that language pack is not registered
     do_check_locale_not_registered("test-langpack");
     startupManager(false);
@@ -335,5 +324,5 @@ function run_test_9() {
     do_check_eq(chrome.getSelectedLocale("test-langpack"), "x-testing");
 
     do_test_finished();
-  }));
+  });
 }

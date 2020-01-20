@@ -8,7 +8,7 @@
 #define HTMLPropertiesCollection_h_
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/DOMStringList.h"
+#include "nsDOMLists.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsAutoPtr.h"
 #include "nsCOMArray.h"
@@ -19,8 +19,9 @@
 #include "nsIHTMLCollection.h"
 #include "nsHashKeys.h"
 #include "nsRefPtrHashtable.h"
-#include "nsGenericHTMLElement.h"
+#include "jsapi.h"
 
+class nsGenericHTMLElement;
 class nsIDocument;
 class nsINode;
 
@@ -31,18 +32,17 @@ class HTMLPropertiesCollection;
 class PropertyNodeList;
 class Element;
 
-class PropertyStringList : public DOMStringList
+class PropertyStringList : public nsDOMStringList
 {
 public:
   PropertyStringList(HTMLPropertiesCollection* aCollection);
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PropertyStringList, DOMStringList)
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(PropertyStringList)
+  NS_DECL_NSIDOMDOMSTRINGLIST
 
   bool ContainsInternal(const nsAString& aString);
 
 protected:
-  virtual void EnsureFresh() MOZ_OVERRIDE;
-
   nsRefPtr<HTMLPropertiesCollection> mCollection;
 };
 
@@ -56,47 +56,28 @@ public:
   HTMLPropertiesCollection(nsGenericHTMLElement* aRoot);
   virtual ~HTMLPropertiesCollection();
 
-  // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-protected:
-  virtual JSObject* GetWrapperPreserveColorInternal() MOZ_OVERRIDE
-  {
-    return nsWrapperCache::GetWrapperPreserveColor();
-  }
-public:
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   virtual Element* GetElementAt(uint32_t aIndex);
 
   void SetDocument(nsIDocument* aDocument);
   nsINode* GetParentObject() MOZ_OVERRIDE;
-
-  virtual Element*
-  GetFirstNamedElement(const nsAString& aName, bool& aFound) MOZ_OVERRIDE
-  {
-    // HTMLPropertiesCollection.namedItem and the named getter call the
-    // NamedItem that returns a PropertyNodeList, calling
-    // HTMLCollection.namedItem doesn't make sense so this returns null.
-    aFound = false;
-    return nullptr;
-  }
+  virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
+                              mozilla::ErrorResult& error) MOZ_OVERRIDE;
   PropertyNodeList* NamedItem(const nsAString& aName);
   PropertyNodeList* NamedGetter(const nsAString& aName, bool& aFound)
   {
     aFound = IsSupportedNamedProperty(aName);
     return aFound ? NamedItem(aName) : nullptr;
   }
-  bool NameIsEnumerable(const nsAString& aName)
-  {
-    return true;
-  }
-  DOMStringList* Names()
+  nsDOMStringList* Names()
   {
     EnsureFresh();
     return mNames;
   }
-  virtual void GetSupportedNames(unsigned,
-                                 nsTArray<nsString>& aNames) MOZ_OVERRIDE;
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
 
   NS_DECL_NSIDOMHTMLCOLLECTION
 
@@ -136,7 +117,7 @@ protected:
   nsRefPtrHashtable<nsStringHashKey, PropertyNodeList> mNamedItemEntries;
 
   // The element this collection is rooted at
-  nsRefPtr<nsGenericHTMLElement> mRoot;
+  nsCOMPtr<nsGenericHTMLElement> mRoot;
 
   // The document mRoot is in, if any
   nsCOMPtr<nsIDocument> mDoc;
@@ -153,7 +134,8 @@ public:
                    nsIContent* aRoot, const nsAString& aName);
   virtual ~PropertyNodeList();
 
-  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   void SetDocument(nsIDocument* aDocument);
 

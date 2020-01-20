@@ -4,50 +4,62 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    TEST_DIRS += ['test']
+XPIDL_SOURCES += [
+    'nsIDOMCameraManager.idl',
+    'nsIDOMNavigatorCamera.idl',
+]
+
+XPIDL_MODULE = 'dom_camera'
+
+XPIDL_FLAGS += [
+    '-I$(topsrcdir)/dom/base',
+    '-I$(topsrcdir)/dom/interfaces/base',
+    '-I$(topsrcdir)/dom/interfaces/events',
+    '-I$(topsrcdir)/dom/media',
+]
+
+MODULE = 'dom'
 
 EXPORTS += [
     'CameraCommon.h',
     'CameraPreviewMediaStream.h',
     'DOMCameraManager.h',
     'GonkCameraControl.h',
+    'GonkNativeWindow.h',
+    'GonkNativeWindowClient.h',
 ]
 
-SOURCES += [
+CPP_SOURCES += [
     'CameraControlImpl.cpp',
     'CameraPreviewMediaStream.cpp',
     'CameraRecorderProfiles.cpp',
     'DOMCameraCapabilities.cpp',
     'DOMCameraControl.cpp',
-    'DOMCameraControlListener.cpp',
-    'DOMCameraDetectedFace.cpp',
     'DOMCameraManager.cpp',
+    'DOMCameraPreview.cpp',
 ]
 
 if CONFIG['MOZ_B2G_CAMERA']:
-    SOURCES += [
+    CPP_SOURCES += [
+        'GonkCameraManager.cpp',
         'GonkCameraControl.cpp',
         'GonkCameraHwMgr.cpp',
-        'GonkCameraManager.cpp',
-        'GonkCameraParameters.cpp',
-        'GonkCameraSource.cpp',
+        'GonkNativeWindow.cpp',
+        'GonkNativeWindowClient.cpp',
         'GonkRecorder.cpp',
+        'GonkCameraSource.cpp',
+        'AudioParameter.cpp',
         'GonkRecorderProfiles.cpp',
-        'TestGonkCameraHardware.cpp',
+    ]
+elif CONFIG['MOZ_OMX_DECODER']:
+    CPP_SOURCES += [
+        'FallbackCameraManager.cpp',
+        'FallbackCameraControl.cpp',
+        'GonkNativeWindow.cpp',
+        'GonkNativeWindowClient.cpp',
     ]
 else:
-    SOURCES += [
-        'FallbackCameraControl.cpp',
+    CPP_SOURCES += [
         'FallbackCameraManager.cpp',
+        'FallbackCameraControl.cpp',
     ]
-
-FAIL_ON_WARNINGS = True
-
-LOCAL_INCLUDES += [
-    '../base',
-]
-
-include('/ipc/chromium/chromium-config.mozbuild')
-
-FINAL_LIBRARY = 'gklayout'

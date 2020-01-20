@@ -28,7 +28,7 @@ NS_NewDOMDocumentType(nsIDOMDocumentType** aDocType,
   NS_ENSURE_ARG_POINTER(aDocType);
   mozilla::ErrorResult rv;
   *aDocType = NS_NewDOMDocumentType(aNodeInfoManager, aName, aPublicId,
-                                    aSystemId, aInternalSubset, rv).take();
+                                    aSystemId, aInternalSubset, rv).get();
   return rv.ErrorCode();
 }
 
@@ -45,14 +45,14 @@ NS_NewDOMDocumentType(nsNodeInfoManager* aNodeInfoManager,
     return nullptr;
   }
 
-  already_AddRefed<nsINodeInfo> ni =
+  nsCOMPtr<nsINodeInfo> ni =
     aNodeInfoManager->GetNodeInfo(nsGkAtoms::documentTypeNodeName, nullptr,
                                   kNameSpaceID_None,
                                   nsIDOMNode::DOCUMENT_TYPE_NODE,
                                   aName);
 
   nsRefPtr<mozilla::dom::DocumentType> docType =
-    new mozilla::dom::DocumentType(ni, aPublicId, aSystemId, aInternalSubset);
+    new mozilla::dom::DocumentType(ni.forget(), aPublicId, aSystemId, aInternalSubset);
   return docType.forget();
 }
 
@@ -60,12 +60,12 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-DocumentType::WrapNode(JSContext *cx)
+DocumentType::WrapNode(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return DocumentTypeBinding::Wrap(cx, this);
+  return DocumentTypeBinding::Wrap(cx, scope, this);
 }
 
-DocumentType::DocumentType(already_AddRefed<nsINodeInfo>& aNodeInfo,
+DocumentType::DocumentType(already_AddRefed<nsINodeInfo> aNodeInfo,
                            const nsAString& aPublicId,
                            const nsAString& aSystemId,
                            const nsAString& aInternalSubset) :
@@ -74,6 +74,7 @@ DocumentType::DocumentType(already_AddRefed<nsINodeInfo>& aNodeInfo,
   mSystemId(aSystemId),
   mInternalSubset(aInternalSubset)
 {
+  SetIsDOMBinding();
   NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE,
                     "Bad NodeType in aNodeInfo");
 }
@@ -82,8 +83,8 @@ DocumentType::~DocumentType()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(DocumentType, nsGenericDOMDataNode, nsIDOMNode,
-                            nsIDOMDocumentType)
+NS_IMPL_ISUPPORTS_INHERITED2(DocumentType, nsGenericDOMDataNode, nsIDOMNode,
+                             nsIDOMDocumentType)
 
 bool
 DocumentType::IsNodeOfType(uint32_t aFlags) const
@@ -141,8 +142,9 @@ DocumentType::MozRemove()
 nsGenericDOMDataNode*
 DocumentType::CloneDataNode(nsINodeInfo *aNodeInfo, bool aCloneText) const
 {
-  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
-  return new DocumentType(ni, mPublicId, mSystemId, mInternalSubset);
+  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+  return new DocumentType(ni.forget(), mPublicId, mSystemId,
+                          mInternalSubset);
 }
 
 } // namespace dom

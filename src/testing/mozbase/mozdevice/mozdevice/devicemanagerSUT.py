@@ -2,9 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import datetime
 import mozlog
-import moznetwork
 import select
 import socket
 import time
@@ -13,7 +11,7 @@ import re
 import posixpath
 import subprocess
 import StringIO
-from devicemanager import DeviceManager, DMError, _pop_last_line
+from devicemanager import DeviceManager, DMError, NetworkTools, _pop_last_line
 import errno
 from distutils.version import StrictVersion
 
@@ -232,7 +230,7 @@ class DeviceManagerSUT(DeviceManager):
 
                     # Get our response
                     try:
-                        # Wait up to a second for socket to become ready for reading...
+                          # Wait up to a second for socket to become ready for reading...
                         if select.select([self._sock], [], [], select_timeout)[0]:
                             temp = self._sock.recv(1024)
                             self._logger.debug("response: %s" % temp)
@@ -340,10 +338,9 @@ class DeviceManagerSUT(DeviceManager):
         # woops, we couldn't find an end of line/return value
         raise DMError("Automation Error: Error finding end of line/return value when running '%s'" % cmdline)
 
-    def pushFile(self, localname, destname, retryLimit=None, createDir=True):
+    def pushFile(self, localname, destname, retryLimit = None):
         retryLimit = retryLimit or self.retryLimit
-        if createDir:
-            self.mkDirs(destname)
+        self.mkDirs(destname)
 
         try:
             filesize = os.path.getsize(localname)
@@ -365,19 +362,21 @@ class DeviceManagerSUT(DeviceManager):
         if not self.dirExists(name):
             self._runCmds([{ 'cmd': 'mkdr ' + name }])
 
-    def pushDir(self, localDir, remoteDir, retryLimit=None, timeout=None):
+    def pushDir(self, localDir, remoteDir, retryLimit = None):
         retryLimit = retryLimit or self.retryLimit
         self._logger.info("pushing directory: %s to %s" % (localDir, remoteDir))
 
         existentDirectories = []
         for root, dirs, files in os.walk(localDir, followlinks=True):
-            _, subpath = root.split(localDir)
-            subpath = subpath.lstrip('/')
-            remoteRoot = posixpath.join(remoteDir, subpath)
+            parts = root.split(localDir)
             for f in files:
-                remoteName = posixpath.join(remoteRoot, f)
+                remoteRoot = remoteDir + '/' + parts[1]
+                if (remoteRoot.endswith('/')):
+                    remoteName = remoteRoot + f
+                else:
+                    remoteName = remoteRoot + '/' + f
 
-                if subpath == "":
+                if (parts[1] == ""):
                     remoteRoot = remoteDir
 
                 parent = os.path.dirname(remoteName)
@@ -385,7 +384,8 @@ class DeviceManagerSUT(DeviceManager):
                     self.mkDirs(remoteName)
                     existentDirectories.append(parent)
 
-                self.pushFile(os.path.join(root, f), remoteName, retryLimit=retryLimit, createDir=False)
+                self.pushFile(os.path.join(root, f), remoteName, retryLimit=retryLimit)
+
 
     def dirExists(self, remotePath):
         ret = self._runCmds([{ 'cmd': 'isdir ' + remotePath }]).strip()
@@ -397,24 +397,19 @@ class DeviceManagerSUT(DeviceManager):
     def fileExists(self, filepath):
         # Because we always have / style paths we make this a lot easier with some
         # assumptions
-        filepath = posixpath.normpath(filepath)
-        # / should always exist but we can use this to check for things like
-        # having access to the filesystem
-        if filepath == '/':
-            return self.dirExists(filepath)
-        (containingpath, filename) = posixpath.split(filepath)
-        return filename in self.listFiles(containingpath)
+        s = filepath.split('/')
+        containingpath = '/'.join(s[:-1])
+        return s[-1] in self.listFiles(containingpath)
 
     def listFiles(self, rootdir):
-        rootdir = posixpath.normpath(rootdir)
-        if not self.dirExists(rootdir):
+        rootdir = rootdir.rstrip('/')
+        if (self.dirExists(rootdir) == False):
             return []
         data = self._runCmds([{ 'cmd': 'cd ' + rootdir }, { 'cmd': 'ls' }])
 
         files = filter(lambda x: x, data.splitlines())
         if len(files) == 1 and files[0] == '<empty>':
-            # special case on the agent: empty directories return just the
-            # string "<empty>"
+            # special case on the agent: empty directories return just the string "<empty>"
             return []
         return files
 
@@ -426,12 +421,6 @@ class DeviceManagerSUT(DeviceManager):
     def removeDir(self, remoteDir):
         if self.dirExists(remoteDir):
             self._runCmds([{ 'cmd': 'rmdr ' + remoteDir }])
-
-    def moveTree(self, source, destination):
-        self._runCmds([{ 'cmd': 'mv %s %s' % (source, destination) }])
-
-    def copyTree(self, source, destination):
-        self._runCmds([{ 'cmd': 'dd if=%s of=%s' % (source, destination) }])
 
     def getProcessList(self):
         data = self._runCmds([{ 'cmd': 'ps' }])
@@ -533,9 +522,9 @@ class DeviceManagerSUT(DeviceManager):
             self.fireProcess(cmdline, failIfRunning)
         return outputFile
 
-    def killProcess(self, appname, sig=None):
-        if sig:
-            self._logger.warn("killProcess(): sig parameter unsupported on SUT")
+    def killProcess(self, appname, forceKill=False):
+        if forceKill:
+            self._logger.warn("killProcess(): forceKill parameter unsupported on SUT")
         retries = 0
         while retries < self.retryLimit:
             try:
@@ -553,7 +542,7 @@ class DeviceManagerSUT(DeviceManager):
     def getTempDir(self):
         return self._runCmds([{ 'cmd': 'tmpd' }]).strip()
 
-    def pullFile(self, remoteFile, offset=None, length=None):
+    def pullFile(self, remoteFile):
         # The "pull" command is different from other commands in that DeviceManager
         # has to read a certain number of bytes instead of just reading to the
         # next prompt.  This is more robust than the "cat" command, which will be
@@ -570,23 +559,30 @@ class DeviceManagerSUT(DeviceManager):
         # the class level if we wanted to refactor sendCMD().  For now they are
         # only used to pull files.
 
-        def uread(to_recv, error_msg):
+        def uread(to_recv, error_msg, timeout=None):
             """ unbuffered read """
-            try:
-                data = ""
-                if select.select([self._sock], [], [], self.default_timeout)[0]:
-                    data = self._sock.recv(to_recv)
-                if not data:
-                    # timed out waiting for response or error response
-                    err(error_msg)
+            timer = 0
+            select_timeout = 1
+            if not timeout:
+                timeout = self.default_timeout
 
+            try:
+                if select.select([self._sock], [], [], select_timeout)[0]:
+                    data = self._sock.recv(to_recv)
+                    timer = 0
+                timer += select_timeout
+                if timer > timeout:
+                    err('timeout in uread while retrieving file')
+
+                if not data:
+                    err(error_msg)
                 return data
             except:
                 err(error_msg)
 
         def read_until_char(c, buf, error_msg):
             """ read until 'c' is found; buffer rest """
-            while not c in buf:
+            while not '\n' in buf:
                 data = uread(1024, error_msg)
                 buf += data
             return buf.partition(c)
@@ -608,14 +604,7 @@ class DeviceManagerSUT(DeviceManager):
         # <filename>,-1\n<error message>
 
         # just send the command first, we read the response inline below
-        if offset is not None and length is not None:
-            cmd = 'pull %s %d %d' % (remoteFile, offset, length)
-        elif offset is not None:
-            cmd = 'pull %s %d' % (remoteFile, offset)
-        else: 
-            cmd = 'pull %s' % remoteFile
-
-        self._runCmds([{ 'cmd': cmd }])
+        self._runCmds([{ 'cmd': 'pull ' + remoteFile }])
 
         # read metadata; buffer the rest
         metadata, sep, buf = read_until_char('\n', buf, 'could not find metadata')
@@ -731,78 +720,61 @@ class DeviceManagerSUT(DeviceManager):
 
         self._runCmds([{ 'cmd': 'unzp %s %s' % (filePath, destDir)}])
 
-    def _getRebootServerSocket(self, ipAddr):
-        serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        serverSocket.settimeout(60.0)
-        serverSocket.bind((ipAddr, 0))
-        serverSocket.listen(1)
-        self._logger.debug('Created reboot callback server at %s:%d' %
-                           serverSocket.getsockname())
-        return serverSocket
-
-    def _waitForRebootPing(self, serverSocket):
+    def _wait_for_reboot(self, host, port):
+        self._logger.debug('Creating server with %s:%d' % (host, port))
+        timeout_expires = time.time() + self.reboot_timeout
         conn = None
-        data = None
-        startTime = datetime.datetime.now()
-        waitTime = datetime.timedelta(seconds=self.reboot_timeout)
-        while not data and datetime.datetime.now() - startTime < waitTime:
-            self._logger.info("Waiting for reboot callback ping from device...")
+        data = ''
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.settimeout(60.0)
+        s.bind((host, port))
+        s.listen(1)
+        while not data and time.time() < timeout_expires:
             try:
                 if not conn:
-                    conn, _ = serverSocket.accept()
+                    conn, _ = s.accept()
                 # Receiving any data is good enough.
                 data = conn.recv(1024)
                 if data:
-                    self._logger.info("Received reboot callback ping from device!")
                     conn.sendall('OK')
                 conn.close()
             except socket.timeout:
-                pass
+                print '.'
             except socket.error, e:
                 if e.errno != errno.EAGAIN and e.errno != errno.EWOULDBLOCK:
                     raise
+        if data:
+            # Sleep to ensure not only we are online, but all our services are
+            # also up.
+            time.sleep(self.reboot_settling_time)
+        else:
+            self._logger.error('Timed out waiting for reboot callback.')
+        s.close()
+        return data
 
-        if not data:
-            raise DMError('Timed out waiting for reboot callback.')
-
-        self._logger.info("Sleeping for %s seconds to wait for device "
-                          "to 'settle'" % self.reboot_settling_time)
-        time.sleep(self.reboot_settling_time)
-
-
-    def reboot(self, ipAddr=None, port=30000, wait=False):
-        # port ^^^ is here for backwards compatibility only, we now
-        # determine a port automatically and safely
-        wait = (wait or ipAddr)
-
+    def reboot(self, ipAddr=None, port=30000):
         cmd = 'rebt'
 
-        self._logger.info("Rebooting device")
+        self._logger.info("sending rebt command")
 
-        # if we're waiting, create a listening server and pass information on
-        # it to the device before rebooting (we do this instead of just polling
-        # to make sure the device actually rebooted -- yes, there are probably
-        # simpler ways of doing this like polling uptime, but this is what we're
-        # doing for now)
-        if wait:
-            if not ipAddr:
-                ipAddr = moznetwork.get_ip()
-            serverSocket = self._getRebootServerSocket(ipAddr)
+        if ipAddr is not None:
             # The update.info command tells the SUTAgent to send a TCP message
             # after restarting.
             destname = '/data/data/com.mozilla.SUTAgentAndroid/files/update.info'
-            data = "%s,%s\rrebooting\r" % serverSocket.getsockname()
+            data = "%s,%s\rrebooting\r" % (ipAddr, port)
             self._runCmds([{'cmd': 'push %s %s' % (destname, len(data)),
                             'data': data}])
-            cmd += " %s %s" % serverSocket.getsockname()
 
-        # actually reboot device
-        self._runCmds([{'cmd': cmd}])
-        # if we're waiting, wait for a callback ping from the agent before
-        # continuing (and throw an exception if we don't receive said ping)
-        if wait:
-            self._waitForRebootPing(serverSocket)
+            ip, port = self._getCallbackIpAndPort(ipAddr, port)
+            cmd += " %s %s" % (ip, port)
+
+        status = self._runCmds([{'cmd': cmd}])
+
+        if ipAddr is not None:
+            status = self._wait_for_reboot(ipAddr, port)
+
+        self._logger.info("rebt- got status back: %s" % status)
 
     def getInfo(self, directive=None):
         data = None
@@ -843,8 +815,10 @@ class DeviceManagerSUT(DeviceManager):
 
         data = self._runCmds([{ 'cmd': cmd }])
 
-        if 'installation complete [0]' not in data:
-            raise DMError("Remove Device Error: Error installing app. Error message: %s" % data)
+        f = re.compile('Failure')
+        for line in data.split():
+            if (f.match(line)):
+                raise DMError("Remove Device Error: Error installing app. Error message: %s" % data)
 
     def uninstallApp(self, appName, installPath=None):
         cmd = 'uninstall ' + appName
@@ -867,12 +841,8 @@ class DeviceManagerSUT(DeviceManager):
         self._logger.debug("uninstallAppAndReboot: %s" % data)
         return
 
-    def updateApp(self, appBundlePath, processName=None, destPath=None,
-                  ipAddr=None, port=30000, wait=False):
-        # port ^^^ is here for backwards compatibility only, we now
-        # determine a port automatically and safely
-        wait = (wait or ipAddr)
-
+    def updateApp(self, appBundlePath, processName=None, destPath=None, ipAddr=None, port=30000):
+        status = None
         cmd = 'updt '
         if processName is None:
             # Then we pass '' for processName
@@ -883,21 +853,38 @@ class DeviceManagerSUT(DeviceManager):
         if destPath:
             cmd += " " + destPath
 
-        if wait:
-            if not ipAddr:
-                ipAddr = moznetwork.get_ip()
-            serverSocket = self._getRebootServerSocket(ipAddr)
-            cmd += " %s %s" % serverSocket.getsockname()
+        if ipAddr is not None:
+            ip, port = self._getCallbackIpAndPort(ipAddr, port)
+            cmd += " %s %s" % (ip, port)
 
         self._logger.debug("updateApp using command: " % cmd)
 
-        self._runCmds([{'cmd': cmd}])
+        status = self._runCmds([{'cmd': cmd}])
 
-        if wait:
-            self._waitForRebootPing(serverSocket)
+        if ipAddr is not None:
+            status = self._wait_for_reboot(ip, port)
+
+        self._logger.debug("updateApp: got status back: %s" % status)
 
     def getCurrentTime(self):
-        return int(self._runCmds([{ 'cmd': 'clok' }]).strip())
+        return self._runCmds([{ 'cmd': 'clok' }]).strip()
+
+    def _getCallbackIpAndPort(self, aIp, aPort):
+        """
+        Connect the ipaddress and port for a callback ping.
+
+        Defaults to current IP address and ports starting at 30000.
+        NOTE: the detection for current IP address only works on Linux!
+        """
+        ip = aIp
+        nettools = NetworkTools()
+        if (ip == None):
+            ip = nettools.getLanIp()
+        if (aPort != None):
+            port = nettools.findOpenPort(ip, aPort)
+        else:
+            port = nettools.findOpenPort(ip, 30000)
+        return ip, port
 
     def _formatEnvString(self, env):
         """

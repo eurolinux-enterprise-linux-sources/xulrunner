@@ -8,10 +8,11 @@
 #define jit_x86_BaselineHelpers_x86_h
 
 #ifdef JS_ION
-#include "jit/BaselineFrame.h"
-#include "jit/BaselineIC.h"
-#include "jit/BaselineRegisters.h"
+
 #include "jit/IonMacroAssembler.h"
+#include "jit/BaselineFrame.h"
+#include "jit/BaselineRegisters.h"
+#include "jit/BaselineIC.h"
 
 namespace js {
 namespace jit {
@@ -26,12 +27,6 @@ EmitRestoreTailCallReg(MacroAssembler &masm)
 }
 
 inline void
-EmitRepushTailCallReg(MacroAssembler &masm)
-{
-    masm.push(BaselineTailCallReg);
-}
-
-inline void
 EmitCallIC(CodeOffsetLabel *patchOffset, MacroAssembler &masm)
 {
     // Move ICEntry offset into BaselineStubReg
@@ -39,8 +34,8 @@ EmitCallIC(CodeOffsetLabel *patchOffset, MacroAssembler &masm)
     *patchOffset = offset;
 
     // Load stub pointer into BaselineStubReg
-    masm.loadPtr(Address(BaselineStubReg, (int32_t) ICEntry::offsetOfFirstStub()),
-                 BaselineStubReg);
+    masm.movl(Operand(BaselineStubReg, (int32_t) ICEntry::offsetOfFirstStub()),
+              BaselineStubReg);
 
     // Load stubcode pointer from BaselineStubEntry into BaselineTailCallReg
     // BaselineTailCallReg will always be unused in the contexts where ICs are called.
@@ -53,7 +48,7 @@ EmitEnterTypeMonitorIC(MacroAssembler &masm,
 {
     // This is expected to be called from within an IC, when BaselineStubReg
     // is properly initialized to point to the stub.
-    masm.loadPtr(Address(BaselineStubReg, (int32_t) monitorStubOffset), BaselineStubReg);
+    masm.movl(Operand(BaselineStubReg, (int32_t) monitorStubOffset), BaselineStubReg);
 
     // Jump to the stubcode.
     masm.jmp(Operand(BaselineStubReg, (int32_t) ICStub::offsetOfStubCode()));
@@ -72,7 +67,7 @@ EmitChangeICReturnAddress(MacroAssembler &masm, Register reg)
 }
 
 inline void
-EmitTailCallVM(JitCode *target, MacroAssembler &masm, uint32_t argSize)
+EmitTailCallVM(IonCode *target, MacroAssembler &masm, uint32_t argSize)
 {
     // We assume during this that R0 and R1 have been pushed.
 
@@ -84,10 +79,10 @@ EmitTailCallVM(JitCode *target, MacroAssembler &masm, uint32_t argSize)
     // Store frame size without VMFunction arguments for GC marking.
     masm.movl(eax, ebx);
     masm.subl(Imm32(argSize), ebx);
-    masm.store32(ebx, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
+    masm.store32(ebx, Operand(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
 
     // Push frame descriptor and perform the tail call.
-    masm.makeFrameDescriptor(eax, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(eax, IonFrame_BaselineJS);
     masm.push(eax);
     masm.push(BaselineTailCallReg);
     masm.jmp(target);
@@ -102,11 +97,11 @@ EmitCreateStubFrameDescriptor(MacroAssembler &masm, Register reg)
     masm.addl(Imm32(sizeof(void *) * 2), reg);
     masm.subl(BaselineStackReg, reg);
 
-    masm.makeFrameDescriptor(reg, JitFrame_BaselineStub);
+    masm.makeFrameDescriptor(reg, IonFrame_BaselineStub);
 }
 
 inline void
-EmitCallVM(JitCode *target, MacroAssembler &masm)
+EmitCallVM(IonCode *target, MacroAssembler &masm)
 {
     EmitCreateStubFrameDescriptor(masm, eax);
     masm.push(eax);
@@ -129,13 +124,13 @@ EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
     masm.addl(Imm32(BaselineFrame::FramePointerOffset), scratch);
     masm.subl(BaselineStackReg, scratch);
 
-    masm.store32(scratch, Address(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
+    masm.store32(scratch, Operand(BaselineFrameReg, BaselineFrame::reverseOffsetOfFrameSize()));
 
     // Note: when making changes here,  don't forget to update STUB_FRAME_SIZE
     // if needed.
 
     // Push frame descriptor and return address.
-    masm.makeFrameDescriptor(scratch, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(scratch, IonFrame_BaselineJS);
     masm.push(scratch);
     masm.push(BaselineTailCallReg);
 
@@ -146,7 +141,7 @@ EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
 }
 
 inline void
-EmitLeaveStubFrameHead(MacroAssembler &masm, bool calledIntoIon = false)
+EmitLeaveStubFrame(MacroAssembler &masm, bool calledIntoIon = false)
 {
     // Ion frames do not save and restore the frame pointer. If we called
     // into Ion, we have to restore the stack pointer from the frame descriptor.
@@ -160,11 +155,7 @@ EmitLeaveStubFrameHead(MacroAssembler &masm, bool calledIntoIon = false)
     } else {
         masm.mov(BaselineFrameReg, BaselineStackReg);
     }
-}
 
-inline void
-EmitLeaveStubFrameCommonTail(MacroAssembler &masm)
-{
     masm.pop(BaselineFrameReg);
     masm.pop(BaselineStubReg);
 
@@ -174,13 +165,6 @@ EmitLeaveStubFrameCommonTail(MacroAssembler &masm)
     // Overwrite frame descriptor with return address, so that the stack matches
     // the state before entering the stub frame.
     masm.storePtr(BaselineTailCallReg, Address(BaselineStackReg, 0));
-}
-
-inline void
-EmitLeaveStubFrame(MacroAssembler &masm, bool calledIntoIon = false)
-{
-    EmitLeaveStubFrameHead(masm, calledIntoIon);
-    EmitLeaveStubFrameCommonTail(masm);
 }
 
 inline void
@@ -205,35 +189,28 @@ EmitStowICValues(MacroAssembler &masm, int values)
 }
 
 inline void
-EmitUnstowICValues(MacroAssembler &masm, int values, bool discard = false)
+EmitUnstowICValues(MacroAssembler &masm, int values)
 {
     JS_ASSERT(values >= 0 && values <= 2);
     switch(values) {
       case 1:
         // Unstow R0
         masm.pop(BaselineTailCallReg);
-        if (discard)
-            masm.addPtr(Imm32(sizeof(Value)), BaselineStackReg);
-        else
-            masm.popValue(R0);
+        masm.popValue(R0);
         masm.push(BaselineTailCallReg);
         break;
       case 2:
-        // Unstow R0 and R1
+        // Untow R0 and R1
         masm.pop(BaselineTailCallReg);
-        if (discard) {
-            masm.addPtr(Imm32(sizeof(Value) * 2), BaselineStackReg);
-        } else {
-            masm.popValue(R1);
-            masm.popValue(R0);
-        }
+        masm.popValue(R1);
+        masm.popValue(R0);
         masm.push(BaselineTailCallReg);
         break;
     }
 }
 
 inline void
-EmitCallTypeUpdateIC(MacroAssembler &masm, JitCode *code, uint32_t objectOffset)
+EmitCallTypeUpdateIC(MacroAssembler &masm, IonCode *code, uint32_t objectOffset)
 {
     // R0 contains the value that needs to be typechecked.
     // The object we're updating is a boxed Value on the stack, at offset
@@ -244,8 +221,8 @@ EmitCallTypeUpdateIC(MacroAssembler &masm, JitCode *code, uint32_t objectOffset)
 
     // This is expected to be called from within an IC, when BaselineStubReg
     // is properly initialized to point to the stub.
-    masm.loadPtr(Address(BaselineStubReg, (int32_t) ICUpdatedStub::offsetOfFirstUpdateStub()),
-                 BaselineStubReg);
+    masm.movl(Operand(BaselineStubReg, (int32_t) ICUpdatedStub::offsetOfFirstUpdateStub()),
+              BaselineStubReg);
 
     // Call the stubcode.
     masm.call(Operand(BaselineStubReg, ICStub::offsetOfStubCode()));
@@ -295,7 +272,7 @@ EmitStubGuardFailure(MacroAssembler &masm)
     // BaselineStubEntry points to the current stub.
 
     // Load next stub into BaselineStubReg
-    masm.loadPtr(Address(BaselineStubReg, (int32_t) ICStub::offsetOfNext()), BaselineStubReg);
+    masm.movl(Operand(BaselineStubReg, (int32_t) ICStub::offsetOfNext()), BaselineStubReg);
 
     // Return address is already loaded, just jump to the next stubcode.
     masm.jmp(Operand(BaselineStubReg, (int32_t) ICStub::offsetOfStubCode()));

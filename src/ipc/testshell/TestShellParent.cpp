@@ -5,12 +5,11 @@
 #include "TestShellParent.h"
 
 /* This must occur *after* TestShellParent.h to avoid typedefs conflicts. */
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "mozilla/dom/ContentParent.h"
 
 #include "nsAutoPtr.h"
-#include "nsCxPusher.h"
 
 using namespace mozilla;
 using mozilla::ipc::TestShellParent;
@@ -19,13 +18,13 @@ using mozilla::ipc::PTestShellCommandParent;
 using mozilla::dom::ContentParent;
 
 PTestShellCommandParent*
-TestShellParent::AllocPTestShellCommandParent(const nsString& aCommand)
+TestShellParent::AllocPTestShellCommand(const nsString& aCommand)
 {
   return new TestShellCommandParent();
 }
 
 bool
-TestShellParent::DeallocPTestShellCommandParent(PTestShellCommandParent* aActor)
+TestShellParent::DeallocPTestShellCommand(PTestShellCommandParent* aActor)
 {
   delete aActor;
   return true;
@@ -36,48 +35,47 @@ TestShellParent::CommandDone(TestShellCommandParent* command,
                              const nsString& aResponse)
 {
   // XXX what should happen if the callback fails?
-  /*bool ok = */command->RunCallback(aResponse);
+  /*JSBool ok = */command->RunCallback(aResponse);
   command->ReleaseCallback();
 
   return true;
 }
 
-bool
+JSBool
 TestShellCommandParent::SetCallback(JSContext* aCx,
                                     JS::Value aCallback)
 {
   if (!mCallback.Hold(aCx)) {
-    return false;
+    return JS_FALSE;
   }
 
   mCallback = aCallback;
   mCx = aCx;
 
-  return true;
+  return JS_TRUE;
 }
 
-bool
+JSBool
 TestShellCommandParent::RunCallback(const nsString& aResponse)
 {
-  NS_ENSURE_TRUE(!mCallback.get().isNull() && mCx, false);
+  NS_ENSURE_TRUE(*mCallback.ToJSValPtr() != JSVAL_NULL && mCx, JS_FALSE);
 
-  // We're pulling a cx off the heap, so make sure it's stack-top.
-  AutoCxPusher pusher(mCx);
-  NS_ENSURE_TRUE(mCallback.ToJSObject(), false);
+  JSAutoRequest ar(mCx);
+  NS_ENSURE_TRUE(mCallback.ToJSObject(), JS_FALSE);
   JSAutoCompartment ac(mCx, mCallback.ToJSObject());
-  JS::Rooted<JSObject*> global(mCx, JS::CurrentGlobalOrNull(mCx));
+  JS::Rooted<JSObject*> global(mCx, JS_GetGlobalForScopeChain(mCx));
 
   JSString* str = JS_NewUCStringCopyN(mCx, aResponse.get(), aResponse.Length());
-  NS_ENSURE_TRUE(str, false);
+  NS_ENSURE_TRUE(str, JS_FALSE);
 
   JS::Rooted<JS::Value> strVal(mCx, JS::StringValue(str));
 
   JS::Rooted<JS::Value> rval(mCx);
-  JS::Rooted<JS::Value> callback(mCx, mCallback);
-  bool ok = JS_CallFunctionValue(mCx, global, callback, strVal, &rval);
-  NS_ENSURE_TRUE(ok, false);
+  JSBool ok = JS_CallFunctionValue(mCx, global, mCallback, 1, strVal.address(),
+				   rval.address());
+  NS_ENSURE_TRUE(ok, JS_FALSE);
 
-  return true;
+  return JS_TRUE;
 }
 
 void

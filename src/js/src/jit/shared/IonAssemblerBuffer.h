@@ -6,7 +6,6 @@
 
 #ifndef jit_shared_IonAssemblerBuffer_h
 #define jit_shared_IonAssemblerBuffer_h
-
 // needed for the definition of Label :(
 #include "jit/shared/Assembler-shared.h"
 
@@ -52,29 +51,23 @@ class BufferOffset
 };
 
 template<int SliceSize>
-struct BufferSlice {
+struct BufferSlice : public InlineForwardListNode<BufferSlice<SliceSize> > {
   protected:
-    BufferSlice<SliceSize> *prev;
-    BufferSlice<SliceSize> *next;
     // How much data has been added to the current node.
     uint32_t nodeSize;
   public:
-    BufferSlice *getNext() { return this->next; }
-    BufferSlice *getPrev() { return this->prev; }
+    BufferSlice *getNext() { return static_cast<BufferSlice *>(this->next); }
     void setNext(BufferSlice<SliceSize> *next_) {
-        JS_ASSERT(this->next == nullptr);
-        JS_ASSERT(next_->prev == nullptr);
+        JS_ASSERT(this->next == NULL);
         this->next = next_;
-        next_->prev = this;
     }
-
-    mozilla::Array<uint8_t, SliceSize> instructions;
+    uint8_t instructions [SliceSize];
     unsigned int size() {
         return nodeSize;
     }
-    BufferSlice() : prev(nullptr), next(nullptr), nodeSize(0) {}
+    BufferSlice() : InlineForwardListNode<BufferSlice<SliceSize> >(NULL), nodeSize(0) {}
     void putBlob(uint32_t instSize, uint8_t* inst) {
-        if (inst != nullptr)
+        if (inst != NULL)
             memcpy(&instructions[size()], inst, instSize);
         nodeSize += instSize;
     }
@@ -84,7 +77,7 @@ template<int SliceSize, class Inst>
 struct AssemblerBuffer
 {
   public:
-    AssemblerBuffer() : head(nullptr), tail(nullptr), m_oom(false), m_bail(false), bufferSize(0), LifoAlloc_(8192) {}
+    AssemblerBuffer() : head(NULL), tail(NULL), m_oom(false), m_bail(false), bufferSize(0), LifoAlloc_(8192) {}
   protected:
     typedef BufferSlice<SliceSize> Slice;
     typedef AssemblerBuffer<SliceSize, Inst> AssemblerBuffer_;
@@ -105,27 +98,24 @@ struct AssemblerBuffer
         Slice *tmp = static_cast<Slice*>(a.alloc(sizeof(Slice)));
         if (!tmp) {
             m_oom = true;
-            return nullptr;
+            return NULL;
         }
         new (tmp) Slice;
         return tmp;
     }
     bool ensureSpace(int size) {
-        if (tail != nullptr && tail->size()+size <= SliceSize)
+        if (tail != NULL && tail->size()+size <= SliceSize)
             return true;
         Slice *tmp = newSlice(LifoAlloc_);
-        if (tmp == nullptr)
+        if (tmp == NULL)
             return false;
-        if (tail != nullptr) {
+        if (tail != NULL) {
             bufferSize += tail->size();
             tail->setNext(tmp);
         }
         tail = tmp;
-        if (head == nullptr) {
-            finger = tmp;
-            finger_offset = 0;
+        if (head == NULL)
             head = tmp;
-        }
         return true;
     }
 
@@ -149,7 +139,7 @@ struct AssemblerBuffer
     }
     unsigned int size() const {
         int executableSize;
-        if (tail != nullptr)
+        if (tail != NULL)
             executableSize = bufferSize + tail->size();
         else
             executableSize = bufferSize;
@@ -170,76 +160,33 @@ struct AssemblerBuffer
     void fail_bail() {
         m_bail = true;
     }
-    // finger for speeding up accesses
-    Slice *finger;
-    unsigned int finger_offset;
     Inst *getInst(BufferOffset off) {
-        int local_off = off.getOffset();
-        // don't update the structure's finger in place, so there is the option
-        // to not update it.
-        Slice *cur = nullptr;
-        int cur_off;
-        // get the offset that we'd be dealing with by walking through backwards
-        int end_off = bufferSize - local_off;
-        // If end_off is negative, then it is in the last chunk, and there is no
-        // real work to be done.
-        if (end_off <= 0) {
-            return (Inst*)&tail->instructions[-end_off];
-        }
-        bool used_finger = false;
-        int finger_off = abs((int)(local_off - finger_offset));
-        if (finger_off < Min(local_off, end_off)) {
-            // The finger offset is minimal, use the finger.
-            cur = finger;
-            cur_off = finger_offset;
-            used_finger = true;
-        } else if (local_off < end_off) {
-            // it is closest to the start
-            cur = head;
-            cur_off = 0;
-        } else {
-            // it is closest to the end
+        unsigned int local_off = off.getOffset();
+        Slice *cur = NULL;
+        if (local_off > bufferSize) {
+            local_off -= bufferSize;
             cur = tail;
-            cur_off = bufferSize;
-        }
-        int count = 0;
-        if (local_off < cur_off) {
-            for (; cur != nullptr; cur = cur->getPrev(), cur_off -= cur->size()) {
-                if (local_off >= cur_off) {
-                    local_off -= cur_off;
-                    break;
-                }
-                count++;
-            }
-            JS_ASSERT(cur != nullptr);
         } else {
-            for (; cur != nullptr; cur = cur->getNext()) {
-                int cur_size = cur->size();
-                if (local_off < cur_off + cur_size) {
-                    local_off -= cur_off;
+            for (cur = head; cur != NULL; cur = cur->getNext()) {
+                if (local_off < cur->size())
                     break;
-                }
-                cur_off += cur_size;
-                count++;
+                local_off -= cur->size();
             }
-            JS_ASSERT(cur != nullptr);
-        }
-        if (count > 2 || used_finger) {
-            finger = cur;
-            finger_offset = cur_off;
+            JS_ASSERT(cur != NULL);
         }
         // the offset within this node should not be larger than the node itself.
-        JS_ASSERT(local_off < (int)cur->size());
+        JS_ASSERT(local_off < cur->size());
         return (Inst*)&cur->instructions[local_off];
     }
     BufferOffset nextOffset() const {
-        if (tail != nullptr)
+        if (tail != NULL)
             return BufferOffset(bufferSize + tail->size());
         else
             return BufferOffset(bufferSize);
     }
     BufferOffset prevOffset() const {
-        MOZ_ASSUME_UNREACHABLE("Don't current record lastInstSize");
+        JS_NOT_REACHED("Don't current record lastInstSize");
+        return BufferOffset(bufferSize + tail->nodeSize - lastInstSize);
     }
 
     // Break the instruction stream so we can go back and edit it at this point

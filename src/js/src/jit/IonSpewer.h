@@ -7,13 +7,12 @@
 #ifndef jit_IonSpewer_h
 #define jit_IonSpewer_h
 
-#include "mozilla/DebugOnly.h"
-
 #include <stdarg.h>
 
-#include "jit/C1Spewer.h"
-#include "jit/JSONSpewer.h"
-#include "js/RootingAPI.h"
+#include "mozilla/DebugOnly.h"
+
+#include "C1Spewer.h"
+#include "JSONSpewer.h"
 
 namespace js {
 namespace jit {
@@ -25,8 +24,6 @@ namespace jit {
     /* Information about compiled scripts */\
     _(Scripts)                              \
     /* Information during MIR building */   \
-    _(Logs)                                 \
-    /* Info about failing to log script */  \
     _(MIR)                                  \
     /* Information during alias analysis */ \
     _(Alias)                                \
@@ -74,9 +71,7 @@ namespace jit {
     /* OSR from Baseline => Ion. */         \
     _(BaselineOSR)                          \
     /* Bailouts. */                         \
-    _(BaselineBailouts)                     \
-    /* Debug Mode On Stack Recompile . */   \
-    _(BaselineDebugModeOSR)
+    _(BaselineBailouts)
 
 
 enum IonSpewChannel {
@@ -97,28 +92,28 @@ class IonSpewer
 {
   private:
     MIRGraph *graph;
-    JS::HandleScript function;
+    HandleScript function;
     C1Spewer c1Spewer;
     JSONSpewer jsonSpewer;
     bool inited_;
 
   public:
     IonSpewer()
-      : graph(nullptr), function(NullPtr()), inited_(false)
+      : graph(NULL), function(NullPtr()), inited_(false)
     { }
 
     // File output is terminated safely upon destruction.
     ~IonSpewer();
 
     bool init();
-    void beginFunction(MIRGraph *graph, JS::HandleScript);
+    void beginFunction(MIRGraph *graph, HandleScript);
     bool isSpewingFunction() const;
     void spewPass(const char *pass);
     void spewPass(const char *pass, LinearScanAllocator *ra);
     void endFunction();
 };
 
-void IonSpewNewFunction(MIRGraph *graph, JS::HandleScript function);
+void IonSpewNewFunction(MIRGraph *graph, HandleScript function);
 void IonSpewPass(const char *pass);
 void IonSpewPass(const char *pass, LinearScanAllocator *ra);
 void IonSpewEndFunction();
@@ -141,7 +136,7 @@ void EnableIonDebugLogging();
 
 #else
 
-static inline void IonSpewNewFunction(MIRGraph *graph, JS::HandleScript function)
+static inline void IonSpewNewFunction(MIRGraph *graph, HandleScript function)
 { }
 static inline void IonSpewPass(const char *pass)
 { }
@@ -152,7 +147,7 @@ static inline void IonSpewEndFunction()
 
 static inline void CheckLogging()
 { }
-static FILE *const IonSpewFile = nullptr;
+static FILE *const IonSpewFile = NULL;
 static inline void IonSpew(IonSpewChannel, const char *fmt, ...)
 { }
 static inline void IonSpewStart(IonSpewChannel channel, const char *fmt, ...)

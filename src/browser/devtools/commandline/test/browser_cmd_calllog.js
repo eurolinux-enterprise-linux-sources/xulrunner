@@ -3,20 +3,16 @@
 
 // Tests that the calllog commands works as they should
 
+let HUDService = (Cu.import("resource:///modules/HUDService.jsm", {})).HUDService;
+
 const TEST_URI = "data:text/html;charset=utf-8,gcli-calllog";
 
 let tests = {};
 
 function test() {
-  return Task.spawn(function() {
-    let options = yield helpers.openTab(TEST_URI);
-    yield helpers.openToolbar(options);
-
-    yield helpers.runTests(options, tests);
-
-    yield helpers.closeToolbar(options);
-    yield helpers.closeTab(options);
-  }).then(finish, helpers.handleError);
+  helpers.addTabWithToolbar(TEST_URI, function(options) {
+    return helpers.runTests(options, tests);
+  }).then(finish);
 }
 
 tests.testCallLogStatus = function(options) {
@@ -52,14 +48,14 @@ tests.testCallLogStatus = function(options) {
 };
 
 tests.testCallLogExec = function(options) {
-  var deferred = promise.defer();
+  var deferred = Promise.defer();
 
   var onWebConsoleOpen = function(subject) {
     Services.obs.removeObserver(onWebConsoleOpen, "web-console-created");
 
     subject.QueryInterface(Ci.nsISupportsString);
     let hud = HUDService.getHudReferenceById(subject.data);
-    ok(hud, "console open");
+    ok(hud.hudId in HUDService.hudReferences, "console open");
 
     helpers.audit(options, [
       {
@@ -101,11 +97,10 @@ tests.testCallLogExec = function(options) {
       name: "calllog start",
       setup: function() {
         // This test wants to be in a different event
-        var deferred = promise.defer();
+        var deferred = Promise.defer();
         executeSoon(function() {
-          helpers.setInput(options, "calllog start").then(() => {
-            deferred.resolve();
-          });
+          helpers.setInput(options, "calllog start");
+          deferred.resolve();
         });
         return deferred.promise;
       },

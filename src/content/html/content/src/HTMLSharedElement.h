@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_HTMLSharedElement_h
 #define mozilla_dom_HTMLSharedElement_h
 
+#include "nsIDOMHTMLParamElement.h"
 #include "nsIDOMHTMLBaseElement.h"
 #include "nsIDOMHTMLDirectoryElement.h"
 #include "nsIDOMHTMLQuoteElement.h"
@@ -21,29 +22,42 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLSharedElement MOZ_FINAL : public nsGenericHTMLElement,
-                                    public nsIDOMHTMLBaseElement,
-                                    public nsIDOMHTMLDirectoryElement,
-                                    public nsIDOMHTMLQuoteElement,
-                                    public nsIDOMHTMLHeadElement,
-                                    public nsIDOMHTMLHtmlElement
+class HTMLSharedElement : public nsGenericHTMLElement,
+                          public nsIDOMHTMLParamElement,
+                          public nsIDOMHTMLBaseElement,
+                          public nsIDOMHTMLDirectoryElement,
+                          public nsIDOMHTMLQuoteElement,
+                          public nsIDOMHTMLHeadElement,
+                          public nsIDOMHTMLHtmlElement
 {
 public:
-  HTMLSharedElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  HTMLSharedElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
-    if (mNodeInfo->Equals(nsGkAtoms::head) ||
-        mNodeInfo->Equals(nsGkAtoms::html)) {
-      SetHasWeirdParserInsertionMode();
-    }
+    SetIsDOMBinding();
   }
   virtual ~HTMLSharedElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLParamElement
+  NS_DECL_NSIDOMHTMLPARAMELEMENT
+
   // nsIDOMHTMLBaseElement
   NS_DECL_NSIDOMHTMLBASEELEMENT
+
+  // nsIDOMHTMLDirectoryElement
+  NS_DECL_NSIDOMHTMLDIRECTORYELEMENT
 
   // nsIDOMHTMLQuoteElement
   NS_DECL_NSIDOMHTMLQUOTEELEMENT
@@ -82,6 +96,11 @@ public:
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE
+  {
+    return static_cast<nsIDOMHTMLParamElement*>(this);
+  }
 
   // WebIDL API
   // HTMLParamElement
@@ -178,7 +197,8 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 };
 
 } // namespace mozilla

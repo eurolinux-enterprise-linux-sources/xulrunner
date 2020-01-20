@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
@@ -16,9 +16,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGMaskElement::WrapNode(JSContext *aCx)
+SVGMaskElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGMaskElementBinding::Wrap(aCx, this);
+  return SVGMaskElementBinding::Wrap(aCx, aScope, this);
 }
 
 //--------------------- Masks ------------------------
@@ -46,7 +46,7 @@ nsSVGElement::EnumInfo SVGMaskElement::sEnumInfo[2] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGMaskElement::SVGMaskElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGMaskElement::SVGMaskElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGMaskElementBase(aNodeInfo)
 {
 }
@@ -58,13 +58,13 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGMaskElement)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<SVGAnimatedEnumeration>
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
 SVGMaskElement::MaskUnits()
 {
   return mEnumAttributes[MASKUNITS].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<SVGAnimatedEnumeration>
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
 SVGMaskElement::MaskContentUnits()
 {
   return mEnumAttributes[MASKCONTENTUNITS].ToDOMAnimatedEnum(this);
@@ -127,9 +127,7 @@ NS_IMETHODIMP_(bool)
 SVGMaskElement::IsAttributeMapped(const nsIAtom* name) const
 {
   static const MappedAttributeEntry* const map[] = {
-    sColorMap,
     sFEFloodMap,
-    sFillStrokeMap,
     sFiltersMap,
     sFontSpecificationMap,
     sGradientStopMap,

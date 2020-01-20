@@ -156,8 +156,6 @@ NodeIterator::~NodeIterator()
  * nsISupports and cycle collection stuff
  */
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(NodeIterator)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NodeIterator)
     if (tmp->mRoot)
         tmp->mRoot->RemoveMutationObserver(tmp);
@@ -198,7 +196,7 @@ NS_IMETHODIMP NodeIterator::GetFilter(nsIDOMNodeFilter **aFilter)
 {
     NS_ENSURE_ARG_POINTER(aFilter);
 
-    *aFilter = mFilter.ToXPCOMCallback().take();
+    *aFilter = mFilter.ToXPCOMCallback().get();
 
     return NS_OK;
 }
@@ -289,9 +287,9 @@ void NodeIterator::ContentRemoved(nsIDocument *aDocument,
 }
 
 JSObject*
-NodeIterator::WrapObject(JSContext *cx)
+NodeIterator::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-    return NodeIteratorBinding::Wrap(cx, this);
+    return NodeIteratorBinding::Wrap(cx, scope, this);
 }
 
 } // namespace dom

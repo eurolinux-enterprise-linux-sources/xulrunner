@@ -6,9 +6,6 @@
 #include "base/message_loop.h"
 
 #include "nsBaseAppShell.h"
-#if defined(MOZ_CRASHREPORTER)
-#include "nsExceptionHandler.h"
-#endif
 #include "nsThreadUtils.h"
 #include "nsIObserverService.h"
 #include "nsServiceManagerUtils.h"
@@ -19,14 +16,15 @@
 // next thread event for at most this many ticks:
 #define THREAD_EVENT_STARVATION_LIMIT PR_MillisecondsToInterval(20)
 
-NS_IMPL_ISUPPORTS(nsBaseAppShell, nsIAppShell, nsIThreadObserver, nsIObserver)
+NS_IMPL_THREADSAFE_ISUPPORTS3(nsBaseAppShell, nsIAppShell, nsIThreadObserver,
+                              nsIObserver)
 
 nsBaseAppShell::nsBaseAppShell()
   : mSuspendNativeCount(0)
   , mEventloopNestingLevel(0)
   , mBlockedWait(nullptr)
   , mFavorPerf(0)
-  , mNativeEventPending(false)
+  , mNativeEventPending(0)
   , mStarvationDelay(0)
   , mSwitchTime(0)
   , mLastNativeEventTime(0)
@@ -64,7 +62,8 @@ nsBaseAppShell::Init()
 void
 nsBaseAppShell::NativeEventCallback()
 {
-  if (!mNativeEventPending.exchange(false))
+  int32_t hasPending = PR_ATOMIC_SET(&mNativeEventPending, 0);
+  if (hasPending == 0)
     return;
 
   // If DoProcessNextNativeEvent is on the stack, then we assume that we can
@@ -93,7 +92,7 @@ nsBaseAppShell::NativeEventCallback()
     mBlockNativeEvent = true;
   }
 
-  IncrementEventloopNestingLevel();
+  ++mEventloopNestingLevel;
   EventloopNestingState prevVal = mEventloopNestingState;
   NS_ProcessPendingEvents(thread, THREAD_EVENT_STARVATION_LIMIT);
   mProcessedGeckoEvents = true;
@@ -105,11 +104,11 @@ nsBaseAppShell::NativeEventCallback()
   if (NS_HasPendingEvents(thread))
     DoProcessMoreGeckoEvents();
 
-  DecrementEventloopNestingLevel();
+  --mEventloopNestingLevel;
 }
 
 // Note, this is currently overidden on windows, see comments in nsAppShell for
-// details.
+// details. 
 void
 nsBaseAppShell::DoProcessMoreGeckoEvents()
 {
@@ -135,7 +134,7 @@ nsBaseAppShell::DoProcessNextNativeEvent(bool mayWait, uint32_t recursionDepth)
   EventloopNestingState prevVal = mEventloopNestingState;
   mEventloopNestingState = eEventloopXPCOM;
 
-  IncrementEventloopNestingLevel();
+  ++mEventloopNestingLevel;
 
   bool result = ProcessNextNativeEvent(mayWait);
 
@@ -144,7 +143,7 @@ nsBaseAppShell::DoProcessNextNativeEvent(bool mayWait, uint32_t recursionDepth)
   // to the event loop yet.
   RunSyncSections(false, recursionDepth);
 
-  DecrementEventloopNestingLevel();
+  --mEventloopNestingLevel;
 
   mEventloopNestingState = prevVal;
   return result;
@@ -228,7 +227,8 @@ nsBaseAppShell::OnDispatchedEvent(nsIThreadInternal *thr)
   if (mBlockNativeEvent)
     return NS_OK;
 
-  if (mNativeEventPending.exchange(true))
+  int32_t lastVal = PR_ATOMIC_SET(&mNativeEventPending, 1);
+  if (lastVal == 1)
     return NS_OK;
 
   // Returns on the main thread in NativeEventCallback above
@@ -326,24 +326,6 @@ nsBaseAppShell::DispatchDummyEvent(nsIThread* aTarget)
 }
 
 void
-nsBaseAppShell::IncrementEventloopNestingLevel()
-{
-  ++mEventloopNestingLevel;
-#if defined(MOZ_CRASHREPORTER)
-  CrashReporter::SetEventloopNestingLevel(mEventloopNestingLevel);
-#endif
-}
-
-void
-nsBaseAppShell::DecrementEventloopNestingLevel()
-{
-  --mEventloopNestingLevel;
-#if defined(MOZ_CRASHREPORTER)
-  CrashReporter::SetEventloopNestingLevel(mEventloopNestingLevel);
-#endif
-}
-
-void
 nsBaseAppShell::RunSyncSectionsInternal(bool aStable,
                                         uint32_t aThreadRecursionLevel)
 {
@@ -420,17 +402,16 @@ nsBaseAppShell::ScheduleSyncSection(nsIRunnable* aRunnable, bool aStable)
 // Called from the main thread
 NS_IMETHODIMP
 nsBaseAppShell::AfterProcessNextEvent(nsIThreadInternal *thr,
-                                      uint32_t recursionDepth,
-                                      bool eventWasProcessed)
+                                      uint32_t recursionDepth)
 {
-  // We've just finished running an event, so we're in a stable state.
+  // We've just finished running an event, so we're in a stable state. 
   RunSyncSections(true, recursionDepth);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsBaseAppShell::Observe(nsISupports *subject, const char *topic,
-                        const char16_t *data)
+                        const PRUnichar *data)
 {
   NS_ASSERTION(!strcmp(topic, NS_XPCOM_SHUTDOWN_OBSERVER_ID), "oops");
   Exit();

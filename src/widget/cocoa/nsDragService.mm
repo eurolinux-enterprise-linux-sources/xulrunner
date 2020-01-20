@@ -22,18 +22,15 @@
 #include "nsIDOMNode.h"
 #include "nsRect.h"
 #include "nsPoint.h"
+#include "nsICharsetConverterManager.h"
 #include "nsIIOService.h"
 #include "nsNetUtil.h"
 #include "nsIDocument.h"
 #include "nsIContent.h"
 #include "nsView.h"
+#include "gfxASurface.h"
 #include "gfxContext.h"
 #include "nsCocoaUtils.h"
-#include "mozilla/gfx/2D.h"
-#include "gfxPlatform.h"
-
-using namespace mozilla;
-using namespace mozilla::gfx;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* sCocoaLog;
@@ -118,8 +115,7 @@ static nsresult SetUpDragClipboard(nsISupportsArray* aTransferableArray)
       else if (currentKey == NSTIFFPboardType) {
         [dragPBoard setData:currentValue forType:currentKey];
       }
-      else if (currentKey == NSFilesPromisePboardType ||
-               currentKey == NSFilenamesPboardType) {
+      else if (currentKey == NSFilesPromisePboardType) {
         [dragPBoard setPropertyList:currentValue forType:currentKey];        
       }
     }
@@ -145,12 +141,12 @@ nsDragService::ConstructDragImage(nsIDOMNode* aDOMNode,
 
   CGFloat scaleFactor = nsCocoaUtils::GetBackingScaleFactor(gLastDragView);
 
-  RefPtr<SourceSurface> surface;
+  nsRefPtr<gfxASurface> surface;
   nsPresContext* pc;
   nsresult rv = DrawDrag(aDOMNode, aRegion,
                          NSToIntRound(screenPoint.x),
                          NSToIntRound(screenPoint.y),
-                         aDragRect, &surface, &pc);
+                         aDragRect, getter_AddRefs(surface), &pc);
   if (!aDragRect->width || !aDragRect->height) {
     // just use some suitable defaults
     int32_t size = nsCocoaUtils::CocoaPointsToDevPixels(20, scaleFactor);
@@ -166,19 +162,17 @@ nsDragService::ConstructDragImage(nsIDOMNode* aDOMNode,
   uint32_t height = aDragRect->height;
 
   nsRefPtr<gfxImageSurface> imgSurface = new gfxImageSurface(
-    gfxIntSize(width, height), gfxImageFormat::ARGB32);
+    gfxIntSize(width, height), gfxImageSurface::ImageFormatARGB32);
   if (!imgSurface)
     return nil;
 
-  RefPtr<DrawTarget> dt =
-    gfxPlatform::GetPlatform()->
-      CreateDrawTargetForSurface(imgSurface, IntSize(width, height));
-  if (!dt)
+  nsRefPtr<gfxContext> context = new gfxContext(imgSurface);
+  if (!context)
     return nil;
 
-  dt->FillRect(gfx::Rect(0, 0, width, height),
-               SurfacePattern(surface, ExtendMode::CLAMP),
-               DrawOptions(1.0f, CompositionOp::OP_SOURCE));
+  context->SetOperator(gfxContext::OPERATOR_SOURCE);
+  context->SetSource(surface);
+  context->Paint();
 
   uint32_t* imageData = (uint32_t*)imgSurface->Data();
   int32_t stride = imgSurface->Stride();
@@ -375,11 +369,11 @@ nsDragService::GetData(nsITransferable* aTransferable, uint32_t aItemIndex)
         continue;
 
       unsigned int stringLength = [filePath length];
-      unsigned int dataLength = (stringLength + 1) * sizeof(char16_t); // in bytes
-      char16_t* clipboardDataPtr = (char16_t*)malloc(dataLength);
+      unsigned int dataLength = (stringLength + 1) * sizeof(PRUnichar); // in bytes
+      PRUnichar* clipboardDataPtr = (PRUnichar*)malloc(dataLength);
       if (!clipboardDataPtr)
         return NS_ERROR_OUT_OF_MEMORY;
-      [filePath getCharacters:reinterpret_cast<unichar*>(clipboardDataPtr)];
+      [filePath getCharacters:clipboardDataPtr];
       clipboardDataPtr[stringLength] = 0; // null terminate
 
       nsCOMPtr<nsIFile> file;
@@ -388,7 +382,9 @@ nsDragService::GetData(nsITransferable* aTransferable, uint32_t aItemIndex)
       if (NS_FAILED(rv))
         continue;
 
-      aTransferable->SetTransferData(flavorStr, file, dataLength);
+      nsCOMPtr<nsISupports> genericDataWrapper;
+      genericDataWrapper = do_QueryInterface(file);
+      aTransferable->SetTransferData(flavorStr, genericDataWrapper, dataLength);
       
       break;
     }
@@ -416,11 +412,11 @@ nsDragService::GetData(nsITransferable* aTransferable, uint32_t aItemIndex)
       dataLength = signedDataLength;
 
       // skip BOM (Byte Order Mark to distinguish little or big endian)      
-      char16_t* clipboardDataPtrNoBOM = (char16_t*)clipboardDataPtr;
+      PRUnichar* clipboardDataPtrNoBOM = (PRUnichar*)clipboardDataPtr;
       if ((dataLength > 2) &&
           ((clipboardDataPtrNoBOM[0] == 0xFEFF) ||
            (clipboardDataPtrNoBOM[0] == 0xFFFE))) {
-        dataLength -= sizeof(char16_t);
+        dataLength -= sizeof(PRUnichar);
         clipboardDataPtrNoBOM += 1;
       }
 

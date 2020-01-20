@@ -12,12 +12,9 @@
 #include "nsIVolume.h"
 #include "nsIVolumeService.h"
 #include "nsString.h"
-#include "nsXULAppAPI.h"
 
 #define VOLUME_MANAGER_LOG_TAG  "nsVolumeMountLock"
 #include "VolumeManagerLog.h"
-#include "nsServiceManagerUtils.h"
-#include "mozilla/dom/power/PowerManagerService.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::services;
@@ -25,8 +22,8 @@ using namespace mozilla::services;
 namespace mozilla {
 namespace system {
 
-NS_IMPL_ISUPPORTS(nsVolumeMountLock, nsIVolumeMountLock,
-                  nsIObserver, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS3(nsVolumeMountLock, nsIVolumeMountLock,
+                   nsIObserver, nsISupportsWeakReference)
 
 // static
 already_AddRefed<nsVolumeMountLock>
@@ -95,7 +92,7 @@ NS_IMETHODIMP nsVolumeMountLock::Unlock()
   return NS_OK;
 }
 
-NS_IMETHODIMP nsVolumeMountLock::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
+NS_IMETHODIMP nsVolumeMountLock::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* aData)
 {
   if (strcmp(aTopic, NS_VOLUME_STATE_CHANGED) != 0) {
     return NS_OK;
@@ -142,18 +139,14 @@ NS_IMETHODIMP nsVolumeMountLock::Observe(nsISupports* aSubject, const char* aTop
   mWakeLock = nullptr;
   mVolumeGeneration = mountGeneration;
 
-  nsRefPtr<power::PowerManagerService> pmService =
-    power::PowerManagerService::GetInstance();
+  nsCOMPtr<nsIPowerManagerService> pmService =
+    do_GetService(POWERMANAGERSERVICE_CONTRACTID);
   NS_ENSURE_TRUE(pmService, NS_ERROR_FAILURE);
 
   nsString mountLockName;
   vol->GetMountLockName(mountLockName);
-
-  ErrorResult err;
-  mWakeLock = pmService->NewWakeLock(mountLockName, nullptr, err);
-  if (err.Failed()) {
-    return err.ErrorCode();
-  }
+  rv = pmService->NewWakeLock(mountLockName, nullptr, getter_AddRefs(mWakeLock));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   LOG("nsVolumeMountLock acquired for '%s' gen %d",
       NS_LossyConvertUTF16toASCII(mVolumeName).get(), mVolumeGeneration);

@@ -7,7 +7,7 @@
 #include "nsIDOMClassInfo.h"
 #include "jsapi.h" // For OBJECT_TO_JSVAL and JS_NewDateObjectMsec
 #include "jsfriendapi.h" // For js_DateGetMsecSinceEpoch
-#include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
+#include "Constants.h"
 
 using namespace mozilla::dom::mobilemessage;
 
@@ -26,8 +26,7 @@ NS_IMPL_ADDREF(SmsMessage)
 NS_IMPL_RELEASE(SmsMessage)
 
 SmsMessage::SmsMessage(int32_t aId,
-                       uint64_t aThreadId,
-                       const nsString& aIccId,
+                       const uint64_t aThreadId,
                        DeliveryState aDelivery,
                        DeliveryStatus aDeliveryStatus,
                        const nsString& aSender,
@@ -35,12 +34,9 @@ SmsMessage::SmsMessage(int32_t aId,
                        const nsString& aBody,
                        MessageClass aMessageClass,
                        uint64_t aTimestamp,
-                       uint64_t aSentTimestamp,
-                       uint64_t aDeliveryTimestamp,
                        bool aRead)
-  : mData(aId, aThreadId, aIccId, aDelivery, aDeliveryStatus,
-          aSender, aReceiver, aBody, aMessageClass, aTimestamp, aSentTimestamp,
-          aDeliveryTimestamp, aRead)
+  : mData(aId, aThreadId, aDelivery, aDeliveryStatus, aSender, aReceiver, aBody,
+          aMessageClass, aTimestamp, aRead)
 {
 }
 
@@ -51,18 +47,15 @@ SmsMessage::SmsMessage(const SmsMessageData& aData)
 
 /* static */ nsresult
 SmsMessage::Create(int32_t aId,
-                   uint64_t aThreadId,
-                   const nsAString& aIccId,
+                   const uint64_t aThreadId,
                    const nsAString& aDelivery,
                    const nsAString& aDeliveryStatus,
                    const nsAString& aSender,
                    const nsAString& aReceiver,
                    const nsAString& aBody,
                    const nsAString& aMessageClass,
-                   uint64_t aTimestamp,
-                   uint64_t aSentTimestamp,
-                   uint64_t aDeliveryTimestamp,
-                   bool aRead,
+                   const JS::Value& aTimestamp,
+                   const bool aRead,
                    JSContext* aCx,
                    nsIDOMMozSmsMessage** aMessage)
 {
@@ -73,7 +66,6 @@ SmsMessage::Create(int32_t aId,
   SmsMessageData data;
   data.id() = aId;
   data.threadId() = aThreadId;
-  data.iccId() = nsString(aIccId);
   data.sender() = nsString(aSender);
   data.receiver() = nsString(aReceiver);
   data.body() = nsString(aBody);
@@ -117,14 +109,23 @@ SmsMessage::Create(int32_t aId,
     return NS_ERROR_INVALID_ARG;
   }
 
-  // Set |timestamp|.
-  data.timestamp() = aTimestamp;
-
-  // Set |sentTimestamp|.
-  data.sentTimestamp() = aSentTimestamp;
-
-  // Set |deliveryTimestamp|.
-  data.deliveryTimestamp() = aDeliveryTimestamp;
+  // We support both a Date object and a millisecond timestamp as a number.
+  if (aTimestamp.isObject()) {
+    JS::Rooted<JSObject*> obj(aCx, &aTimestamp.toObject());
+    if (!JS_ObjectIsDate(aCx, obj)) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    data.timestamp() = js_DateGetMsecSinceEpoch(obj);
+  } else {
+    if (!aTimestamp.isNumber()) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    double number = aTimestamp.toNumber();
+    if (static_cast<uint64_t>(number) != number) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    data.timestamp() = static_cast<uint64_t>(number);
+  }
 
   nsCOMPtr<nsIDOMMozSmsMessage> message = new SmsMessage(data);
   message.swap(*aMessage);
@@ -159,13 +160,6 @@ SmsMessage::GetThreadId(uint64_t* aThreadId)
 }
 
 NS_IMETHODIMP
-SmsMessage::GetIccId(nsAString& aIccId)
-{
-  aIccId = mData.iccId();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 SmsMessage::GetDelivery(nsAString& aDelivery)
 {
   switch (mData.delivery()) {
@@ -184,7 +178,8 @@ SmsMessage::GetDelivery(nsAString& aDelivery)
     case eDeliveryState_Unknown:
     case eDeliveryState_EndGuard:
     default:
-      MOZ_CRASH("We shouldn't get any other delivery state!");
+      MOZ_NOT_REACHED("We shouldn't get any other delivery state!");
+      return NS_ERROR_UNEXPECTED;
   }
 
   return NS_OK;
@@ -208,7 +203,8 @@ SmsMessage::GetDeliveryStatus(nsAString& aDeliveryStatus)
       break;
     case eDeliveryStatus_EndGuard:
     default:
-      MOZ_CRASH("We shouldn't get any other delivery status!");
+      MOZ_NOT_REACHED("We shouldn't get any other delivery status!");
+      return NS_ERROR_UNEXPECTED;
   }
 
   return NS_OK;
@@ -255,30 +251,20 @@ SmsMessage::GetMessageClass(nsAString& aMessageClass)
       aMessageClass = MESSAGE_CLASS_CLASS_3;
       break;
     default:
-      MOZ_CRASH("We shouldn't get any other message class!");
+      MOZ_NOT_REACHED("We shouldn't get any other message class!");
+      return NS_ERROR_UNEXPECTED;
   }
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-SmsMessage::GetTimestamp(DOMTimeStamp* aTimestamp)
+SmsMessage::GetTimestamp(JSContext* cx, JS::Value* aDate)
 {
-  *aTimestamp = mData.timestamp();
-  return NS_OK;
-}
+  JSObject *obj = JS_NewDateObjectMsec(cx, mData.timestamp());
+  NS_ENSURE_TRUE(obj, NS_ERROR_FAILURE);
 
-NS_IMETHODIMP
-SmsMessage::GetSentTimestamp(DOMTimeStamp* aSentTimestamp)
-{
-  *aSentTimestamp = mData.sentTimestamp();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-SmsMessage::GetDeliveryTimestamp(DOMTimeStamp* aDate)
-{
-  *aDate = mData.deliveryTimestamp();
+  *aDate = OBJECT_TO_JSVAL(obj);
   return NS_OK;
 }
 

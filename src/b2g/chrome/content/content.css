@@ -10,17 +10,13 @@ xul|window xul|scrollbar {
   display: none;
 }
 
-html xul|scrollbar[root="true"] {
-  position: relative;
-  z-index: 2147483647;
-}
-
 html xul|scrollbar {
   -moz-appearance: none !important;
+  position: relative;
   background-color: transparent !important;
   background-image: none !important;
   border: 0px solid transparent !important;
-  pointer-events: none;
+  z-index: 2147483647;
   opacity: 1;
 }
 
@@ -49,7 +45,7 @@ xul|scrollbar[orient="horizontal"] xul|thumb {
 xul|scrollbar:not([active="true"]),
 xul|scrollbar[disabled] {
   opacity: 0;
-  transition: opacity 1s ease;
+  -moz-transition: opacity 1s ease;
 }
 
 xul|scrollbarbutton {
@@ -72,10 +68,6 @@ xul|thumb {
   -moz-border-left-colors: none !important;
   border: 1px solid rgba(255, 255, 255, 0.4) !important;
   border-radius: 3px;
-}
-
-xul|scrollbarbutton {
-  background-image: none !important;
 }
 
 /* -moz-touch-enabled? media elements */
@@ -289,11 +281,6 @@ select:active,
 label:active,
 textarea:active {
   background-color: rgba(141, 184, 216, 0.5);
-}
-
-input[type=number] > div > div, /* work around bug 946184 */
-input[type=number]::-moz-number-spin-box {
-  display: none;
 }
 
 %ifdef MOZ_WIDGET_GONK

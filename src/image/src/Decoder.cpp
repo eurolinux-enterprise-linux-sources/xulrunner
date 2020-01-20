@@ -5,11 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Decoder.h"
+#include "nsIServiceManager.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "GeckoProfiler.h"
-#include "nsServiceManagerUtils.h"
-#include "nsComponentManagerUtils.h"
 
 namespace mozilla {
 namespace image {
@@ -271,12 +270,7 @@ Decoder::FlushInvalidations()
 void
 Decoder::SetSizeOnImage()
 {
-  MOZ_ASSERT(mImageMetadata.HasSize(), "Should have size");
-  MOZ_ASSERT(mImageMetadata.HasOrientation(), "Should have orientation");
-
-  mImage.SetSize(mImageMetadata.GetWidth(),
-                 mImageMetadata.GetHeight(),
-                 mImageMetadata.GetOrientation());
+  mImage.SetSize(mImageMetadata.GetWidth(), mImageMetadata.GetHeight());
 }
 
 /*
@@ -292,16 +286,14 @@ void Decoder::FinishInternal() { }
  */
 
 void
-Decoder::PostSize(int32_t aWidth,
-                  int32_t aHeight,
-                  Orientation aOrientation /* = Orientation()*/)
+Decoder::PostSize(int32_t aWidth, int32_t aHeight)
 {
   // Validate
   NS_ABORT_IF_FALSE(aWidth >= 0, "Width can't be negative!");
   NS_ABORT_IF_FALSE(aHeight >= 0, "Height can't be negative!");
 
   // Tell the image
-  mImageMetadata.SetSize(aWidth, aHeight, aOrientation);
+  mImageMetadata.SetSize(aWidth, aHeight);
 
   // Notify the observer
   if (mObserver)
@@ -353,9 +345,8 @@ Decoder::PostFrameStop(FrameBlender::FrameAlpha aFrameAlpha /* = FrameBlender::k
   }
 
   mCurrentFrame->SetFrameDisposalMethod(aDisposalMethod);
-  mCurrentFrame->SetRawTimeout(aTimeout);
+  mCurrentFrame->SetTimeout(aTimeout);
   mCurrentFrame->SetBlendMethod(aBlendMethod);
-  mCurrentFrame->ImageUpdated(mCurrentFrame->GetRect());
 
   // Flush any invalidations before we finish the frame
   FlushInvalidations();
@@ -419,7 +410,7 @@ Decoder::PostDecoderError(nsresult aFailureCode)
 void
 Decoder::NeedNewFrame(uint32_t framenum, uint32_t x_offset, uint32_t y_offset,
                       uint32_t width, uint32_t height,
-                      gfxImageFormat format,
+                      gfxASurface::gfxImageFormat format,
                       uint8_t palette_depth /* = 0 */)
 {
   // Decoders should never call NeedNewFrame without yielding back to Write().
@@ -438,7 +429,7 @@ Decoder::MarkFrameDirty()
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mCurrentFrame) {
-    mCurrentFrame->ApplyDirtToSurfaces();
+    mCurrentFrame->MarkImageDataDirty();
   }
 }
 

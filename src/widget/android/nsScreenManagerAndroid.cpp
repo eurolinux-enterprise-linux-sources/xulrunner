@@ -45,7 +45,9 @@ nsScreenAndroid::GetAvailRect(int32_t *outLeft, int32_t *outTop, int32_t *outWid
 NS_IMETHODIMP
 nsScreenAndroid::GetPixelDepth(int32_t *aPixelDepth)
 {
-    *aPixelDepth = AndroidBridge::Bridge()->GetScreenDepth();
+    // XXX do we need to lie here about 16bpp?  Or
+    // should we actually check and return the right thing?
+    *aPixelDepth = 16;
     return NS_OK;
 }
 
@@ -59,10 +61,10 @@ nsScreenAndroid::GetColorDepth(int32_t *aColorDepth)
 void
 nsScreenAndroid::ApplyMinimumBrightness(uint32_t aBrightness)
 {
-  mozilla::widget::android::GeckoAppShell::SetKeepScreenOn(aBrightness == BRIGHTNESS_FULL);
+  AndroidBridge::Bridge()->SetKeepScreenOn(aBrightness == BRIGHTNESS_FULL);
 }
 
-NS_IMPL_ISUPPORTS(nsScreenManagerAndroid, nsIScreenManager)
+NS_IMPL_ISUPPORTS1(nsScreenManagerAndroid, nsIScreenManager)
 
 nsScreenManagerAndroid::nsScreenManagerAndroid()
 {

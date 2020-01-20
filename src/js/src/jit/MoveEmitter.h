@@ -7,14 +7,12 @@
 #ifndef jit_MoveEmitter_h
 #define jit_MoveEmitter_h
 
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+#if defined(JS_CPU_X86) || defined(JS_CPU_X64)
 # include "jit/shared/MoveEmitter-x86-shared.h"
-#elif defined(JS_CODEGEN_ARM)
+#elif defined(JS_CPU_ARM)
 # include "jit/arm/MoveEmitter-arm.h"
-#elif defined(JS_CODEGEN_MIPS)
-# include "jit/mips/MoveEmitter-mips.h"
 #else
-# error "Unknown architecture!"
+# error "CPU Not Supported"
 #endif
 
 #endif /* jit_MoveEmitter_h */

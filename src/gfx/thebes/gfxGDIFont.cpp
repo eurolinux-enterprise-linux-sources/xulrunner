@@ -4,10 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxGDIFont.h"
-
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/WindowsVersion.h"
-
 #include "gfxGDIShaper.h"
 #include "gfxUniscribeShaper.h"
 #include "gfxHarfBuzzShaper.h"
@@ -17,7 +13,6 @@
 #include "gfxContext.h"
 #include "mozilla/Preferences.h"
 #include "nsUnicodeProperties.h"
-#include "gfxFontConstants.h"
 
 #include "cairo-win32.h"
 
@@ -47,7 +42,7 @@ gfxGDIFont::gfxGDIFont(GDIFontEntry *aFontEntry,
                        bool aNeedsBold,
                        AntialiasOption anAAOption)
     : gfxFont(aFontEntry, aFontStyle, anAAOption),
-      mFont(nullptr),
+      mFont(NULL),
       mFontFace(nullptr),
       mMetrics(nullptr),
       mSpaceGlyph(0),
@@ -90,13 +85,14 @@ gfxGDIFont::CopyWithAntialiasOption(AntialiasOption anAAOption)
 
 static bool
 UseUniscribe(gfxShapedText *aShapedText,
-             char16ptr_t aText,
+             const PRUnichar *aText,
              uint32_t aLength)
 {
     uint32_t flags = aShapedText->Flags();
     bool useGDI;
 
-    bool isXP = !IsVistaOrLater();
+    bool isXP = (gfxWindowsPlatform::WindowsOSVersion() 
+                       < gfxWindowsPlatform::kWindowsVista);
 
     // bug 561304 - Uniscribe bug produces bad positioning at certain
     // font sizes on XP, so default to GDI on XP using logic of 3.6
@@ -113,7 +109,7 @@ UseUniscribe(gfxShapedText *aShapedText,
 
 bool
 gfxGDIFont::ShapeText(gfxContext      *aContext,
-                      const char16_t *aText,
+                      const PRUnichar *aText,
                       uint32_t         aOffset,
                       uint32_t         aLength,
                       int32_t          aScript,
@@ -146,7 +142,8 @@ gfxGDIFont::ShapeText(gfxContext      *aContext,
 
     if (!ok && mHarfBuzzShaper) {
         if (gfxPlatform::GetPlatform()->UseHarfBuzzForScript(aScript) ||
-            (!IsVistaOrLater() &&
+            (gfxWindowsPlatform::WindowsOSVersion() <
+                 gfxWindowsPlatform::kWindowsVista &&
              ScriptShapingType(aScript) == SHAPING_INDIC &&
              !Preferences::GetBool("gfx.font_rendering.winxp-indic-uniscribe",
                                    false))) {
@@ -363,7 +360,7 @@ gfxGDIFont::Initialize()
 
             const MAT2 kIdentityMatrix = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
             GLYPHMETRICS gm;
-            DWORD len = GetGlyphOutlineW(dc.GetDC(), char16_t('x'), GGO_METRICS, &gm, 0, nullptr, &kIdentityMatrix);
+            DWORD len = GetGlyphOutlineW(dc.GetDC(), PRUnichar('x'), GGO_METRICS, &gm, 0, nullptr, &kIdentityMatrix);
             if (len == GDI_ERROR || gm.gmptGlyphOrigin.y <= 0) {
                 // 56% of ascent, best guess for true type
                 mMetrics->xHeight =
@@ -540,12 +537,12 @@ gfxGDIFont::FillLogFont(LOGFONTW& aLogFont, gfxFloat aSize,
 int32_t
 gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
 {
-    if (!mGlyphWidths) {
-        mGlyphWidths = new nsDataHashtable<nsUint32HashKey,int32_t>(200);
+    if (!mGlyphWidths.IsInitialized()) {
+        mGlyphWidths.Init(200);
     }
 
     int32_t width;
-    if (mGlyphWidths->Get(aGID, &width)) {
+    if (mGlyphWidths.Get(aGID, &width)) {
         return width;
     }
 
@@ -553,10 +550,10 @@ gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
     AutoSelectFont fs(dc, GetHFONT());
 
     int devWidth;
-    if (GetCharWidthI(dc, aGID, 1, nullptr, &devWidth)) {
+    if (GetCharWidthI(dc, aGID, 1, NULL, &devWidth)) {
         // ensure width is positive, 16.16 fixed-point value
         width = (devWidth & 0x7fff) << 16;
-        mGlyphWidths->Put(aGID, width);
+        mGlyphWidths.Put(aGID, width);
         return width;
     }
 
@@ -564,21 +561,18 @@ gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
 }
 
 void
-gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                   FontCacheSizes* aSizes) const
+gfxGDIFont::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                FontCacheSizes*   aSizes) const
 {
-    gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
-    aSizes->mFontInstances += aMallocSizeOf(mMetrics);
-    if (mGlyphWidths) {
-        aSizes->mFontInstances +=
-            mGlyphWidths->SizeOfExcludingThis(nullptr, aMallocSizeOf);
-    }
+    gfxFont::SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    aSizes->mFontInstances += aMallocSizeOf(mMetrics) +
+        mGlyphWidths.SizeOfExcludingThis(nullptr, aMallocSizeOf);
 }
 
 void
-gfxGDIFont::AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                   FontCacheSizes* aSizes) const
+gfxGDIFont::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                FontCacheSizes*   aSizes) const
 {
     aSizes->mFontInstances += aMallocSizeOf(this);
-    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
+    SizeOfExcludingThis(aMallocSizeOf, aSizes);
 }

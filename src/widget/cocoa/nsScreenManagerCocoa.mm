@@ -8,7 +8,7 @@
 #include "nsCOMPtr.h"
 #include "nsCocoaUtils.h"
 
-NS_IMPL_ISUPPORTS(nsScreenManagerCocoa, nsIScreenManager)
+NS_IMPL_ISUPPORTS1(nsScreenManagerCocoa, nsIScreenManager)
 
 nsScreenManagerCocoa::nsScreenManagerCocoa()
 {

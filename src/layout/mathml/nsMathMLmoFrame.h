@@ -7,8 +7,8 @@
 #define nsMathMLmoFrame_h___
 
 #include "mozilla/Attributes.h"
+#include "nsCOMPtr.h"
 #include "nsMathMLTokenFrame.h"
-#include "nsMathMLChar.h"
 
 //
 // <mo> -- operator, fence, or separator
@@ -38,11 +38,7 @@ public:
   NS_IMETHOD
   TransmitAutomaticData() MOZ_OVERRIDE;
 
-  virtual nsresult
-  SetInitialChildList(ChildListID     aListID,
-                      nsFrameList&    aChildList) MOZ_OVERRIDE;
-
-  virtual nsresult
+  NS_IMETHOD
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
@@ -50,11 +46,10 @@ public:
 
   virtual void MarkIntrinsicWidthsDirty() MOZ_OVERRIDE;
 
-  virtual void
-  GetIntrinsicWidthMetrics(nsRenderingContext* aRenderingContext,
-                           nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
+  virtual nscoord
+  GetIntrinsicWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
-  virtual nsresult
+  NS_IMETHOD
   AttributeChanged(int32_t         aNameSpaceID,
                    nsIAtom*        aAttribute,
                    int32_t         aModType) MOZ_OVERRIDE;
@@ -66,13 +61,6 @@ public:
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
           nsHTMLReflowMetrics& aDesiredStretchSize) MOZ_OVERRIDE;
-
-  virtual nsresult
-  ChildListChanged(int32_t aModType) MOZ_OVERRIDE
-  {
-    ProcessTextData();
-    return nsMathMLContainerFrame::ChildListChanged(aModType);
-  }
 
 protected:
   nsMathMLmoFrame(nsStyleContext* aContext) : nsMathMLTokenFrame(aContext) {}
@@ -86,7 +74,7 @@ protected:
   bool UseMathMLChar();
 
   // overload the base method so that we can setup our nsMathMLChar
-  void ProcessTextData();
+  virtual void ProcessTextData() MOZ_OVERRIDE;
 
   // helper to get our 'form' and lookup in the Operator Dictionary to fetch 
   // our default data that may come from there, and to complete the setup

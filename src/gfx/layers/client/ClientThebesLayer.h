@@ -6,46 +6,27 @@
 #ifndef GFX_CLIENTTHEBESLAYER_H
 #define GFX_CLIENTTHEBESLAYER_H
 
-#include "ClientLayerManager.h"         // for ClientLayerManager, etc
-#include "Layers.h"                     // for ThebesLayer, etc
-#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
-#include "mozilla/RefPtr.h"             // for RefPtr
-#include "mozilla/layers/ContentClient.h"  // for ContentClient
-#include "mozilla/mozalloc.h"           // for operator delete
-#include "nsDebug.h"                    // for NS_ASSERTION
-#include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
-#include "nsRegion.h"                   // for nsIntRegion
-#include "mozilla/layers/PLayerTransaction.h" // for ThebesLayerAttributes
-
-class gfxContext;
+#include "ClientLayerManager.h"
+#include "ThebesLayerBuffer.h"
+#include "mozilla/layers/ContentClient.h"
 
 namespace mozilla {
 namespace layers {
 
-class CompositableClient;
-class ShadowableLayer;
-class SpecificLayerAttributes;
-
 class ClientThebesLayer : public ThebesLayer, 
                           public ClientLayer {
 public:
-  typedef RotatedContentBuffer::PaintState PaintState;
-  typedef RotatedContentBuffer::ContentType ContentType;
+  typedef ThebesLayerBuffer::PaintState PaintState;
+  typedef ThebesLayerBuffer::ContentType ContentType;
 
   ClientThebesLayer(ClientLayerManager* aLayerManager) :
-    ThebesLayer(aLayerManager,
-                static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST())),
+    ThebesLayer(aLayerManager, static_cast<ClientLayer*>(this)),
     mContentClient(nullptr)
   {
     MOZ_COUNT_CTOR(ClientThebesLayer);
   }
   virtual ~ClientThebesLayer()
   {
-    if (mContentClient) {
-      mContentClient->OnDetach();
-      mContentClient = nullptr;
-    }
     MOZ_COUNT_DTOR(ClientThebesLayer);
   }
 
@@ -60,7 +41,7 @@ public:
     NS_ASSERTION(ClientManager()->InConstruction(),
                  "Can only set properties in construction phase");
     mInvalidRegion.Or(mInvalidRegion, aRegion);
-    mInvalidRegion.SimplifyOutward(20);
+    mInvalidRegion.SimplifyOutward(10);
     mValidRegion.Sub(mValidRegion, mInvalidRegion);
   }
 
@@ -100,6 +81,13 @@ public:
   }
 
 protected:
+  void
+  PaintBuffer(gfxContext* aContext,
+              const nsIntRegion& aRegionToDraw,
+              const nsIntRegion& aExtendedRegionToDraw,
+              const nsIntRegion& aRegionToInvalidate,
+              bool aDidSelfCopy);
+  
   void PaintThebes();
   
   void DestroyBackBuffer()

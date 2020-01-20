@@ -19,12 +19,7 @@
 #include "nsAuthInformationHolder.h"
 #include "nsIStringBundle.h"
 #include "nsIPrompt.h"
-#include "netCore.h"
-#include "nsIHttpAuthenticableChannel.h"
-#include "nsIURI.h"
-
-namespace mozilla {
-namespace net {
+#include "nsNetUtil.h"
 
 static void
 GetAppIdAndBrowserStatus(nsIChannel* aChan, uint32_t* aAppId, bool* aInBrowserElem)
@@ -51,13 +46,19 @@ nsHttpChannelAuthProvider::nsHttpChannelAuthProvider()
     , mTriedProxyAuth(false)
     , mTriedHostAuth(false)
     , mSuppressDefensiveAuth(false)
-    , mHttpHandler(gHttpHandler)
 {
+    // grab a reference to the handler to ensure that it doesn't go away.
+    nsHttpHandler *handler = gHttpHandler;
+    NS_ADDREF(handler);
 }
 
 nsHttpChannelAuthProvider::~nsHttpChannelAuthProvider()
 {
     MOZ_ASSERT(!mAuthChannel, "Disconnect wasn't called");
+
+    // release our reference to the handler
+    nsHttpHandler *handler = gHttpHandler;
+    NS_RELEASE(handler);
 }
 
 NS_IMETHODIMP
@@ -257,11 +258,11 @@ nsHttpChannelAuthProvider::Disconnect(nsresult status)
 
 // buf contains "domain\user"
 static void
-ParseUserDomain(char16_t *buf,
-                const char16_t **user,
-                const char16_t **domain)
+ParseUserDomain(PRUnichar *buf,
+                const PRUnichar **user,
+                const PRUnichar **domain)
 {
-    char16_t *p = buf;
+    PRUnichar *p = buf;
     while (*p && *p != '\\') ++p;
     if (!*p)
         return;
@@ -274,11 +275,11 @@ ParseUserDomain(char16_t *buf,
 static void
 SetIdent(nsHttpAuthIdentity &ident,
          uint32_t authFlags,
-         char16_t *userBuf,
-         char16_t *passBuf)
+         PRUnichar *userBuf,
+         PRUnichar *passBuf)
 {
-    const char16_t *user = userBuf;
-    const char16_t *domain = nullptr;
+    const PRUnichar *user = userBuf;
+    const PRUnichar *domain = nullptr;
 
     if (authFlags & nsIHttpAuthenticator::IDENTITY_INCLUDES_DOMAIN)
         ParseUserDomain(userBuf, &user, &domain);
@@ -835,8 +836,8 @@ nsHttpChannelAuthProvider::GetIdentityFromURI(uint32_t            authFlags,
     }
 
     if (!userBuf.IsEmpty()) {
-        SetIdent(ident, authFlags, (char16_t *) userBuf.get(),
-                 (char16_t *) passBuf.get());
+        SetIdent(ident, authFlags, (PRUnichar *) userBuf.get(),
+                 (PRUnichar *) passBuf.get());
     }
 }
 
@@ -853,7 +854,6 @@ nsHttpChannelAuthProvider::ParseRealm(const char *challenge,
     // but, we'll accept anything after the the "=" up to the first space, or
     // end-of-line, if the string is not quoted.
     //
-
     const char *p = PL_strcasestr(challenge, "realm=");
     if (p) {
         bool has_quote = false;
@@ -863,31 +863,21 @@ nsHttpChannelAuthProvider::ParseRealm(const char *challenge,
             p++;
         }
 
-        const char *end;
-        if (has_quote) {
-            end = p;
-            while (*end) {
-                if (*end == '\\') {
-                    // escaped character, store that one instead if not zero
-                    if (!*++end)
-                        break;
-                }
-                else if (*end == '\"')
-                    // end of string
-                    break;
+        const char *end = p;
+        while (*end && has_quote) {
+           // Loop through all the string characters to find the closing
+           // quote, ignoring escaped quotes.
+            if (*end == '"' && end[-1] != '\\')
+                break;
+            ++end;
+        }
 
-                realm.Append(*end);
-                ++end;
-            }
-        }
-        else {
-            // realm given without quotes
+        if (!has_quote)
             end = strchr(p, ' ');
-            if (end)
-                realm.Assign(p, end - p);
-            else
-                realm.Assign(p);
-        }
+        if (end)
+            realm.Assign(p, end - p);
+        else
+            realm.Assign(p);
     }
 }
 
@@ -1184,7 +1174,7 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
         return true;
 
     NS_ConvertUTF8toUTF16 ucsHost(host), ucsUser(user);
-    const char16_t *strs[2] = { ucsHost.get(), ucsUser.get() };
+    const PRUnichar *strs[2] = { ucsHost.get(), ucsUser.get() };
 
     nsXPIDLString msg;
     bundle->FormatStringFromName(bundleKey.get(), strs, 2, getter_Copies(msg));
@@ -1213,6 +1203,8 @@ nsHttpChannelAuthProvider::ConfirmAuth(const nsString &bundleKey,
     bool confirmed;
     if (doYesNoPrompt) {
         int32_t choice;
+        // The actual value is irrelevant but we shouldn't be handing out
+        // malformed JSBools to XPConnect.
         bool checkState = false;
         rv = prompt->ConfirmEx(nullptr, msg,
                                nsIPrompt::BUTTON_POS_1_DEFAULT +
@@ -1348,8 +1340,5 @@ nsHttpChannelAuthProvider::GetCurrentPath(nsACString &path)
     return rv;
 }
 
-NS_IMPL_ISUPPORTS(nsHttpChannelAuthProvider, nsICancelable,
-                  nsIHttpChannelAuthProvider, nsIAuthPromptCallback)
-
-} // namespace mozilla::net
-} // namespace mozilla
+NS_IMPL_ISUPPORTS3(nsHttpChannelAuthProvider, nsICancelable,
+                   nsIHttpChannelAuthProvider, nsIAuthPromptCallback)

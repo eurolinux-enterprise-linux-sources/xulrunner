@@ -8,10 +8,7 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "FreeSpaceWatcher",
-                                  "resource://gre/modules/FreeSpaceWatcher.jsm");
+Cu.import("resource://gre/modules/FreeSpaceWatcher.jsm");
 
 this.EXPORTED_SYMBOLS = ["AppDownloadManager"];
 
@@ -62,9 +59,6 @@ this.AppDownloadManager = {
    */
   get: function app_dlMgr_get(aManifestURL) {
     debug("Getting " + aManifestURL);
-    if (!this.downloads[aManifestURL]) {
-      return null;
-    }
     return this.downloads[aManifestURL];
   },
 

@@ -10,15 +10,16 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_viewsource'
 
-UNIFIED_SOURCES += [
+XPIDL_FLAGS += [
+    '-I$(topsrcdir)/netwerk/base/public',
+]
+
+MODULE = 'necko'
+
+CPP_SOURCES += [
     'nsViewSourceChannel.cpp',
     'nsViewSourceHandler.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
-FINAL_LIBRARY = 'necko'
-LOCAL_INCLUDES += [
-    '../../base/src',
-]
+LIBRARY_NAME = 'nkviewsource_s'
 

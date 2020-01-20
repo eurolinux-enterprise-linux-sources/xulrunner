@@ -9,7 +9,6 @@
 #include "nsIStringEnumerator.h"
 #include "nsICategoryManager.h"
 #include "nsISupportsPrimitives.h"
-#include "nsISimpleEnumerator.h"
 
 #define DEFAULT_SPELL_CHECKER "@mozilla.org/spellchecker/engine;1"
 
@@ -22,9 +21,9 @@ NS_INTERFACE_MAP_BEGIN(mozSpellChecker)
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(mozSpellChecker)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(mozSpellChecker,
-                         mTsDoc,
-                         mPersonalDictionary)
+NS_IMPL_CYCLE_COLLECTION_2(mozSpellChecker,
+                           mTsDoc,
+                           mPersonalDictionary)
 
 mozSpellChecker::mozSpellChecker()
 {
@@ -117,7 +116,7 @@ mozSpellChecker::CheckWord(const nsAString &aWord, bool *aIsMisspelled, nsTArray
   if(!correct){
     if(aSuggestions){
       uint32_t count,i;
-      char16_t **words;
+      PRUnichar **words;
       
       result = mSpellCheckingEngine->Suggest(PromiseFlatString(aWord).get(), &words, &count);
       NS_ENSURE_SUCCESS(result, result); 
@@ -237,7 +236,7 @@ NS_IMETHODIMP
 mozSpellChecker::AddWordToPersonalDictionary(const nsAString &aWord)
 {
   nsresult res;
-  char16_t empty=0;
+  PRUnichar empty=0;
   if (!mPersonalDictionary)
     return NS_ERROR_NULL_POINTER;
   res = mPersonalDictionary->AddWord(PromiseFlatString(aWord).get(),&empty);
@@ -248,7 +247,7 @@ NS_IMETHODIMP
 mozSpellChecker::RemoveWordFromPersonalDictionary(const nsAString &aWord)
 {
   nsresult res;
-  char16_t empty=0;
+  PRUnichar empty=0;
   if (!mPersonalDictionary)
     return NS_ERROR_NULL_POINTER;
   res = mPersonalDictionary->RemoveWord(PromiseFlatString(aWord).get(),&empty);
@@ -280,6 +279,7 @@ mozSpellChecker::GetDictionaryList(nsTArray<nsString> *aDictionaryList)
 
   // For catching duplicates
   nsClassHashtable<nsStringHashKey, nsCString> dictionaries;
+  dictionaries.Init();
 
   nsCOMArray<mozISpellCheckingEngine> spellCheckingEngines;
   rv = GetEngineList(&spellCheckingEngines);
@@ -289,7 +289,7 @@ mozSpellChecker::GetDictionaryList(nsTArray<nsString> *aDictionaryList)
     nsCOMPtr<mozISpellCheckingEngine> engine = spellCheckingEngines[i];
 
     uint32_t count = 0;
-    char16_t **words = nullptr;
+    PRUnichar **words = nullptr;
     engine->GetDictionaryList(&words, &count);
     for (uint32_t k = 0; k < count; k++) {
       nsAutoString dictName;

@@ -9,6 +9,7 @@
 
 #include "AudioNode.h"
 #include "AudioParam.h"
+#include "PlayingRefChangeHandler.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,32 +24,36 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DelayNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   AudioParam* DelayTime() const
   {
     return mDelay;
   }
 
-  virtual const DelayNode* AsDelayNode() const MOZ_OVERRIDE
+  virtual void NotifyInputConnected() MOZ_OVERRIDE
   {
-    return this;
+    mMediaStreamGraphUpdateIndexAtLastInputConnection =
+      mStream->Graph()->GetCurrentGraphUpdateIndex();
   }
-
-  virtual const char* NodeType() const
+  bool AcceptPlayingRefRelease(int64_t aLastGraphUpdateIndexProcessed) const
   {
-    return "DelayNode";
+    // Reject any requests to release mPlayingRef if the request was issued
+    // before the MediaStreamGraph was aware of the most-recently-added input
+    // connection.
+    return aLastGraphUpdateIndexProcessed >= mMediaStreamGraphUpdateIndexAtLastInputConnection;
   }
-
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 private:
   static void SendDelayToStream(AudioNode* aNode);
   friend class DelayNodeEngine;
+  friend class PlayingRefChangeHandler<DelayNode>;
 
 private:
+  int64_t mMediaStreamGraphUpdateIndexAtLastInputConnection;
   nsRefPtr<AudioParam> mDelay;
+  SelfReference<DelayNode> mPlayingRef;
 };
 
 }

@@ -136,10 +136,16 @@ var PluginHelper = {
   },
 
   getPluginMimeType: function (plugin) {
-    var tagMimetype = plugin.actualType;
+    var tagMimetype;
+    if (plugin instanceof HTMLAppletElement) {
+      tagMimetype = "application/x-java-vm";
+    } else {
+      tagMimetype = plugin.QueryInterface(Components.interfaces.nsIObjectLoadingContent)
+                          .actualType;
 
-    if (tagMimetype == "") {
-      tagMimetype = plugin.type;
+      if (tagMimetype == "") {
+        tagMimetype = plugin.type;
+      }
     }
 
     return tagMimetype;
@@ -148,7 +154,7 @@ var PluginHelper = {
   handlePluginBindingAttached: function (aTab, aEvent) {
     let plugin = aEvent.target;
     let doc = plugin.ownerDocument;
-    let overlay = doc.getAnonymousElementByAttribute(plugin, "anonid", "main");
+    let overlay = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
     if (!overlay || overlay._bindingHandled) {
       return;
     }
@@ -179,7 +185,6 @@ var PluginHelper = {
           // There's a large enough visible overlay that we don't need to show
           // the doorhanger.
           aTab.shouldShowPluginDoorhanger = false;
-          overlay.classList.add("visible");
         }
 
         // Add click to play listener to the overlay
@@ -194,20 +199,6 @@ var PluginHelper = {
 
           NativeWindow.doorhanger.hide("ask-to-play-plugins", tab.id);
         }, true);
-
-        // Add handlers for over- and underflow in case the plugin gets resized
-        plugin.addEventListener("overflow", function(event) {
-          overlay.classList.remove("visible");
-          PluginHelper.delayAndShowDoorHanger(aTab);
-        });
-        plugin.addEventListener("underflow", function(event) {
-          // This is also triggered if only one dimension underflows,
-          // the other dimension might still overflow
-          if (!PluginHelper.isTooSmall(plugin, overlay)) {
-            overlay.classList.add("visible");
-          }
-        });
-
         break;
       }
 
@@ -264,9 +255,8 @@ var PluginHelper = {
         // "Learn More..." link in the missing plugin error message.
         let learnMoreLink = doc.getAnonymousElementByAttribute(plugin, "class", "unsupportedLearnMoreLink");
         let learnMoreUrl = Services.urlFormatter.formatURLPref("app.support.baseURL");
-        learnMoreUrl += "mobile-flash-unsupported";
+        learnMoreUrl += "why-cant-firefox-mobile-play-flash-on-my-device";
         learnMoreLink.href = learnMoreUrl;
-        overlay.classList.add("visible");
         break;
       }
     }

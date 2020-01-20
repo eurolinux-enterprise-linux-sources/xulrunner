@@ -7,7 +7,7 @@
 
 include DOMTypes;
 
-using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+using mozilla::void_t;
 
 namespace mozilla {
 namespace jsipc {
@@ -37,24 +37,10 @@ union JSVariant
     JSIID;      /* XPC nsIID */
 };
 
-struct ReturnSuccess
+struct ReturnStatus
 {
-};
-
-struct ReturnStopIteration
-{
-};
-
-struct ReturnException
-{
-    JSVariant exn;
-};
-
-union ReturnStatus
-{
-    ReturnSuccess;
-    ReturnStopIteration;
-    ReturnException;
+    bool ok;        /* True for success, false for failure. */
+    JSVariant exn;  /* Exception, if |ok| is false. */
 };
 
 union JSParam
@@ -67,6 +53,7 @@ struct PPropertyDescriptor
 {
     uint64_t    objId;
     uint32_t    attrs;
+    uint32_t    shortid;
     JSVariant   value;
 
     // How to interpret these values depends on whether JSPROP_GETTER/SETTER

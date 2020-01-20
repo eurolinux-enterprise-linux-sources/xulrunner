@@ -43,8 +43,7 @@ this.NetUtil = {
      *         can be used to cancel the copying).  The consumer can ignore the
      *         return value if desired.
      */
-    asyncCopy: function NetUtil_asyncCopy(aSource, aSink,
-                                          aCallback = null)
+    asyncCopy: function NetUtil_asyncCopy(aSource, aSink, aCallback)
     {
         if (!aSource || !aSink) {
             let exception = new Components.Exception(
@@ -55,13 +54,28 @@ this.NetUtil = {
             throw exception;
         }
 
+        var sourceBuffered = ioUtil.inputStreamIsBuffered(aSource);
+        var sinkBuffered = ioUtil.outputStreamIsBuffered(aSink);
+
+        var ostream = aSink;
+        if (!sourceBuffered && !sinkBuffered) {
+            // wrap the sink in a buffered stream.
+            ostream = Cc["@mozilla.org/network/buffered-output-stream;1"].
+                      createInstance(Ci.nsIBufferedOutputStream);
+            ostream.init(aSink, 0x8000);
+            sinkBuffered = true;
+        }
+
         // make a stream copier
         var copier = Cc["@mozilla.org/network/async-stream-copier;1"].
-            createInstance(Ci.nsIAsyncStreamCopier2);
-        copier.init(aSource, aSink,
-                    null /* Default event target */,
-                    0 /* Default length */,
-                    true, true /* Auto-close */);
+            createInstance(Ci.nsIAsyncStreamCopier);
+
+        // Initialize the copier.  The 0x8000 should match the size of the
+        // buffer our buffered stream is using, for best performance.  If we're
+        // not using our own buffered stream, that's ok too.  But maybe we
+        // should just use the default net segment size here?
+        copier.init(aSource, ostream, null, sourceBuffered, sinkBuffered,
+                    0x8000, true, true);
 
         var observer;
         if (aCallback) {
@@ -76,7 +90,7 @@ this.NetUtil = {
         }
 
         // start the copying
-        copier.QueryInterface(Ci.nsIAsyncStreamCopier).asyncCopy(observer, null);
+        copier.asyncCopy(observer, null);
         return copier;
     },
 

@@ -4,9 +4,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+interface TouchList;
 interface WindowProxy;
 
-[Func="mozilla::dom::TouchEvent::PrefEnabled"]
+[PrefControlled]
 interface TouchEvent : UIEvent {
   readonly attribute TouchList touches;
   readonly attribute TouchList targetTouches;

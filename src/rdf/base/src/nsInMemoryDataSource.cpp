@@ -69,6 +69,11 @@
 #include "rdfIDataSource.h"
 #include "rdfITripleVisitor.h"
 
+#ifdef PR_LOGGING
+static PRLogModuleInfo* gLog = nullptr;
+#endif
+
+
 // This struct is used as the slot value in the forward and reverse
 // arcs hash tables.
 //
@@ -192,7 +197,7 @@ Assertion::~Assertion()
 {
     if (mHashEntry && u.hash.mPropertyHash) {
         PL_DHashTableEnumerate(u.hash.mPropertyHash, DeletePropertyHashEntry,
-                               nullptr);
+                               NULL);
         PL_DHashTableDestroy(u.hash.mPropertyHash);
         u.hash.mPropertyHash = nullptr;
     }
@@ -360,16 +365,7 @@ public:
 #endif
 
     bool    mPropagateChanges;
-
-private:
-#ifdef PR_LOGGING
-    static PRLogModuleInfo* gLog;
-#endif
 };
-
-#ifdef PR_LOGGING
-PRLogModuleInfo* InMemoryDataSource::gLog;
-#endif
 
 //----------------------------------------------------------------------
 //
@@ -469,7 +465,7 @@ InMemoryAssertionEnumeratorImpl::~InMemoryAssertionEnumeratorImpl()
 
 NS_IMPL_ADDREF(InMemoryAssertionEnumeratorImpl)
 NS_IMPL_RELEASE(InMemoryAssertionEnumeratorImpl)
-NS_IMPL_QUERY_INTERFACE(InMemoryAssertionEnumeratorImpl, nsISimpleEnumerator)
+NS_IMPL_QUERY_INTERFACE1(InMemoryAssertionEnumeratorImpl, nsISimpleEnumerator)
 
 NS_IMETHODIMP
 InMemoryAssertionEnumeratorImpl::HasMoreElements(bool* aResult)
@@ -637,7 +633,7 @@ InMemoryArcsEnumeratorImpl::~InMemoryArcsEnumeratorImpl()
 
 NS_IMPL_ADDREF(InMemoryArcsEnumeratorImpl)
 NS_IMPL_RELEASE(InMemoryArcsEnumeratorImpl)
-NS_IMPL_QUERY_INTERFACE(InMemoryArcsEnumeratorImpl, nsISimpleEnumerator)
+NS_IMPL_QUERY_INTERFACE1(InMemoryArcsEnumeratorImpl, nsISimpleEnumerator)
 
 NS_IMETHODIMP
 InMemoryArcsEnumeratorImpl::HasMoreElements(bool* aResult)
@@ -773,24 +769,28 @@ InMemoryDataSource::InMemoryDataSource(nsISupports* aOuter)
     mForwardArcs.ops = nullptr;
     mReverseArcs.ops = nullptr;
     mPropagateChanges = true;
-    MOZ_COUNT_CTOR(InMemoryDataSource);
 }
 
 
 nsresult
 InMemoryDataSource::Init()
 {
-    PL_DHashTableInit(&mForwardArcs,
-                      PL_DHashGetStubOps(),
-                      nullptr,
-                      sizeof(Entry),
-                      PL_DHASH_MIN_SIZE);
-
-    PL_DHashTableInit(&mReverseArcs,
-                      PL_DHashGetStubOps(),
-                      nullptr,
-                      sizeof(Entry),
-                      PL_DHASH_MIN_SIZE);
+    if (!PL_DHashTableInit(&mForwardArcs,
+                           PL_DHashGetStubOps(),
+                           nullptr,
+                           sizeof(Entry),
+                           PL_DHASH_MIN_SIZE)) {
+        mForwardArcs.ops = nullptr;
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+    if (!PL_DHashTableInit(&mReverseArcs,
+                           PL_DHashGetStubOps(),
+                           nullptr,
+                           sizeof(Entry),
+                           PL_DHASH_MIN_SIZE)) {
+        mReverseArcs.ops = nullptr;
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
 
 #ifdef PR_LOGGING
     if (! gLog)
@@ -813,7 +813,7 @@ InMemoryDataSource::~InMemoryDataSource()
         // associated with this data source. We only need to do this
         // for the forward arcs, because the reverse arcs table
         // indexes the exact same set of resources.
-        PL_DHashTableEnumerate(&mForwardArcs, DeleteForwardArcsEntry, nullptr);
+        PL_DHashTableEnumerate(&mForwardArcs, DeleteForwardArcsEntry, NULL);
         PL_DHashTableFinish(&mForwardArcs);
     }
     if (mReverseArcs.ops)
@@ -822,7 +822,6 @@ InMemoryDataSource::~InMemoryDataSource()
     PR_LOG(gLog, PR_LOG_NOTICE,
            ("InMemoryDataSource(%p): destroyed.", this));
 
-    MOZ_COUNT_DTOR(InMemoryDataSource);
 }
 
 PLDHashOperator
@@ -845,8 +844,6 @@ InMemoryDataSource::DeleteForwardArcsEntry(PLDHashTable* aTable, PLDHashEntryHdr
 
 
 ////////////////////////////////////////////////////////////////////////
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(InMemoryDataSource)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(InMemoryDataSource)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mObservers)
@@ -1736,7 +1733,7 @@ InMemoryDataSource::EnsureFastContainment(nsIRDFResource* aSource)
     // Add the datasource's owning reference.
     hashAssertion->AddRef();
 
-    Assertion *first = GetForwardArcs(aSource);
+    register Assertion *first = GetForwardArcs(aSource);
     SetForwardArcs(aSource, hashAssertion);
 
     // mutate references of existing forward assertions into this hash

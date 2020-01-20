@@ -1,6 +1,7 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sw=4 et tw=99 ft=cpp:
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -9,8 +10,8 @@
  * are faster to access again.
  */
 
-#ifndef mozilla_SplayTree_h
-#define mozilla_SplayTree_h
+#ifndef mozilla_SplayTree_h_
+#define mozilla_SplayTree_h_
 
 #include "mozilla/Assertions.h"
 #include "mozilla/NullPtr.h"
@@ -52,30 +53,31 @@ template<typename T, class Comparator>
 class SplayTree
 {
     T* root;
+    T* freeList;
 
   public:
     SplayTree()
-      : root(nullptr)
+      : root(nullptr), freeList(nullptr)
     {}
 
     bool empty() const {
       return !root;
     }
 
-    T* find(const T& v)
+    bool contains(const T& v)
     {
       if (empty())
-        return nullptr;
+        return false;
 
       T* last = lookup(v);
       splay(last);
       checkCoherency(root, nullptr);
-      return Comparator::compare(v, *last) == 0 ? last : nullptr;
+      return Comparator::compare(v, *last) == 0;
     }
 
     bool insert(T* v)
     {
-      MOZ_ASSERT(!find(*v), "Duplicate elements are not allowed.");
+      MOZ_ASSERT(!contains(*v), "Duplicate elements are not allowed.");
 
       if (!root) {
         root = v;
@@ -280,4 +282,4 @@ class SplayTree
 
 }  /* namespace mozilla */
 
-#endif /* mozilla_SplayTree_h */
+#endif /* mozilla_SplayTree_h_ */

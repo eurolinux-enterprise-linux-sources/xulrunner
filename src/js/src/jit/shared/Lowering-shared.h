@@ -10,6 +10,7 @@
 // This file declares the structures that are used for attaching LIR to a
 // MIRGraph.
 
+#include "jit/IonAllocPolicy.h"
 #include "jit/LIR.h"
 
 namespace js {
@@ -31,7 +32,6 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     LIRGraph &lirGraph_;
     LBlock *current;
     MResumePoint *lastResumePoint_;
-    LRecoverInfo *cachedRecoverInfo_;
     LOsiPoint *osiPoint_;
 
   public:
@@ -39,9 +39,8 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
       : gen(gen),
         graph(graph),
         lirGraph_(lirGraph),
-        lastResumePoint_(nullptr),
-        cachedRecoverInfo_(nullptr),
-        osiPoint_(nullptr)
+        lastResumePoint_(NULL),
+        osiPoint_(NULL)
     { }
 
     MIRGenerator *mir() {
@@ -74,7 +73,6 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     inline LUse useFixed(MDefinition *mir, Register reg);
     inline LUse useFixed(MDefinition *mir, FloatRegister reg);
     inline LUse useFixed(MDefinition *mir, AnyRegister reg);
-    inline LUse useFixedAtStart(MDefinition *mir, Register reg);
     inline LAllocation useOrConstant(MDefinition *mir);
     // "Any" is architecture dependent, and will include registers and stack slots on X86,
     // and only registers on ARM.
@@ -88,7 +86,6 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     inline LAllocation useKeepaliveOrConstant(MDefinition *mir);
     inline LAllocation useRegisterOrConstant(MDefinition *mir);
     inline LAllocation useRegisterOrConstantAtStart(MDefinition *mir);
-    inline LAllocation useRegisterOrNonNegativeConstantAtStart(MDefinition *mir);
     inline LAllocation useRegisterOrNonDoubleConstant(MDefinition *mir);
 
 #ifdef JS_NUNBOX32
@@ -106,8 +103,7 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     // These create temporary register requests.
     inline LDefinition temp(LDefinition::Type type = LDefinition::GENERAL,
                             LDefinition::Policy policy = LDefinition::DEFAULT);
-    inline LDefinition tempFloat32();
-    inline LDefinition tempDouble();
+    inline LDefinition tempFloat();
     inline LDefinition tempCopy(MDefinition *input, uint32_t reusedInput);
 
     // Note that the fixed register has a GENERAL type.
@@ -142,27 +138,22 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
     // redefine(), but used when creating new LIR.
     inline bool defineAs(LInstruction *outLir, MDefinition *outMir, MDefinition *inMir);
 
-    TempAllocator &alloc() const {
-        return graph.alloc();
-    }
-
     uint32_t getVirtualRegister() {
         return lirGraph_.getVirtualRegister();
     }
 
     template <typename T> void annotate(T *ins);
-    template <typename T> bool add(T *ins, MInstruction *mir = nullptr);
+    template <typename T> bool add(T *ins, MInstruction *mir = NULL);
 
     void lowerTypedPhiInput(MPhi *phi, uint32_t inputPosition, LBlock *block, size_t lirIndex);
     bool defineTypedPhi(MPhi *phi, size_t lirIndex);
 
     LOsiPoint *popOsiPoint() {
         LOsiPoint *tmp = osiPoint_;
-        osiPoint_ = nullptr;
+        osiPoint_ = NULL;
         return tmp;
     }
 
-    LRecoverInfo *getRecoverInfo(MResumePoint *rp);
     LSnapshot *buildSnapshot(LInstruction *ins, MResumePoint *rp, BailoutKind kind);
     bool assignPostSnapshot(MInstruction *mir, LInstruction *ins);
 
@@ -187,16 +178,6 @@ class LIRGeneratorShared : public MInstructionVisitorWithDefaults
 
     // Whether to generate typed array accesses on statically known objects.
     static bool allowStaticTypedArrayAccesses() {
-        return false;
-    }
-
-     // Whether we can emit Float32 specific optimizations.
-    static bool allowFloat32Optimizations() {
-       return false;
-    }
-
-    // Whether we can inline ForkJoinGetSlice.
-    static bool allowInlineForkJoinGetSlice() {
         return false;
     }
 };

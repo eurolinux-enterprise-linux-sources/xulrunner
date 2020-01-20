@@ -10,8 +10,6 @@
 #include "nsStyleConsts.h"
 #include "nsCocoaFeatures.h"
 #include "gfxFont.h"
-#include "gfxFontConstants.h"
-#include "mozilla/gfx/2D.h"
 
 #import <Cocoa/Cocoa.h>
 
@@ -251,13 +249,16 @@ nsLookAndFeel::NativeGetColor(ColorID aID, nscolor &aColor)
       aColor = GetColorFromNSColor([NSColor selectedMenuItemTextColor]);
       break;      
     case eColorID__moz_mac_disabledtoolbartext:
-      aColor = GetColorFromNSColor([NSColor disabledControlTextColor]);
+      aColor = NS_RGB(0x3F,0x3F,0x3F);
       break;
     case eColorID__moz_mac_menuselect:
       aColor = GetColorFromNSColor([NSColor alternateSelectedControlColor]);
       break;
     case eColorID__moz_buttondefault:
       aColor = NS_RGB(0xDC,0xDC,0xDC);
+      break;
+    case eColorID__moz_mac_alternateprimaryhighlight:
+      aColor = GetColorFromNSColor([NSColor alternateSelectedControlColor]);
       break;
     case eColorID__moz_cellhighlight:
     case eColorID__moz_html_cellhighlight:
@@ -311,7 +312,7 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       break;
     case eIntID_SelectTextfieldsOnKeyFocus:
       // Select textfield content when focused by kbd
-      // used by EventStateManager::sTextfieldSelectModel
+      // used by nsEventStateManager::sTextfieldSelectModel
       aResult = 1;
       break;
     case eIntID_SubmenuDelay:
@@ -357,15 +358,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_AllowOverlayScrollbarsOverlap:
       aResult = AllowOverlayScrollbarsOverlap() ? 1 : 0;
       break;
-    case eIntID_ScrollbarDisplayOnMouseMove:
-      aResult = 0;
-      break;
-    case eIntID_ScrollbarFadeBeginDelay:
-      aResult = 450;
-      break;
-    case eIntID_ScrollbarFadeDuration:
-      aResult = 200;
-      break;
     case eIntID_TreeOpenDelay:
       aResult = 1000;
       break;
@@ -385,8 +377,8 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_WindowsClassic:
     case eIntID_WindowsDefaultTheme:
     case eIntID_TouchEnabled:
+    case eIntID_MaemoClassic:
     case eIntID_WindowsThemeIdentifier:
-    case eIntID_OperatingSystemVersionIdentifier:
       aResult = 0;
       res = NS_ERROR_NOT_IMPLEMENTED;
       break;
@@ -446,9 +438,6 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         aResult = [NSEvent isSwipeTrackingFromScrollEventsEnabled] ? 1 : 0;
       }
       break;
-    case eIntID_ColorPickerAvailable:
-      aResult = 1;
-      break;
     default:
       aResult = 0;
       res = NS_ERROR_FAILURE;
@@ -502,7 +491,7 @@ bool nsLookAndFeel::AllowOverlayScrollbarsOverlap()
 static void GetStringForNSString(const NSString *aSrc, nsAString& aDest)
 {
     aDest.SetLength([aSrc length]);
-    [aSrc getCharacters:reinterpret_cast<unichar*>(aDest.BeginWriting())];
+    [aSrc getCharacters:aDest.BeginWriting()];
 }
 
 bool

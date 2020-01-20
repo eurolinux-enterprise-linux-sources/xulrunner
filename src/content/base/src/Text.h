@@ -15,11 +15,7 @@ namespace dom {
 class Text : public nsGenericDOMDataNode
 {
 public:
-  Text(already_AddRefed<nsINodeInfo>& aNodeInfo)
-    : nsGenericDOMDataNode(aNodeInfo)
-  {}
-
-  Text(already_AddRefed<nsINodeInfo>&& aNodeInfo)
+  Text(already_AddRefed<nsINodeInfo> aNodeInfo)
     : nsGenericDOMDataNode(aNodeInfo)
   {}
 
@@ -33,8 +29,8 @@ public:
   }
 
   static already_AddRefed<Text>
-  Constructor(const GlobalObject& aGlobal,
-              const nsAString& aData, ErrorResult& aRv);
+  Constructor(const GlobalObject& aGlobal, const nsAString& aData,
+              ErrorResult& aRv);
 };
 
 } // namespace dom

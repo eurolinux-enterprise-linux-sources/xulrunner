@@ -3,13 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/HTMLMenuItemElement.h"
-
-#include "mozilla/BasicEvents.h"
-#include "mozilla/EventDispatcher.h"
+#include "HTMLMenuItemElement.h"
 #include "mozilla/dom/HTMLMenuItemElementBinding.h"
+#include "nsEventDispatcher.h"
 #include "nsAttrValueInlines.h"
-#include "nsContentUtils.h"
 
 
 NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(MenuItem)
@@ -156,7 +153,7 @@ protected:
 
 
 HTMLMenuItemElement::HTMLMenuItemElement(
-  already_AddRefed<nsINodeInfo>& aNodeInfo, FromParser aFromParser)
+  already_AddRefed<nsINodeInfo> aNodeInfo, FromParser aFromParser)
   : nsGenericHTMLElement(aNodeInfo),
     mType(kMenuItemDefaultType->value),
     mParserCreating(false),
@@ -164,6 +161,7 @@ HTMLMenuItemElement::HTMLMenuItemElement(
     mCheckedDirty(false),
     mChecked(false)
 {
+  SetIsDOMBinding();
   mParserCreating = aFromParser;
 }
 
@@ -172,17 +170,26 @@ HTMLMenuItemElement::~HTMLMenuItemElement()
 }
 
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLMenuItemElement, nsGenericHTMLElement,
-                            nsIDOMHTMLMenuItemElement)
+NS_IMPL_ADDREF_INHERITED(HTMLMenuItemElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLMenuItemElement, Element)
+
+
+// QueryInterface implementation for HTMLMenuItemElement
+NS_INTERFACE_TABLE_HEAD(HTMLMenuItemElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLMenuItemElement,
+                                nsIDOMHTMLMenuItemElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
 
 //NS_IMPL_ELEMENT_CLONE(HTMLMenuItemElement)
 nsresult
 HTMLMenuItemElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 {
   *aResult = nullptr;
-  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
+  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
   nsRefPtr<HTMLMenuItemElement> it =
-    new HTMLMenuItemElement(ni, NOT_FROM_PARSER);
+    new HTMLMenuItemElement(ni.forget(), NOT_FROM_PARSER);
   nsresult rv = const_cast<HTMLMenuItemElement*>(this)->CopyInnerTo(it);
   if (NS_SUCCEEDED(rv)) {
     switch (mType) {
@@ -251,7 +258,7 @@ HTMLMenuItemElement::SetChecked(bool aChecked)
 }
 
 nsresult
-HTMLMenuItemElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLMenuItemElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 {
   if (aVisitor.mEvent->message == NS_MOUSE_CLICK) {
 
@@ -286,7 +293,7 @@ HTMLMenuItemElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
 }
 
 nsresult
-HTMLMenuItemElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
+HTMLMenuItemElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 {
   // Check to see if the event was cancelled.
   if (aVisitor.mEvent->message == NS_MOUSE_CLICK &&
@@ -371,9 +378,7 @@ void
 HTMLMenuItemElement::GetText(nsAString& aText)
 {
   nsAutoString text;
-  if (!nsContentUtils::GetNodeTextContent(this, false, text)) {
-    NS_RUNTIMEABORT("OOM");
-  }
+  nsContentUtils::GetNodeTextContent(this, false, text);
 
   text.CompressWhitespace(true, true);
   aText = text;
@@ -485,12 +490,10 @@ HTMLMenuItemElement::InitChecked()
 }
 
 JSObject*
-HTMLMenuItemElement::WrapNode(JSContext* aCx)
+HTMLMenuItemElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLMenuItemElementBinding::Wrap(aCx, this);
+  return HTMLMenuItemElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
 } // namespace mozilla
-
-#undef NS_ORIGINAL_CHECKED_VALUE

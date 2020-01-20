@@ -18,10 +18,7 @@ XPCOMUtils.defineLazyGetter(this, "Sanitizer", function () {
  * be removed when the user sanitizes their history.
  */
 function runTests() {
-  dontExpireThumbnailURLs([URL, URL_COPY]);
-
   yield clearHistory();
-  yield addVisitsAndRepopulateNewTabLinks(URL, next);
   yield createThumbnail();
 
   // Make sure Storage.copy() updates an existing file.
@@ -42,7 +39,6 @@ function runTests() {
     yield clearHistory();
   }
 
-  yield addVisitsAndRepopulateNewTabLinks(URL, next);
   yield createThumbnail();
 
   // Clear the last 10 minutes of browsing history.

@@ -11,8 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_CODING_QM_SELECT_H_
 #define WEBRTC_MODULES_VIDEO_CODING_QM_SELECT_H_
 
-#include "webrtc/common_types.h"
-#include "webrtc/typedefs.h"
+#include "common_types.h"
+#include "typedefs.h"
 
 /******************************************************/
 /* Quality Modes: Resolution and Robustness settings  */
@@ -231,9 +231,6 @@ class VCMQmResolution : public VCMQmMethod {
   // Output: the spatial and/or temporal scale change.
   int SelectResolution(VCMResolutionScale** qm);
 
-  // Update with current system load
-  void SetCPULoadState(CPULoadState state);
-
  private:
   // Set the default resolution action.
   void SetDefaultAction();
@@ -341,7 +338,6 @@ class VCMQmResolution : public VCMQmMethod {
   // large: i.e., (4/3) ^{kDownActionHistorySize} <= kMaxDownSample.
   ResolutionAction down_action_history_[kDownActionHistorySize];
   int num_layers_;
-  CPULoadState loadstate_;
 };
 
 // Robustness settings class.
@@ -374,5 +370,6 @@ class VCMQmRobustness : public VCMQmMethod {
   uint8_t prev_packet_loss_;
   uint8_t prev_code_rate_delta_;
 };
-}  // namespace webrtc
+}   // namespace webrtc
 #endif  // WEBRTC_MODULES_VIDEO_CODING_QM_SELECT_H_
+

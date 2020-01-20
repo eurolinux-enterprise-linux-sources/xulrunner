@@ -5,7 +5,7 @@
 
 #include "DeleteTextTxn.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/dom/Selection.h"
+#include "mozilla/Selection.h"
 #include "nsAutoPtr.h"
 #include "nsDebug.h"
 #include "nsEditor.h"
@@ -17,7 +17,6 @@
 #include "nsAString.h"
 
 using namespace mozilla;
-using namespace mozilla::dom;
 
 DeleteTextTxn::DeleteTextTxn() :
   EditTxn(),
@@ -29,8 +28,8 @@ DeleteTextTxn::DeleteTextTxn() :
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(DeleteTextTxn, EditTxn,
-                                   mCharData)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DeleteTextTxn, EditTxn,
+                                     mCharData)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DeleteTextTxn)
 NS_INTERFACE_MAP_END_INHERITING(EditTxn)

@@ -13,10 +13,10 @@
 ///
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Last changed  : $Date: 2014-01-07 13:41:23 -0600 (Tue, 07 Jan 2014) $
+// Last changed  : $Date$
 // File revision : $Revision: 4 $
 //
-// $Id: AAFilter.h 187 2014-01-07 19:41:23Z oparviai $
+// $Id$
 //
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -45,7 +45,6 @@
 #define AAFilter_H
 
 #include "STTypes.h"
-#include "FIFOSampleBuffer.h"
 
 namespace soundtouch
 {
@@ -85,14 +84,6 @@ public:
                   const SAMPLETYPE *src, 
                   uint numSamples, 
                   uint numChannels) const;
-
-    /// Applies the filter to the given src & dest pipes, so that processed amount of
-    /// samples get removed from src, and produced amount added to dest 
-    /// Note : The amount of outputted samples is by value of 'filter length' 
-    /// smaller than the amount of input samples.
-    uint evaluate(FIFOSampleBuffer &dest, 
-                  FIFOSampleBuffer &src) const;
-
 };
 
 }

@@ -1,20 +1,11 @@
 /*
- * Copyright 2012, Mozilla Foundation and contributors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright 2009-2011 Mozilla Foundation and contributors
+ * Licensed under the New BSD license. See LICENSE.txt or:
+ * http://opensource.org/licenses/BSD-3-Clause
  */
 
-'use strict';
+// define(function(require, exports, module) {
+
 // <INJECTED SOURCE:START>
 
 // THIS FILE IS GENERATED FROM SOURCE IN THE GCLI PROJECT
@@ -22,36 +13,28 @@
 
 var exports = {};
 
-var TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testNode.js</p>";
+const TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testNode.js</p>";
 
 function test() {
-  return Task.spawn(function() {
-    let options = yield helpers.openTab(TEST_URI);
-    yield helpers.openToolbar(options);
-    gcli.addItems(mockCommands.items);
-
-    yield helpers.runTests(options, exports);
-
-    gcli.removeItems(mockCommands.items);
-    yield helpers.closeToolbar(options);
-    yield helpers.closeTab(options);
-  }).then(finish, helpers.handleError);
+  helpers.addTabWithToolbar(TEST_URI, function(options) {
+    return helpers.runTests(options, exports);
+  }).then(finish);
 }
 
 // <INJECTED SOURCE:END>
 
-// var assert = require('../testharness/assert');
-// var helpers = require('./helpers');
-var nodetype = require('gcli/types/node');
+'use strict';
+
+// var assert = require('test/assert');
+// var helpers = require('gclitest/helpers');
+// var mockCommands = require('gclitest/mockCommands');
 
 exports.setup = function(options) {
-  if (options.window) {
-    nodetype.setDocument(options.window.document);
-  }
+  mockCommands.setup();
 };
 
 exports.shutdown = function(options) {
-  nodetype.unsetDocument();
+  mockCommands.shutdown();
 };
 
 exports.testNode = function(options) {
@@ -67,7 +50,7 @@ exports.testNode = function(options) {
         status: 'ERROR',
         args: {
           command: { name: 'tse' },
-          node: { status: 'INCOMPLETE' },
+          node: { status: 'INCOMPLETE', message: '' },
           nodes: { status: 'VALID' },
           nodes2: { status: 'VALID' }
         }
@@ -139,6 +122,7 @@ exports.testNode = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse *',
       check: {
         input:  'tse *',
@@ -164,11 +148,11 @@ exports.testNode = function(options) {
 };
 
 exports.testNodeDom = function(options) {
-  var requisition = options.requisition;
+  var requisition = options.display.requisition;
 
   return helpers.audit(options, [
     {
-      skipRemainingIf: options.isNoDom,
+      skipIf: options.isJsdom,
       setup:    'tse :root',
       check: {
         input:  'tse :root',
@@ -186,6 +170,7 @@ exports.testNodeDom = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse :root ',
       check: {
         input:  'tse :root ',
@@ -208,6 +193,7 @@ exports.testNodeDom = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse #gcli-nomatch',
       check: {
         input:  'tse #gcli-nomatch',
@@ -233,11 +219,11 @@ exports.testNodeDom = function(options) {
 };
 
 exports.testNodes = function(options) {
-  var requisition = options.requisition;
+  var requisition = options.display.requisition;
 
   return helpers.audit(options, [
     {
-      skipRemainingIf: options.isNoDom,
+      skipIf: options.isJsdom,
       setup:    'tse :root --nodes *',
       check: {
         input:  'tse :root --nodes *',
@@ -259,6 +245,7 @@ exports.testNodes = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse :root --nodes2 div',
       check: {
         input:  'tse :root --nodes2 div',
@@ -281,6 +268,7 @@ exports.testNodes = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse --nodes ffff',
       check: {
         input:  'tse --nodes ffff',
@@ -289,12 +277,15 @@ exports.testNodes = function(options) {
         cursor: 16,
         current: 'nodes',
         status: 'ERROR',
+        outputState: 'false:default',
+        tooltipState: 'true:isError',
         args: {
           command: { name: 'tse' },
           node: {
             value: undefined,
             arg: '',
-            status: 'INCOMPLETE'
+            status: 'INCOMPLETE',
+            message: ''
           },
           nodes: {
             value: undefined,
@@ -314,6 +305,7 @@ exports.testNodes = function(options) {
       }
     },
     {
+      skipIf: options.isJsdom,
       setup:    'tse --nodes2 ffff',
       check: {
         input:  'tse --nodes2 ffff',
@@ -322,12 +314,15 @@ exports.testNodes = function(options) {
         cursor: 17,
         current: 'nodes2',
         status: 'ERROR',
+        outputState: 'false:default',
+        tooltipState: 'false:default',
         args: {
           command: { name: 'tse' },
           node: {
             value: undefined,
             arg: '',
-            status: 'INCOMPLETE'
+            status: 'INCOMPLETE',
+            message: ''
           },
           nodes: { arg: '', status: 'VALID', message: '' },
           nodes2: { arg: ' --nodes2 ffff', status: 'VALID', message: '' }
@@ -346,3 +341,6 @@ exports.testNodes = function(options) {
     },
   ]);
 };
+
+
+// });

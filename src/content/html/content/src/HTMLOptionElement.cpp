@@ -23,7 +23,7 @@
 #include "nsIDOMHTMLSelectElement.h"
 #include "nsNodeInfoManager.h"
 #include "nsCOMPtr.h"
-#include "mozilla/EventStates.h"
+#include "nsEventStates.h"
 #include "nsContentCreatorFunctions.h"
 #include "mozAutoDocUpdate.h"
 #include "nsTextNode.h"
@@ -37,12 +37,14 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Option)
 namespace mozilla {
 namespace dom {
 
-HTMLOptionElement::HTMLOptionElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLOptionElement::HTMLOptionElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
     mSelectedChanged(false),
     mIsSelected(false),
     mIsInSetDefaultSelected(false)
 {
+  SetIsDOMBinding();
+
   // We start off enabled
   AddStatesSilently(NS_EVENT_STATE_ENABLED);
 }
@@ -51,8 +53,21 @@ HTMLOptionElement::~HTMLOptionElement()
 {
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLOptionElement, nsGenericHTMLElement,
-                            nsIDOMHTMLOptionElement)
+// ISupports
+
+
+NS_IMPL_ADDREF_INHERITED(HTMLOptionElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLOptionElement, Element)
+
+
+// QueryInterface implementation for HTMLOptionElement
+NS_INTERFACE_TABLE_HEAD(HTMLOptionElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLOptionElement,
+                                nsIDOMHTMLOptionElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
+
 
 NS_IMPL_ELEMENT_CLONE(HTMLOptionElement)
 
@@ -99,16 +114,15 @@ HTMLOptionElement::SetSelected(bool aValue)
   // so defer to it to get the answer
   HTMLSelectElement* selectInt = GetSelect();
   if (selectInt) {
-    int32_t index = Index();
-    uint32_t mask = HTMLSelectElement::SET_DISABLED | HTMLSelectElement::NOTIFY;
-    if (aValue) {
-      mask |= HTMLSelectElement::IS_SELECTED;
-    }
-
+    int32_t index;
+    GetIndex(&index);
     // This should end up calling SetSelectedInternal
-    selectInt->SetOptionsSelectedByIndex(index, index, mask);
+    return selectInt->SetOptionsSelectedByIndex(index, index, aValue,
+                                                false, true, true,
+                                                nullptr);
   } else {
     SetSelectedInternal(aValue, true);
+    return NS_OK;
   }
 
   return NS_OK;
@@ -123,30 +137,22 @@ NS_IMPL_BOOL_ATTR(HTMLOptionElement, Disabled, disabled)
 NS_IMETHODIMP
 HTMLOptionElement::GetIndex(int32_t* aIndex)
 {
-  *aIndex = Index();
-  return NS_OK;
-}
-
-int32_t
-HTMLOptionElement::Index()
-{
-  static int32_t defaultIndex = 0;
+  // When the element is not in a list of options, the index is 0.
+  *aIndex = 0;
 
   // Only select elements can contain a list of options.
   HTMLSelectElement* selectElement = GetSelect();
   if (!selectElement) {
-    return defaultIndex;
+    return NS_OK;
   }
 
   HTMLOptionsCollection* options = selectElement->GetOptions();
   if (!options) {
-    return defaultIndex;
+    return NS_OK;
   }
 
-  int32_t index = defaultIndex;
-  MOZ_ALWAYS_TRUE(NS_SUCCEEDED(
-    options->GetOptionIndex(this, 0, true, &index)));
-  return index;
+  // aIndex will not be set if GetOptionsIndex fails.
+  return options->GetOptionIndex(this, 0, true, aIndex);
 }
 
 bool
@@ -194,16 +200,6 @@ HTMLOptionElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     return NS_OK;
   }
 
-  bool defaultSelected = aValue;
-  // First make sure we actually set our mIsSelected state to reflect our new
-  // defaultSelected state.  If that turns out to be wrong,
-  // SetOptionsSelectedByIndex will fix it up.  But otherwise we can end up in a
-  // situation where mIsSelected is still false, but mSelectedChanged becomes
-  // true (later in this method, when we compare mIsSelected to
-  // defaultSelected), and then we start returning false for Selected() even
-  // though we're actually selected.
-  mIsSelected = defaultSelected;
-
   // We just changed out selected state (since we look at the "selected"
   // attribute when mSelectedChanged is false).  Let's tell our select about
   // it.
@@ -212,35 +208,30 @@ HTMLOptionElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     return NS_OK;
   }
 
+  // Note that at this point mSelectedChanged is false and as long as that's
+  // true it doesn't matter what value mIsSelected has.
   NS_ASSERTION(!mSelectedChanged, "Shouldn't be here");
 
+  bool newSelected = (aValue != nullptr);
   bool inSetDefaultSelected = mIsInSetDefaultSelected;
   mIsInSetDefaultSelected = true;
 
-  int32_t index = Index();
-  uint32_t mask = HTMLSelectElement::SET_DISABLED;
-  if (defaultSelected) {
-    mask |= HTMLSelectElement::IS_SELECTED;
-  }
-
-  if (aNotify) {
-    mask |= HTMLSelectElement::NOTIFY;
-  }
-
-  // This can end up calling SetSelectedInternal if our selected state needs to
-  // change, which we will allow to take effect so that parts of
-  // SetOptionsSelectedByIndex that might depend on it working don't get
-  // confused.
-  selectInt->SetOptionsSelectedByIndex(index, index, mask);
+  int32_t index;
+  GetIndex(&index);
+  // This should end up calling SetSelectedInternal, which we will allow to
+  // take effect so that parts of SetOptionsSelectedByIndex that might depend
+  // on it working don't get confused.
+  rv = selectInt->SetOptionsSelectedByIndex(index, index, newSelected,
+                                            false, true, aNotify,
+                                            nullptr);
 
   // Now reset our members; when we finish the attr set we'll end up with the
   // rigt selected state.
   mIsInSetDefaultSelected = inSetDefaultSelected;
-  // mIsSelected might have been changed by SetOptionsSelectedByIndex.  Possibly
-  // more than once; make sure our mSelectedChanged state is set correctly.
-  mSelectedChanged = mIsSelected != defaultSelected;
+  mSelectedChanged = false;
+  // mIsSelected doesn't matter while mSelectedChanged is false
 
-  return NS_OK;
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -299,10 +290,10 @@ HTMLOptionElement::UnbindFromTree(bool aDeep, bool aNullParent)
   UpdateState(false);
 }
 
-EventStates
+nsEventStates
 HTMLOptionElement::IntrinsicState() const
 {
-  EventStates state = nsGenericHTMLElement::IntrinsicState();
+  nsEventStates state = nsGenericHTMLElement::IntrinsicState();
   if (Selected()) {
     state |= NS_EVENT_STATE_CHECKED;
   }
@@ -356,19 +347,19 @@ HTMLOptionElement::Option(const GlobalObject& aGlobal,
                           const Optional<bool>& aDefaultSelected,
                           const Optional<bool>& aSelected, ErrorResult& aError)
 {
-  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.Get());
   nsIDocument* doc;
   if (!win || !(doc = win->GetExtantDoc())) {
     aError.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  already_AddRefed<nsINodeInfo> nodeInfo =
+  nsCOMPtr<nsINodeInfo> nodeInfo =
     doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::option, nullptr,
                                         kNameSpaceID_XHTML,
                                         nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<HTMLOptionElement> option = new HTMLOptionElement(nodeInfo);
+  nsRefPtr<HTMLOptionElement> option = new HTMLOptionElement(nodeInfo.forget());
 
   if (aText.WasPassed()) {
     // Create a new text node and append it to the option
@@ -428,9 +419,9 @@ HTMLOptionElement::CopyInnerTo(Element* aDest)
 }
 
 JSObject*
-HTMLOptionElement::WrapNode(JSContext* aCx)
+HTMLOptionElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLOptionElementBinding::Wrap(aCx, this);
+  return HTMLOptionElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

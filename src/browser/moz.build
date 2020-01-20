@@ -9,7 +9,6 @@ CONFIGURE_SUBST_FILES += ['installer/Makefile']
 PARALLEL_DIRS += [
     'base',
     'components',
-    'experiments',
     'fuel',
     'locales',
     'modules',
@@ -28,5 +27,3 @@ if CONFIG['MOZ_METRO']:
 if CONFIG['MAKENSISU']:
     DIRS += ['installer/windows']
 
-DIST_SUBDIR = 'browser'
-export('DIST_SUBDIR')

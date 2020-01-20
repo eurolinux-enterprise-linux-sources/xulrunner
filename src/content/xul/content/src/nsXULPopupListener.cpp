@@ -19,6 +19,7 @@
 #include "nsContentCID.h"
 #include "nsContentUtils.h"
 #include "nsXULPopupManager.h"
+#include "nsEventStateManager.h"
 #include "nsIScriptContext.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMXULDocument.h"
@@ -30,10 +31,7 @@
 #include "nsFrameManager.h"
 #include "nsHTMLReflowState.h"
 #include "nsIObjectLoadingContent.h"
-#include "mozilla/EventStateManager.h"
-#include "mozilla/EventStates.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/dom/Event.h" // for nsIDOMEvent::InternalDOMEvent()
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/FragmentOrElement.h"
 
@@ -45,13 +43,14 @@
 #include "nsViewManager.h"
 #include "nsError.h"
 #include "nsMenuFrame.h"
+#include "nsDOMEvent.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 // on win32 and os/2, context menus come up on mouse up. On other platforms,
 // they appear on mouse down. Certain bits of code care about this difference.
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
 #define NS_CONTEXT_MENU_IS_MOUSEUP 1
 #endif
 
@@ -66,7 +65,7 @@ nsXULPopupListener::~nsXULPopupListener(void)
   ClosePopup();
 }
 
-NS_IMPL_CYCLE_COLLECTION(nsXULPopupListener, mElement, mPopupContent)
+NS_IMPL_CYCLE_COLLECTION_2(nsXULPopupListener, mElement, mPopupContent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULPopupListener)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXULPopupListener)
 
@@ -107,7 +106,7 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
        (eventType.EqualsLiteral("contextmenu") && mIsContext)))
     return NS_OK;
 
-  int16_t button;
+  uint16_t button;
 
   nsCOMPtr<nsIDOMMouseEvent> mouseEvent = do_QueryInterface(aEvent);
   if (!mouseEvent) {
@@ -135,16 +134,6 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
     if (!targetNode) {
       return NS_ERROR_FAILURE;
     }
-  }
-
-  nsCOMPtr<nsIContent> targetContent = do_QueryInterface(target);
-  if (!targetContent) {
-    return NS_OK;
-  }
-  if (targetContent->Tag() == nsGkAtoms::browser &&
-      targetContent->IsXUL() &&
-      EventStateManager::IsRemoteTarget(targetContent)) {
-    return NS_OK;
   }
 
   bool preventDefault;
@@ -191,6 +180,7 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
   // If a menu item child was clicked on that leads to a popup needing
   // to show, we know (guaranteed) that we're dealing with a menu or
   // submenu of an already-showing popup.  We don't need to do anything at all.
+  nsCOMPtr<nsIContent> targetContent = do_QueryInterface(target);
   if (!mIsContext) {
     nsIAtom *tag = targetContent ? targetContent->Tag() : nullptr;
     if (tag == nsGkAtoms::menu || tag == nsGkAtoms::menuitem)
@@ -274,7 +264,7 @@ nsXULPopupListener::FireFocusOnTargetContent(nsIDOMNode* aTargetNode)
       }
     }
 
-    EventStateManager* esm = context->EventStateManager();
+    nsEventStateManager *esm = context->EventStateManager();
     nsCOMPtr<nsIContent> focusableContent = do_QueryInterface(element);
     esm->SetContentState(focusableContent, NS_EVENT_STATE_ACTIVE);
   }
@@ -297,7 +287,7 @@ nsXULPopupListener::ClosePopup()
     // fire events during destruction.  
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm)
-      pm->HidePopup(mPopupContent, false, true, true, false);
+      pm->HidePopup(mPopupContent, false, true, true);
     mPopupContent = nullptr;  // release the popup
   }
 } // ClosePopup

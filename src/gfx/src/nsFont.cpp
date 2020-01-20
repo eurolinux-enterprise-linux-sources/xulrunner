@@ -4,17 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsFont.h"
-#include "gfxFont.h"                    // for gfxFontStyle
-#include "gfxFontConstants.h"           // for NS_FONT_KERNING_AUTO, etc
-#include "gfxFontFeatures.h"            // for gfxFontFeature, etc
-#include "gfxFontUtils.h"               // for TRUETYPE_TAG
-#include "nsCRT.h"                      // for nsCRT
-#include "nsDebug.h"                    // for NS_ASSERTION
-#include "nsISupports.h"
+#include "nsString.h"
 #include "nsUnicharUtils.h"
-#include "nscore.h"                     // for char16_t
-#include "mozilla/ArrayUtils.h"
-#include "mozilla/gfx/2D.h"
+#include "nsCRT.h"
+#include "gfxFont.h"
 
 nsFont::nsFont(const char* aName, uint8_t aStyle, uint8_t aVariant,
                uint16_t aWeight, int16_t aStretch, uint8_t aDecoration,
@@ -29,7 +22,6 @@ nsFont::nsFont(const char* aName, uint8_t aStyle, uint8_t aVariant,
   weight = aWeight;
   stretch = aStretch;
   decorations = aDecoration;
-  smoothing = NS_FONT_SMOOTHING_AUTO;
   size = aSize;
   sizeAdjust = 0.0;
   kerning = NS_FONT_KERNING_AUTO;
@@ -54,7 +46,6 @@ nsFont::nsFont(const nsSubstring& aName, uint8_t aStyle, uint8_t aVariant,
   weight = aWeight;
   stretch = aStretch;
   decorations = aDecoration;
-  smoothing = NS_FONT_SMOOTHING_AUTO;
   size = aSize;
   sizeAdjust = 0.0;
   kerning = NS_FONT_KERNING_AUTO;
@@ -77,7 +68,6 @@ nsFont::nsFont(const nsFont& aOther)
   weight = aOther.weight;
   stretch = aOther.stretch;
   decorations = aOther.decorations;
-  smoothing = aOther.smoothing;
   size = aOther.size;
   sizeAdjust = aOther.sizeAdjust;
   kerning = aOther.kerning;
@@ -122,8 +112,7 @@ bool nsFont::BaseEquals(const nsFont& aOther) const
       (variantNumeric == aOther.variantNumeric) &&
       (variantPosition == aOther.variantPosition) &&
       (alternateValues == aOther.alternateValues) &&
-      (featureValueLookup == aOther.featureValueLookup) &&
-      (smoothing == aOther.smoothing)) {
+      (featureValueLookup == aOther.featureValueLookup)) {
     return true;
   }
   return false;
@@ -148,7 +137,6 @@ nsFont& nsFont::operator=(const nsFont& aOther)
   weight = aOther.weight;
   stretch = aOther.stretch;
   decorations = aOther.decorations;
-  smoothing = aOther.smoothing;
   size = aOther.size;
   sizeAdjust = aOther.sizeAdjust;
   kerning = aOther.kerning;
@@ -181,13 +169,14 @@ static bool IsGenericFontFamily(const nsString& aFamily)
   return generic != kGenericFont_NONE;
 }
 
-const char16_t kSingleQuote  = char16_t('\'');
-const char16_t kDoubleQuote  = char16_t('\"');
-const char16_t kComma        = char16_t(',');
+const PRUnichar kNullCh       = PRUnichar('\0');
+const PRUnichar kSingleQuote  = PRUnichar('\'');
+const PRUnichar kDoubleQuote  = PRUnichar('\"');
+const PRUnichar kComma        = PRUnichar(',');
 
 bool nsFont::EnumerateFamilies(nsFontFamilyEnumFunc aFunc, void* aData) const
 {
-  const char16_t *p, *p_end;
+  const PRUnichar *p, *p_end;
   name.BeginReading(p);
   name.EndReading(p_end);
   nsAutoString family;
@@ -200,10 +189,10 @@ bool nsFont::EnumerateFamilies(nsFontFamilyEnumFunc aFunc, void* aData) const
     bool generic;
     if (*p == kSingleQuote || *p == kDoubleQuote) {
       // quoted font family
-      char16_t quoteMark = *p;
+      PRUnichar quoteMark = *p;
       if (++p == p_end)
         return true;
-      const char16_t *nameStart = p;
+      const PRUnichar *nameStart = p;
 
       // XXX What about CSS character escapes?
       while (*p != quoteMark)
@@ -218,7 +207,7 @@ bool nsFont::EnumerateFamilies(nsFontFamilyEnumFunc aFunc, void* aData) const
 
     } else {
       // unquoted font family
-      const char16_t *nameStart = p;
+      const PRUnichar *nameStart = p;
       while (++p != p_end && *p != kComma)
         /* nothing */ ;
 
@@ -254,13 +243,11 @@ const gfxFontFeature eastAsianDefaults[] = {
   { TRUETYPE_TAG('r','u','b','y'), 1 }
 };
 
-static_assert(MOZ_ARRAY_LENGTH(eastAsianDefaults) ==
-              eFeatureEastAsian_numFeatures,
-              "eFeatureEastAsian_numFeatures should be correct");
+PR_STATIC_ASSERT(NS_ARRAY_LENGTH(eastAsianDefaults) ==
+                 eFeatureEastAsian_numFeatures);
 
 // NS_FONT_VARIANT_LIGATURES_xxx values
 const gfxFontFeature ligDefaults[] = {
-  { TRUETYPE_TAG('l','i','g','a'), 0 },  // none value means all off
   { TRUETYPE_TAG('l','i','g','a'), 1 },
   { TRUETYPE_TAG('l','i','g','a'), 0 },
   { TRUETYPE_TAG('d','l','i','g'), 1 },
@@ -271,9 +258,8 @@ const gfxFontFeature ligDefaults[] = {
   { TRUETYPE_TAG('c','a','l','t'), 0 }
 };
 
-static_assert(MOZ_ARRAY_LENGTH(ligDefaults) ==
-              eFeatureLigatures_numFeatures,
-              "eFeatureLigatures_numFeatures should be correct");
+PR_STATIC_ASSERT(NS_ARRAY_LENGTH(ligDefaults) ==
+                 eFeatureLigatures_numFeatures);
 
 // NS_FONT_VARIANT_NUMERIC_xxx values
 const gfxFontFeature numericDefaults[] = {
@@ -287,9 +273,8 @@ const gfxFontFeature numericDefaults[] = {
   { TRUETYPE_TAG('o','r','d','n'), 1 }
 };
 
-static_assert(MOZ_ARRAY_LENGTH(numericDefaults) ==
-              eFeatureNumeric_numFeatures,
-              "eFeatureNumeric_numFeatures should be correct");
+PR_STATIC_ASSERT(NS_ARRAY_LENGTH(numericDefaults) ==
+                 eFeatureNumeric_numFeatures);
 
 static void
 AddFontFeaturesBitmask(uint32_t aValue, uint32_t aMin, uint32_t aMax,
@@ -387,30 +372,18 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle *aStyle) const
   // -- ligatures
   if (variantLigatures) {
     AddFontFeaturesBitmask(variantLigatures,
-                           NS_FONT_VARIANT_LIGATURES_NONE,
+                           NS_FONT_VARIANT_LIGATURES_COMMON,
                            NS_FONT_VARIANT_LIGATURES_NO_CONTEXTUAL,
                            ligDefaults, aStyle->featureSettings);
 
+    // special case common ligs, which also enable/disable clig
     if (variantLigatures & NS_FONT_VARIANT_LIGATURES_COMMON) {
-      // liga already enabled, need to enable clig also
       setting.mTag = TRUETYPE_TAG('c','l','i','g');
       setting.mValue = 1;
       aStyle->featureSettings.AppendElement(setting);
     } else if (variantLigatures & NS_FONT_VARIANT_LIGATURES_NO_COMMON) {
-      // liga already disabled, need to disable clig also
       setting.mTag = TRUETYPE_TAG('c','l','i','g');
       setting.mValue = 0;
-      aStyle->featureSettings.AppendElement(setting);
-    } else if (variantLigatures & NS_FONT_VARIANT_LIGATURES_NONE) {
-      // liga already disabled, need to disable dlig, hlig, calt, clig
-      setting.mValue = 0;
-      setting.mTag = TRUETYPE_TAG('d','l','i','g');
-      aStyle->featureSettings.AppendElement(setting);
-      setting.mTag = TRUETYPE_TAG('h','l','i','g');
-      aStyle->featureSettings.AppendElement(setting);
-      setting.mTag = TRUETYPE_TAG('c','a','l','t');
-      aStyle->featureSettings.AppendElement(setting);
-      setting.mTag = TRUETYPE_TAG('c','l','i','g');
       aStyle->featureSettings.AppendElement(setting);
     }
   }
@@ -443,11 +416,6 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle *aStyle) const
 
   // add in features from font-feature-settings
   aStyle->featureSettings.AppendElements(fontFeatureSettings);
-
-  // enable grayscale antialiasing for text
-  if (smoothing == NS_FONT_SMOOTHING_GRAYSCALE) {
-    aStyle->useGrayscaleAntialiasing = true;
-  }
 }
 
 static bool FontEnumCallback(const nsString& aFamily, bool aGeneric, void *aData)

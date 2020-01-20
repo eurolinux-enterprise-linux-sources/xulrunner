@@ -6,8 +6,6 @@
 #ifndef nsUTF8ToUnicode_h___
 #define nsUTF8ToUnicode_h___
 
-#include "nsUCSupport.h"
-
 // Class ID for our UTF8ToUnicode charset converter
 // {5534DDC0-DD96-11d2-8AAC-00600811A836}
 #define NS_UTF8TOUNICODE_CID \
@@ -56,7 +54,7 @@ protected:
   // Subclassing of nsBasicDecoderSupport class [declaration]
 
   NS_IMETHOD Convert(const char * aSrc, int32_t * aSrcLength, 
-      char16_t * aDest, int32_t * aDestLength);
+      PRUnichar * aDest, int32_t * aDestLength);
 
   //--------------------------------------------------------------------
   // Subclassing of nsBasicDecoderSupport class [declaration]

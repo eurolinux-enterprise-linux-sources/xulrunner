@@ -19,11 +19,10 @@ class DrawTargetSkia;
 class SourceSurfaceSkia : public DataSourceSurface
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DataSourceSurfaceSkia)
   SourceSurfaceSkia();
   ~SourceSurfaceSkia();
 
-  virtual SurfaceType GetType() const { return SurfaceType::SKIA; }
+  virtual SurfaceType GetType() const { return SURFACE_SKIA; }
   virtual IntSize GetSize() const;
   virtual SurfaceFormat GetFormat() const;
 
@@ -46,13 +45,15 @@ private:
   friend class DrawTargetSkia;
 
   void DrawTargetWillChange();
+  void DrawTargetDestroyed();
+  void MarkIndependent();
   void MaybeUnlock();
 
   SkBitmap mBitmap;
   SurfaceFormat mFormat;
   IntSize mSize;
   int32_t mStride;
-  RefPtr<DrawTargetSkia> mDrawTarget;
+  DrawTargetSkia* mDrawTarget;
   bool mLocked;
 };
 

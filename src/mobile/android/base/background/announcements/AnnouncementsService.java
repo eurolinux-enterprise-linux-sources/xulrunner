@@ -10,7 +10,6 @@ import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 
-import org.mozilla.gecko.BrowserLocaleManager;
 import org.mozilla.gecko.background.BackgroundService;
 import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.background.common.log.Logger;
@@ -117,28 +116,12 @@ public class AnnouncementsService extends BackgroundService implements Announcem
   @Override
   public void onHandleIntent(Intent intent) {
     Logger.setThreadLogTag(AnnouncementsConstants.GLOBAL_LOG_TAG);
-
-    // Intent can be null. Bug 1025937.
-    if (intent == null) {
-      Logger.debug(LOG_TAG, "Short-circuiting on null intent.");
-      return;
-    }
-
     Logger.debug(LOG_TAG, "Running AnnouncementsService.");
-
-    if (AnnouncementsConstants.DISABLED) {
-      Logger.debug(LOG_TAG, "Announcements disabled. Returning from AnnouncementsService.");
-      return;
-    }
 
     if (!shouldFetchAnnouncements()) {
       Logger.debug(LOG_TAG, "Not fetching.");
       return;
     }
-
-    // Ensure that our locale is up to date, so that the fetcher's
-    // Accept-Language header is, too.
-    BrowserLocaleManager.getInstance().getAndApplyPersistedLocale(getApplicationContext());
 
     // Otherwise, grab our announcements URL and process the contents.
     AnnouncementsFetcher.fetchAndProcessAnnouncements(getLastLaunch(), this);
@@ -153,7 +136,7 @@ public class AnnouncementsService extends BackgroundService implements Announcem
     return getSharedPreferences().getLong(AnnouncementsConstants.PREF_LAST_LAUNCH, 0);
   }
 
-  protected SharedPreferences getSharedPreferences() {
+  private SharedPreferences getSharedPreferences() {
     return this.getSharedPreferences(AnnouncementsConstants.PREFS_BRANCH, GlobalConstants.SHARED_PREFERENCES_MODE);
   }
 
@@ -179,7 +162,6 @@ public class AnnouncementsService extends BackgroundService implements Announcem
     this.getSharedPreferences().edit().putLong(AnnouncementsConstants.PREF_LAST_FETCH_LOCAL_TIME, fetch).commit();
   }
 
-  @Override
   public long getLastFetch() {
     return this.getSharedPreferences().getLong(AnnouncementsConstants.PREF_LAST_FETCH_LOCAL_TIME, 0L);
   }
@@ -238,7 +220,7 @@ public class AnnouncementsService extends BackgroundService implements Announcem
 
   @Override
   public String getUserAgent() {
-    return AnnouncementsConstants.USER_AGENT;
+    return AnnouncementsConstants.ANNOUNCE_USER_AGENT;
   }
 
   protected void persistTimes(long fetched, String date) {

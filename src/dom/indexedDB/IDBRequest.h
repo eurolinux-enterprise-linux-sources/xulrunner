@@ -7,65 +7,46 @@
 #ifndef mozilla_dom_indexeddb_idbrequest_h__
 #define mozilla_dom_indexeddb_idbrequest_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
-#include "mozilla/Attributes.h"
-#include "mozilla/EventForwards.h"
-#include "mozilla/dom/DOMError.h"
-#include "mozilla/dom/IDBRequestBinding.h"
-#include "mozilla/ErrorResult.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsWrapperCache.h"
-
+#include "nsIIDBRequest.h"
+#include "nsIIDBOpenDBRequest.h"
+#include "nsDOMEventTargetHelper.h"
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
+#include "mozilla/dom/DOMError.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
 
-namespace mozilla {
-class EventChainPostVisitor;
-class EventChainPreVisitor;
-namespace dom {
-class OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
-class ErrorEventInit;
-}
-}
-
 BEGIN_INDEXEDDB_NAMESPACE
 
 class HelperBase;
-class IDBCursor;
 class IDBFactory;
-class IDBIndex;
-class IDBObjectStore;
 class IDBTransaction;
 class IndexedDBRequestParentBase;
 
-class IDBRequest : public IDBWrapperCache
+class IDBRequest : public IDBWrapperCache,
+                   public nsIIDBRequest
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIIDBREQUEST
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(IDBRequest,
                                                          IDBWrapperCache)
 
   static
-  already_AddRefed<IDBRequest> Create(IDBDatabase* aDatabase,
-                                      IDBTransaction* aTransaction);
-
-  static
-  already_AddRefed<IDBRequest> Create(IDBObjectStore* aSource,
-                                      IDBDatabase* aDatabase,
-                                      IDBTransaction* aTransaction);
-
-  static
-  already_AddRefed<IDBRequest> Create(IDBIndex* aSource,
-                                      IDBDatabase* aDatabase,
+  already_AddRefed<IDBRequest> Create(nsISupports* aSource,
+                                      IDBWrapperCache* aOwnerCache,
                                       IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
-  void GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const;
+  nsISupports* Source()
+  {
+    return mSource;
+  }
 
   void Reset();
 
@@ -104,7 +85,7 @@ public:
 
   void CaptureCaller();
 
-  void FillScriptErrorEvent(ErrorEventInit& aEventInit) const;
+  void FillScriptErrorEvent(nsScriptErrorEvent* aEvent) const;
 
   bool
   IsPending() const
@@ -120,51 +101,11 @@ public:
   }
 #endif
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  // WebIDL
-  nsPIDOMWindow*
-  GetParentObject() const
-  {
-    return GetOwner();
-  }
-
-  void
-  GetResult(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
-            ErrorResult& aRv) const;
-
-  IDBTransaction*
-  GetTransaction() const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    return mTransaction;
-  }
-
-  IDBRequestReadyState
-  ReadyState() const;
-
-  IMPL_EVENT_HANDLER(success);
-  IMPL_EVENT_HANDLER(error);
-
 protected:
-  IDBRequest(IDBDatabase* aDatabase);
-  IDBRequest(nsPIDOMWindow* aOwner);
+  IDBRequest();
   ~IDBRequest();
 
-  // At most one of these three fields can be non-null.
-  nsRefPtr<IDBObjectStore> mSourceAsObjectStore;
-  nsRefPtr<IDBIndex> mSourceAsIndex;
-  nsRefPtr<IDBCursor> mSourceAsCursor;
-
-  // Check that the above condition holds.
-#ifdef DEBUG
-  void AssertSourceIsCorrect() const;
-#else
-  void AssertSourceIsCorrect() const {}
-#endif
-
+  nsCOMPtr<nsISupports> mSource;
   nsRefPtr<IDBTransaction> mTransaction;
 
   JS::Heap<JS::Value> mResultVal;
@@ -179,10 +120,13 @@ protected:
   bool mHaveResultOrErrorCode;
 };
 
-class IDBOpenDBRequest : public IDBRequest
+class IDBOpenDBRequest : public IDBRequest,
+                         public nsIIDBOpenDBRequest
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_FORWARD_NSIIDBREQUEST(IDBRequest::)
+  NS_DECL_NSIIDBOPENDBREQUEST
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBOpenDBRequest, IDBRequest)
 
   static
@@ -194,8 +138,7 @@ public:
   void SetTransaction(IDBTransaction* aTransaction);
 
   // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(
-                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   DOMError* GetError(ErrorResult& aRv)
   {
@@ -208,16 +151,7 @@ public:
     return mFactory;
   }
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  // WebIDL
-  IMPL_EVENT_HANDLER(blocked);
-  IMPL_EVENT_HANDLER(upgradeneeded);
-
 protected:
-  IDBOpenDBRequest(nsPIDOMWindow* aOwner);
   ~IDBOpenDBRequest();
 
   // Only touched on the main thread.

@@ -10,11 +10,5 @@ PARALLEL_DIRS += [
     'gcli',
     'sourcemap',
     'webconsole',
-    'apps',
-    'styleinspector',
-    'acorn',
-    'pretty-fast'
+    'apps'
 ]
-
-MOCHITEST_CHROME_MANIFESTS += ['tests/mochitest/chrome.ini']
-XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']

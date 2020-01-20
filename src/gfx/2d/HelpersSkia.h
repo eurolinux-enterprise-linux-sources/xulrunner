@@ -24,53 +24,19 @@ GfxFormatToSkiaConfig(SurfaceFormat format)
 {
   switch (format)
   {
-    case SurfaceFormat::B8G8R8A8:
+    case FORMAT_B8G8R8A8:
       return SkBitmap::kARGB_8888_Config;
-    case SurfaceFormat::B8G8R8X8:
+    case FORMAT_B8G8R8X8:
       // We probably need to do something here.
       return SkBitmap::kARGB_8888_Config;
-    case SurfaceFormat::R5G6B5:
+    case FORMAT_R5G6B5:
       return SkBitmap::kRGB_565_Config;
-    case SurfaceFormat::A8:
+    case FORMAT_A8:
       return SkBitmap::kA8_Config;
-    default:
-      return SkBitmap::kARGB_8888_Config;
-  }
-}
 
-static inline SkColorType
-GfxFormatToSkiaColorType(SurfaceFormat format)
-{
-  switch (format)
-  {
-    case SurfaceFormat::B8G8R8A8:
-      return kBGRA_8888_SkColorType;
-    case SurfaceFormat::B8G8R8X8:
-      // We probably need to do something here.
-      return kBGRA_8888_SkColorType;
-    case SurfaceFormat::R5G6B5:
-      return kRGB_565_SkColorType;
-    case SurfaceFormat::A8:
-      return kAlpha_8_SkColorType;
-    default:
-      return kRGBA_8888_SkColorType;
   }
-}
 
-static inline SurfaceFormat
-SkiaConfigToGfxFormat(SkBitmap::Config config)
-{
-  switch (config)
-  {
-    case SkBitmap::kARGB_8888_Config:
-      return SurfaceFormat::B8G8R8A8;
-    case SkBitmap::kRGB_565_Config:
-      return SurfaceFormat::R5G6B5;
-    case SkBitmap::kA8_Config:
-      return SurfaceFormat::A8;
-    default:
-      return SurfaceFormat::B8G8R8A8;
-  }
+  return SkBitmap::kARGB_8888_Config;
 }
 
 #ifdef USE_SKIA_GPU
@@ -79,14 +45,14 @@ GfxFormatToGrConfig(SurfaceFormat format)
 {
   switch (format)
   {
-    case SurfaceFormat::B8G8R8A8:
+    case FORMAT_B8G8R8A8:
       return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::B8G8R8X8:
+    case FORMAT_B8G8R8X8:
       // We probably need to do something here.
       return kBGRA_8888_GrPixelConfig;
-    case SurfaceFormat::R5G6B5:
+    case FORMAT_R5G6B5:
       return kRGB_565_GrPixelConfig;
-    case SurfaceFormat::A8:
+    case FORMAT_A8:
       return kAlpha_8_GrPixelConfig;
     default:
       return kRGBA_8888_GrPixelConfig;
@@ -107,11 +73,11 @@ CapStyleToSkiaCap(CapStyle aCap)
 {
   switch (aCap)
   {
-    case CapStyle::BUTT:
+    case CAP_BUTT:
       return SkPaint::kButt_Cap;
-    case CapStyle::ROUND:
+    case CAP_ROUND:
       return SkPaint::kRound_Cap;
-    case CapStyle::SQUARE:
+    case CAP_SQUARE:
       return SkPaint::kSquare_Cap;
   }
   return SkPaint::kDefault_Cap;
@@ -122,12 +88,12 @@ JoinStyleToSkiaJoin(JoinStyle aJoin)
 {
   switch (aJoin)
   {
-    case JoinStyle::BEVEL:
+    case JOIN_BEVEL:
       return SkPaint::kBevel_Join;
-    case JoinStyle::ROUND:
+    case JOIN_ROUND:
       return SkPaint::kRound_Join;
-    case JoinStyle::MITER:
-    case JoinStyle::MITER_OR_BEVEL:
+    case JOIN_MITER:
+    case JOIN_MITER_OR_BEVEL:
       return SkPaint::kMiter_Join;
   }
   return SkPaint::kDefault_Join;
@@ -163,9 +129,9 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
       pattern[i] = SkFloatToScalar(aOptions.mDashPattern[i % aOptions.mDashLength]);
     }
 
-    SkDashPathEffect* dash = SkDashPathEffect::Create(&pattern.front(),
-                                                      dashCount, 
-                                                      SkFloatToScalar(aOptions.mDashOffset));
+    SkDashPathEffect* dash = new SkDashPathEffect(&pattern.front(),
+                                                  dashCount, 
+                                                  SkFloatToScalar(aOptions.mDashOffset));
     SkSafeUnref(aPaint.setPathEffect(dash));
   }
 
@@ -173,62 +139,75 @@ StrokeOptionsToPaint(SkPaint& aPaint, const StrokeOptions &aOptions)
   return true;
 }
 
+static inline void
+ConvertBGRXToBGRA(unsigned char* aData, const IntSize &aSize, int32_t aStride)
+{
+    uint32_t* pixel = reinterpret_cast<uint32_t*>(aData);
+
+    for (int row = 0; row < aSize.height; ++row) {
+        for (int column = 0; column < aSize.width; ++column) {
+            pixel[column] |= 0xFF000000;
+        }
+        pixel += (aStride/4);
+    }
+}
+
 static inline SkXfermode::Mode
 GfxOpToSkiaOp(CompositionOp op)
 {
   switch (op)
   {
-    case CompositionOp::OP_OVER:
+    case OP_OVER:
       return SkXfermode::kSrcOver_Mode;
-    case CompositionOp::OP_ADD:
+    case OP_ADD:
       return SkXfermode::kPlus_Mode;
-    case CompositionOp::OP_ATOP:
+    case OP_ATOP:
       return SkXfermode::kSrcATop_Mode;
-    case CompositionOp::OP_OUT:
+    case OP_OUT:
       return SkXfermode::kSrcOut_Mode;
-    case CompositionOp::OP_IN:
+    case OP_IN:
       return SkXfermode::kSrcIn_Mode;
-    case CompositionOp::OP_SOURCE:
+    case OP_SOURCE:
       return SkXfermode::kSrc_Mode;
-    case CompositionOp::OP_DEST_IN:
+    case OP_DEST_IN:
       return SkXfermode::kDstIn_Mode;
-    case CompositionOp::OP_DEST_OUT:
+    case OP_DEST_OUT:
       return SkXfermode::kDstOut_Mode;
-    case CompositionOp::OP_DEST_OVER:
+    case OP_DEST_OVER:
       return SkXfermode::kDstOver_Mode;
-    case CompositionOp::OP_DEST_ATOP:
+    case OP_DEST_ATOP:
       return SkXfermode::kDstATop_Mode;
-    case CompositionOp::OP_XOR:
+    case OP_XOR:
       return SkXfermode::kXor_Mode;
-    case CompositionOp::OP_MULTIPLY:
+    case OP_MULTIPLY:
       return SkXfermode::kMultiply_Mode;
-    case CompositionOp::OP_SCREEN:
+    case OP_SCREEN:
       return SkXfermode::kScreen_Mode;
-    case CompositionOp::OP_OVERLAY:
+    case OP_OVERLAY:
       return SkXfermode::kOverlay_Mode;
-    case CompositionOp::OP_DARKEN:
+    case OP_DARKEN:
       return SkXfermode::kDarken_Mode;
-    case CompositionOp::OP_LIGHTEN:
+    case OP_LIGHTEN:
       return SkXfermode::kLighten_Mode;
-    case CompositionOp::OP_COLOR_DODGE:
+    case OP_COLOR_DODGE:
       return SkXfermode::kColorDodge_Mode;
-    case CompositionOp::OP_COLOR_BURN:
+    case OP_COLOR_BURN:
       return SkXfermode::kColorBurn_Mode;
-    case CompositionOp::OP_HARD_LIGHT:
+    case OP_HARD_LIGHT:
       return SkXfermode::kHardLight_Mode;
-    case CompositionOp::OP_SOFT_LIGHT:
+    case OP_SOFT_LIGHT:
       return SkXfermode::kSoftLight_Mode;
-    case CompositionOp::OP_DIFFERENCE:
+    case OP_DIFFERENCE:
       return SkXfermode::kDifference_Mode;
-    case CompositionOp::OP_EXCLUSION:
+    case OP_EXCLUSION:
       return SkXfermode::kExclusion_Mode;
-    case CompositionOp::OP_HUE:
+    case OP_HUE:
       return SkXfermode::kHue_Mode;
-    case CompositionOp::OP_SATURATION:
+    case OP_SATURATION:
       return SkXfermode::kSaturation_Mode;
-    case CompositionOp::OP_COLOR:
+    case OP_COLOR:
       return SkXfermode::kColor_Mode;
-    case CompositionOp::OP_LUMINOSITY:
+    case OP_LUMINOSITY:
       return SkXfermode::kLuminosity_Mode;
     default:
       return SkXfermode::kSrcOver_Mode;
@@ -269,29 +248,16 @@ IntRectToSkIRect(const IntRect& aRect)
   return SkIRect::MakeXYWH(aRect.x, aRect.y, aRect.width, aRect.height);
 }
 
-static inline Point
-SkPointToPoint(const SkPoint &aPoint)
-{
-  return Point(SkScalarToFloat(aPoint.x()), SkScalarToFloat(aPoint.y()));
-}
-
-static inline Rect
-SkRectToRect(const SkRect &aRect)
-{
-  return Rect(SkScalarToFloat(aRect.x()), SkScalarToFloat(aRect.y()),
-              SkScalarToFloat(aRect.width()), SkScalarToFloat(aRect.height()));
-}
-
 static inline SkShader::TileMode
 ExtendModeToTileMode(ExtendMode aMode)
 {
   switch (aMode)
   {
-    case ExtendMode::CLAMP:
+    case EXTEND_CLAMP:
       return SkShader::kClamp_TileMode;
-    case ExtendMode::REPEAT:
+    case EXTEND_REPEAT:
       return SkShader::kRepeat_TileMode;
-    case ExtendMode::REFLECT:
+    case EXTEND_REFLECT:
       return SkShader::kMirror_TileMode;
   }
   return SkShader::kClamp_TileMode;

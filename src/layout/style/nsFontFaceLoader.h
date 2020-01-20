@@ -9,7 +9,6 @@
 #ifndef nsFontFaceLoader_h_
 #define nsFontFaceLoader_h_
 
-#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsIStreamLoader.h"
 #include "nsIChannel.h"
@@ -18,45 +17,44 @@
 #include "nsTHashtable.h"
 #include "nsCSSRules.h"
 
+class nsISupports;
 class nsPresContext;
 class nsIPrincipal;
 
 class nsFontFaceLoader;
+class nsCSSFontFaceRule;
 
 // nsUserFontSet - defines the loading mechanism for downloadable fonts
 class nsUserFontSet : public gfxUserFontSet
 {
 public:
-  nsUserFontSet(nsPresContext* aContext);
+  nsUserFontSet(nsPresContext *aContext);
+  ~nsUserFontSet();
 
   // Called when this font set is no longer associated with a presentation.
   void Destroy();
 
   // starts loading process, creating and initializing a nsFontFaceLoader obj
   // returns whether load process successfully started or not
-  nsresult StartLoad(gfxMixedFontFamily* aFamily,
-                     gfxProxyFontEntry* aFontToLoad,
-                     const gfxFontFaceSrc* aFontFaceSrc) MOZ_OVERRIDE;
+  nsresult StartLoad(gfxMixedFontFamily *aFamily,
+                     gfxProxyFontEntry *aFontToLoad,
+                     const gfxFontFaceSrc *aFontFaceSrc);
 
   // Called by nsFontFaceLoader when the loader has completed normally.
   // It's removed from the mLoaders set.
-  void RemoveLoader(nsFontFaceLoader* aLoader);
+  void RemoveLoader(nsFontFaceLoader *aLoader);
 
   bool UpdateRules(const nsTArray<nsFontFaceRuleContainer>& aRules);
 
-  nsPresContext* GetPresContext() { return mPresContext; }
+  nsPresContext *GetPresContext() { return mPresContext; }
 
-  virtual void ReplaceFontEntry(gfxMixedFontFamily* aFamily,
-                                gfxProxyFontEntry* aProxy,
-                                gfxFontEntry* aFontEntry) MOZ_OVERRIDE;
+  virtual void ReplaceFontEntry(gfxMixedFontFamily *aFamily,
+                                gfxProxyFontEntry *aProxy,
+                                gfxFontEntry *aFontEntry);
 
-  nsCSSFontFaceRule* FindRuleForEntry(gfxFontEntry* aFontEntry);
+  nsCSSFontFaceRule *FindRuleForEntry(gfxFontEntry *aFontEntry);
 
 protected:
-  // Protected destructor, to discourage deletion outside of Release()
-  // (since we inherit from refcounted class gfxUserFontSet):
-  ~nsUserFontSet();
-
   // The font-set keeps track of the collection of rules, and their
   // corresponding font entries (whether proxies or real entries),
   // so that we can update the set without having to throw away
@@ -66,30 +64,28 @@ protected:
     nsFontFaceRuleContainer      mContainer;
   };
 
-  void InsertRule(nsCSSFontFaceRule* aRule, uint8_t aSheetType,
+  void InsertRule(nsCSSFontFaceRule *aRule, uint8_t aSheetType,
                   nsTArray<FontFaceRuleRecord>& oldRules,
                   bool& aFontSetModified);
 
-  virtual nsresult LogMessage(gfxMixedFontFamily* aFamily,
-                              gfxProxyFontEntry* aProxy,
-                              const char* aMessage,
+  virtual nsresult LogMessage(gfxMixedFontFamily *aFamily,
+                              gfxProxyFontEntry *aProxy,
+                              const char *aMessage,
                               uint32_t aFlags = nsIScriptError::errorFlag,
-                              nsresult aStatus = NS_OK) MOZ_OVERRIDE;
+                              nsresult aStatus = NS_OK);
 
-  virtual nsresult CheckFontLoad(const gfxFontFaceSrc* aFontFaceSrc,
-                                 nsIPrincipal** aPrincipal,
-                                 bool* aBypassCache) MOZ_OVERRIDE;
+  virtual nsresult CheckFontLoad(const gfxFontFaceSrc *aFontFaceSrc,
+                                 nsIPrincipal **aPrincipal,
+                                 bool *aBypassCache);
 
-  virtual nsresult SyncLoadFontData(gfxProxyFontEntry* aFontToLoad,
-                                    const gfxFontFaceSrc* aFontFaceSrc,
-                                    uint8_t*& aBuffer,
-                                    uint32_t& aBufferLength) MOZ_OVERRIDE;
+  virtual nsresult SyncLoadFontData(gfxProxyFontEntry *aFontToLoad,
+                                    const gfxFontFaceSrc *aFontFaceSrc,
+                                    uint8_t* &aBuffer,
+                                    uint32_t &aBufferLength);
 
   virtual bool GetPrivateBrowsing() MOZ_OVERRIDE;
 
-  virtual void DoRebuildUserFontSet() MOZ_OVERRIDE;
-
-  nsPresContext* mPresContext;  // weak reference
+  nsPresContext *mPresContext;  // weak reference
 
   // Set of all loaders pointing to us. These are not strong pointers,
   // but that's OK because nsFontFaceLoader always calls RemoveLoader on
@@ -102,9 +98,9 @@ protected:
 class nsFontFaceLoader : public nsIStreamLoaderObserver
 {
 public:
-  nsFontFaceLoader(gfxMixedFontFamily* aFontFamily,
-                   gfxProxyFontEntry* aFontToLoad, nsIURI* aFontURI, 
-                   nsUserFontSet* aFontSet, nsIChannel* aChannel);
+  nsFontFaceLoader(gfxMixedFontFamily *aFontFamily,
+                   gfxProxyFontEntry *aFontToLoad, nsIURI *aFontURI, 
+                   nsUserFontSet *aFontSet, nsIChannel *aChannel);
 
   virtual ~nsFontFaceLoader();
 
@@ -118,9 +114,9 @@ public:
 
   void DropChannel() { mChannel = nullptr; }
 
-  void StartedLoading(nsIStreamLoader* aStreamLoader);
+  void StartedLoading(nsIStreamLoader *aStreamLoader);
 
-  static void LoadTimerCallback(nsITimer* aTimer, void* aClosure);
+  static void LoadTimerCallback(nsITimer *aTimer, void *aClosure);
 
   static nsresult CheckLoadAllowed(nsIPrincipal* aSourcePrincipal,
                                    nsIURI* aTargetURI,
@@ -134,7 +130,7 @@ private:
   nsCOMPtr<nsIChannel>    mChannel;
   nsCOMPtr<nsITimer>      mLoadTimer;
 
-  nsIStreamLoader*        mStreamLoader;
+  nsIStreamLoader        *mStreamLoader;
 };
 
 #endif /* !defined(nsFontFaceLoader_h_) */

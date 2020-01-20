@@ -2,11 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+
 const Cu = Components.utils;
 
 Cu.import("resource://services-sync/main.js");
 Cu.import("resource:///modules/PlacesUIUtils.jsm");
-Cu.import("resource://gre/modules/PlacesUtils.jsm", this);
 Cu.import("resource://gre/modules/Services.jsm");
 
 let RemoteTabViewer = {
@@ -129,18 +129,6 @@ let RemoteTabViewer = {
     }
   },
 
-  getIcon: function (iconUri, defaultIcon) {
-    try {
-      let iconURI = Weave.Utils.makeURI(iconUri);
-      return PlacesUtils.favicons.getFaviconLinkForIcon(iconURI).spec;
-    } catch(ex) {
-      // Do nothing.
-    }
-
-    // Just give the provided default icon or the system's default.
-    return defaultIcon || PlacesUtils.favicons.defaultFavicon.spec;
-  },
-
   _generateTabList: function() {
     let engine = Weave.Service.engineManager.get("tabs");
     let list = this._tabsList;
@@ -152,19 +140,16 @@ let RemoteTabViewer = {
         list.removeItemAt(i);
     }
 
-    let seenURLs = new Set();
-    let localURLs = engine.getOpenURLs();
-
     for (let [guid, client] in Iterator(engine.getAllClients())) {
       // Create the client node, but don't add it in-case we don't show any tabs
       let appendClient = true;
-
+      let seenURLs = {};
       client.tabs.forEach(function({title, urlHistory, icon}) {
         let url = urlHistory[0];
-        if (!url || localURLs.has(url) || seenURLs.has(url)) {
+        if (engine.locallyOpenTabMatchesURL(url) || url in seenURLs)
           return;
-        }
-        seenURLs.add(url);
+
+        seenURLs[url] = null;
 
         if (appendClient) {
           let attrs = {
@@ -181,7 +166,7 @@ let RemoteTabViewer = {
           type:  "tab",
           title: title || url,
           url:   url,
-          icon:  this.getIcon(icon),
+          icon:  Weave.Utils.getIcon(icon)
         }
         let tab = this.createItem(attrs);
         list.appendChild(tab);

@@ -6,14 +6,11 @@
 
 DIRS += ['md']
 
-SOURCES += [
+MODULE = 'xpcom'
+
+CPP_SOURCES += [
     'xptcall.cpp',
 ]
 
-MSVC_ENABLE_PGO = True
+LIBRARY_NAME = 'xptcall'
 
-LOCAL_INCLUDES += [
-    '/xpcom/reflect/xptinfo/src',
-]
-
-FINAL_LIBRARY = 'xpcom_core'

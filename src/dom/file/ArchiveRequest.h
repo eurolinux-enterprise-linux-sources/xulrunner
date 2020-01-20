@@ -13,9 +13,6 @@
 
 #include "FileCommon.h"
 
-namespace mozilla {
-class EventChainPreVisitor;
-} // namespace mozilla
 
 BEGIN_FILE_NAMESPACE
 
@@ -26,7 +23,13 @@ BEGIN_FILE_NAMESPACE
 class ArchiveRequest : public mozilla::dom::DOMRequest
 {
 public:
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  static bool PrefEnabled()
+  {
+    return ArchiveReader::PrefEnabled();
+  }
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   ArchiveReader* Reader() const;
 
@@ -34,11 +37,11 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ArchiveRequest, DOMRequest)
 
-  ArchiveRequest(nsPIDOMWindow* aWindow,
+  ArchiveRequest(nsIDOMWindow* aWindow,
                  ArchiveReader* aReader);
 
   // nsIDOMEventTarget
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
 public:
   // This is called by the DOMArchiveRequestEvent
@@ -53,7 +56,7 @@ public:
                        nsresult aStatus);
 
 public: // static
-  static already_AddRefed<ArchiveRequest> Create(nsPIDOMWindow* aOwner,
+  static already_AddRefed<ArchiveRequest> Create(nsIDOMWindow* aOwner,
                                                  ArchiveReader* aReader);
 
 private:
@@ -63,10 +66,10 @@ private:
                               JS::Value* aValue,
                               nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
   nsresult GetFileResult(JSContext* aCx,
-                         JS::MutableHandle<JS::Value> aValue,
+                         JS::Value* aValue,
                          nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
   nsresult GetFilesResult(JSContext* aCx,
-                          JS::MutableHandle<JS::Value> aValue,
+                          JS::Value* aValue,
                           nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
 
 protected:

@@ -6,12 +6,8 @@
 #ifndef nsHttpAuthManager_h__
 #define nsHttpAuthManager_h__
 
+#include "nsHttpAuthCache.h"
 #include "nsIHttpAuthManager.h"
-
-namespace mozilla {
-namespace net {
-
-class nsHttpAuthCache;
 
 class nsHttpAuthManager : public nsIHttpAuthManager
 {
@@ -27,7 +23,5 @@ protected:
   nsHttpAuthCache *mAuthCache;
   nsHttpAuthCache *mPrivateAuthCache;
 };
-
-}} // namespace mozilla::net
 
 #endif // nsHttpAuthManager_h__

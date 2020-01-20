@@ -6,14 +6,13 @@
 const nsIPermissionManager = Components.interfaces.nsIPermissionManager;
 const nsICookiePermission = Components.interfaces.nsICookiePermission;
 
-const NOTIFICATION_FLUSH_PERMISSIONS = "flush-pending-permissions";
-
-function Permission(host, rawHost, type, capability) 
+function Permission(host, rawHost, type, capability, perm) 
 {
   this.host = host;
   this.rawHost = rawHost;
   this.type = type;
   this.capability = capability;
+  this.perm = perm;
 }
 
 var gPermissionManager = {
@@ -104,7 +103,7 @@ var gPermissionManager = {
         // Avoid calling the permission manager if the capability settings are
         // the same. Otherwise allow the call to the permissions manager to
         // update the listbox for us.
-        exists = this._permissions[i].capability == capabilityString;
+        exists = this._permissions[i].perm == aCapability;
         break;
       }
     }
@@ -184,7 +183,6 @@ var gPermissionManager = {
 
     var os = Components.classes["@mozilla.org/observer-service;1"]
                        .getService(Components.interfaces.nsIObserverService);
-    os.notifyObservers(null, NOTIFICATION_FLUSH_PERMISSIONS, this._type);
     os.addObserver(this, "perm-changed", false);
 
     this._loadPermissions();
@@ -334,7 +332,8 @@ var gPermissionManager = {
       var p = new Permission(host,
                              (host.charAt(0) == ".") ? host.substring(1,host.length) : host,
                              aPermission.type,
-                             capabilityString);
+                             capabilityString, 
+                             aPermission.capability);
       this._permissions.push(p);
     }  
   },

@@ -14,7 +14,6 @@
 #include "nsXULAppAPI.h"
 #include "mozilla/unused.h"
 #include "nsProxyRelease.h"
-#include "nsThreadUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,7 +22,6 @@ namespace dom {
 
 // static
 DOMStorageDBBridge* DOMStorageCache::sDatabase = nullptr;
-bool DOMStorageCache::sDatabaseDown = false;
 
 namespace { // anon
 
@@ -55,7 +53,7 @@ GetDataSetIndex(const DOMStorage* aStorage)
 
 // DOMStorageCacheBridge
 
-NS_IMPL_ADDREF(DOMStorageCacheBridge)
+NS_IMPL_THREADSAFE_ADDREF(DOMStorageCacheBridge)
 
 // Since there is no consumer of return value of Release, we can turn this 
 // method to void to make implementation of asynchronous DOMStorageCache::Release
@@ -63,7 +61,7 @@ NS_IMPL_ADDREF(DOMStorageCacheBridge)
 NS_IMETHODIMP_(void) DOMStorageCacheBridge::Release(void)
 {
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
-  nsrefcnt count = --mRefCnt;
+  nsrefcnt count = NS_AtomicDecrementRefcnt(mRefCnt);
   NS_LOG_RELEASE(this, count, "DOMStorageCacheBridge");
   if (0 == count) {
     mRefCnt = 1; /* stabilize */
@@ -76,12 +74,12 @@ NS_IMETHODIMP_(void) DOMStorageCacheBridge::Release(void)
 // DOMStorageCache
 
 DOMStorageCache::DOMStorageCache(const nsACString* aScope)
-: mScope(*aScope)
+: mManager(nullptr)
+, mScope(*aScope)
 , mMonitor("DOMStorageCache")
 , mLoaded(false)
 , mLoadResult(NS_OK)
 , mInitialized(false)
-, mPersistent(false)
 , mSessionOnlyDataSetActive(false)
 , mPreloadTelemetryRecorded(false)
 {
@@ -129,17 +127,15 @@ DOMStorageCache::Init(DOMStorageManager* aManager,
     return;
   }
 
+  mManager = aManager;
   mInitialized = true;
   mPrincipal = aPrincipal;
   mPersistent = aPersistent;
   mQuotaScope = aQuotaScope.IsEmpty() ? mScope : aQuotaScope;
 
   if (mPersistent) {
-    mManager = aManager;
     Preload();
   }
-
-  mUsage = aManager->GetScopeUsage(mQuotaScope);
 }
 
 inline bool
@@ -211,8 +207,12 @@ DOMStorageCache::ProcessUsageDelta(uint32_t aGetDataSetIndex, const int64_t aDel
   }
 
   // Now check eTLD+1 limit
-  if (mUsage && !mUsage->CheckAndSetETLD1UsageDelta(aGetDataSetIndex, aDelta)) {
-    return false;
+  GetDatabase();
+  if (sDatabase) {
+    DOMStorageUsage* usage = sDatabase->GetScopeUsage(mQuotaScope);
+    if (!usage->CheckAndSetETLD1UsageDelta(aGetDataSetIndex, aDelta)) {
+      return false;
+    }
   }
 
   // Update size in our data set
@@ -234,6 +234,7 @@ DOMStorageCache::Preload()
   }
 
   sDatabase->AsyncPreload(this);
+  sDatabase->GetScopeUsage(mQuotaScope);
 }
 
 namespace { // anon
@@ -259,7 +260,7 @@ public:
   DOMStorageCacheHolder(DOMStorageCache* aCache) : mCache(aCache) {}
 };
 
-NS_IMPL_ISUPPORTS(DOMStorageCacheHolder, nsITimerCallback)
+NS_IMPL_ISUPPORTS1(DOMStorageCacheHolder, nsITimerCallback)
 
 } // anon
 
@@ -341,10 +342,6 @@ DOMStorageCache::WaitForPreload(Telemetry::ID aTelemetryID)
   // read from the database.  It seems to me more optimal.
 
   // TODO place for A/B testing (force main thread load vs. let preload finish)
-
-  // No need to check sDatabase for being non-null since preload is either
-  // done before we've shut the DB down or when the DB could not start,
-  // preload has not even be started.
   sDatabase->SyncPreload(this);
 }
 
@@ -501,12 +498,6 @@ DOMStorageCache::SetItem(const DOMStorage* aStorage, const nsAString& aKey,
   data.mKeys.Put(aKey, aValue);
 
   if (Persist(aStorage)) {
-    if (!sDatabase) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-
     if (DOMStringIsNull(aOld)) {
       return sDatabase->AsyncAddItem(this, aKey, aValue);
     }
@@ -542,12 +533,6 @@ DOMStorageCache::RemoveItem(const DOMStorage* aStorage, const nsAString& aKey,
   data.mKeys.Remove(aKey);
 
   if (Persist(aStorage)) {
-    if (!sDatabase) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-
     return sDatabase->AsyncRemoveItem(this, aKey);
   }
 
@@ -584,12 +569,6 @@ DOMStorageCache::Clear(const DOMStorage* aStorage)
   }
 
   if (Persist(aStorage) && (refresh || hadData)) {
-    if (!sDatabase) {
-      NS_ERROR("Writing to localStorage after the database has been shut down"
-               ", data lose!");
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-
     return sDatabase->AsyncClear(this);
   }
 
@@ -768,10 +747,7 @@ DOMStorageUsage::CheckAndSetETLD1UsageDelta(uint32_t aDataSetIndex, const int64_
 DOMStorageDBBridge*
 DOMStorageCache::StartDatabase()
 {
-  if (sDatabase || sDatabaseDown) {
-    // When sDatabaseDown is at true, sDatabase is null.
-    // Checking sDatabaseDown flag here prevents reinitialization of
-    // the database after shutdown.
+  if (sDatabase) {
     return sDatabase;
   }
 
@@ -813,8 +789,6 @@ DOMStorageCache::StopDatabase()
   if (!sDatabase) {
     return NS_OK;
   }
-
-  sDatabaseDown = true;
 
   nsresult rv = sDatabase->Shutdown();
   if (XRE_GetProcessType() == GeckoProcessType_Default) {

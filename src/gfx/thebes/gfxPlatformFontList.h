@@ -11,13 +11,11 @@
 #include "nsTHashtable.h"
 
 #include "gfxFontUtils.h"
-#include "gfxFontInfoLoader.h"
 #include "gfxFont.h"
 #include "gfxPlatform.h"
 
 #include "nsIMemoryReporter.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
 
 class CharMapHashKey : public PLDHashEntryHdr
 {
@@ -82,9 +80,7 @@ struct FontListSizes {
     uint32_t mCharMapsSize; // memory used for cmap coverage info
 };
 
-class gfxUserFontSet;
-
-class gfxPlatformFontList : public gfxFontInfoLoader
+class gfxPlatformFontList : protected gfxFontInfoLoader
 {
 public:
     static gfxPlatformFontList* PlatformFontList() {
@@ -117,7 +113,7 @@ public:
     virtual bool ResolveFontName(const nsAString& aFontName,
                                    nsAString& aResolvedFontName);
 
-    void UpdateFontList();
+    void UpdateFontList() { InitFontList(); }
 
     void ClearPrefFonts() { mPrefFonts.Clear(); }
 
@@ -144,7 +140,7 @@ public:
 
     void AddPostscriptName(gfxFontEntry *aFontEntry, nsAString& aPostscriptName);
 
-    bool NeedFullnamePostscriptNames() { return mExtraNames != nullptr; }
+    bool NeedFullnamePostscriptNames() { return mNeedFullnamePostscriptNames; }
 
     // pure virtual functions, to be provided by concrete subclasses
 
@@ -165,10 +161,10 @@ public:
     // (platforms may override, eg Mac)
     virtual bool GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
-    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontListSizes* aSizes) const;
-    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                        FontListSizes* aSizes) const;
+    virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                     FontListSizes*    aSizes) const;
+    virtual void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+                                     FontListSizes*    aSizes) const;
 
     // search for existing cmap that matches the input
     // return the input if no match is found
@@ -180,23 +176,13 @@ public:
     // remove the cmap from the shared cmap set
     void RemoveCmap(const gfxCharacterMap *aCharMap);
 
-    // keep track of userfont sets to notify when global fontlist changes occur
-    void AddUserFontSet(gfxUserFontSet *aUserFontSet) {
-        mUserFontSetList.PutEntry(aUserFontSet);
-    }
-
-    void RemoveUserFontSet(gfxUserFontSet *aUserFontSet) {
-        mUserFontSetList.RemoveEntry(aUserFontSet);
-    }
-
-    static const gfxFontEntry::ScriptRange sComplexScriptRanges[];
-
 protected:
-    class MemoryReporter MOZ_FINAL : public nsIMemoryReporter
+    class MemoryReporter MOZ_FINAL
+        : public nsIMemoryMultiReporter
     {
     public:
         NS_DECL_ISUPPORTS
-        NS_DECL_NSIMEMORYREPORTER
+        NS_DECL_NSIMEMORYMULTIREPORTER
     };
 
     gfxPlatformFontList(bool aNeedFullnamePostscriptNames = true);
@@ -224,39 +210,19 @@ protected:
     // if system fallback is used, no need to load all cmaps
     virtual bool UsesSystemFallback() { return false; }
 
-    // verifies that a family contains a non-zero font count
-    gfxFontFamily* CheckFamily(gfxFontFamily *aFamily);
-
-    // initialize localized family names
+    // separate initialization for reading in name tables, since this is expensive
     void InitOtherFamilyNames();
 
-    static PLDHashOperator
-    InitOtherFamilyNamesProc(nsStringHashKey::KeyType aKey,
-                             nsRefPtr<gfxFontFamily>& aFamilyEntry,
-                             void* userArg);
+    static PLDHashOperator InitOtherFamilyNamesProc(nsStringHashKey::KeyType aKey,
+                                                    nsRefPtr<gfxFontFamily>& aFamilyEntry,
+                                                    void* userArg);
 
-    // search through font families, looking for a given name, initializing
-    // facename lists along the way. first checks all families with names
-    // close to face name, then searchs all families if not found.
-    gfxFontEntry* SearchFamiliesForFaceName(const nsAString& aFaceName);
+    // read in all fullname/Postscript names for all font faces
+    void InitFaceNameLists();
 
-    static PLDHashOperator
-    ReadFaceNamesProc(nsStringHashKey::KeyType aKey,
-                      nsRefPtr<gfxFontFamily>& aFamilyEntry,
-                      void* userArg);
-
-    // helper method for finding fullname/postscript names in facename lists
-    gfxFontEntry* FindFaceName(const nsAString& aFaceName);
-
-    // look up a font by name, for cases where platform font list
-    // maintains explicit mappings of fullname/psname ==> font
-    virtual gfxFontEntry* LookupInFaceNameLists(const nsAString& aFontName);
-
-    static PLDHashOperator LookupMissedFaceNamesProc(nsStringHashKey *aKey,
-                                                     void *aUserArg);
-
-    static PLDHashOperator LookupMissedOtherNamesProc(nsStringHashKey *aKey,
-                                                      void *aUserArg);
+    static PLDHashOperator InitFaceNameListsProc(nsStringHashKey::KeyType aKey,
+                                                 nsRefPtr<gfxFontFamily>& aFamilyEntry,
+                                                 void* userArg);
 
     // commonly used fonts for which the name table should be loaded at startup
     virtual void PreloadNamesList();
@@ -274,24 +240,19 @@ protected:
                                 nsRefPtr<gfxFontFamily>& aFamilyEntry,
                                 void* aUserArg);
 
-    virtual void GetFontFamilyNames(nsTArray<nsString>& aFontFamilyNames);
-
     // gfxFontInfoLoader overrides, used to load in font cmaps
     virtual void InitLoader();
-    virtual bool LoadFontInfo();
-    virtual void CleanupLoader();
+    virtual bool RunLoader();
+    virtual void FinishLoader();
 
     // read the loader initialization prefs, and start it
     void GetPrefsAndStartLoader();
-
-    // for font list changes that affect all documents
-    void ForceGlobalReflow();
 
     // used by memory reporter to accumulate sizes of family names in the hash
     static size_t
     SizeOfFamilyNameEntryExcludingThis(const nsAString&               aKey,
                                        const nsRefPtr<gfxFontFamily>& aFamily,
-                                       mozilla::MallocSizeOf          aMallocSizeOf,
+                                       nsMallocSizeOfFun              aMallocSizeOf,
                                        void*                          aUserArg);
 
     // canonical family name ==> family entry (unique, one name per family entry)
@@ -305,22 +266,16 @@ protected:
     bool mOtherFamilyNamesInitialized;
 
     // flag set after fullname and Postcript name lists are populated
-    bool mFaceNameListsInitialized;
+    bool mFaceNamesInitialized;
 
-    struct ExtraNames {
-      ExtraNames() : mFullnames(100), mPostscriptNames(100) {}
-      // fullname ==> font entry (unique, one name per font entry)
-      nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mFullnames;
-      // Postscript name ==> font entry (unique, one name per font entry)
-      nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mPostscriptNames;
-    };
-    nsAutoPtr<ExtraNames> mExtraNames;
+    // whether these are needed for a given platform
+    bool mNeedFullnamePostscriptNames;
 
-    // face names missed when face name loading takes a long time
-    nsAutoPtr<nsTHashtable<nsStringHashKey> > mFaceNamesMissed;
+    // fullname ==> font entry (unique, one name per font entry)
+    nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mFullnames;
 
-    // localized family names missed when face name loading takes a long time
-    nsAutoPtr<nsTHashtable<nsStringHashKey> > mOtherNamesMissed;
+    // Postscript name ==> font entry (unique, one name per font entry)
+    nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mPostscriptNames;
 
     // cached pref font lists
     // maps list of family names ==> array of family entries, one per lang group
@@ -344,8 +299,6 @@ protected:
     uint32_t mStartIndex;
     uint32_t mIncrement;
     uint32_t mNumFamilies;
-
-    nsTHashtable<nsPtrHashKey<gfxUserFontSet> > mUserFontSetList;
 };
 
 #endif /* GFXPLATFORMFONTLIST_H_ */

@@ -53,7 +53,7 @@ static char* nsEscapeCount(
     size_t i, len = 0, charsToEscape = 0;
     static const char hexChars[] = "0123456789ABCDEF";
 
-	const unsigned char* src = (const unsigned char *) str;
+	register const unsigned char* src = (const unsigned char *) str;
     while (*src)
 	{
         len++;
@@ -82,7 +82,7 @@ static char* nsEscapeCount(
     if (!result)
         return 0;
 
-    unsigned char* dst = (unsigned char *) result;
+    register unsigned char* dst = (unsigned char *) result;
 	src = (const unsigned char *) str;
 	if (flags == url_XPAlphas)
 	{
@@ -128,8 +128,8 @@ char* nsEscape(const char * str, nsEscapeMask flags)
 //----------------------------------------------------------------------------------------
 {
     if(!str)
-        return nullptr;
-    return nsEscapeCount(str, flags, nullptr);
+        return NULL;
+    return nsEscapeCount(str, flags, NULL);
 }
 
 //----------------------------------------------------------------------------------------
@@ -144,21 +144,14 @@ char* nsUnescape(char * str)
 int32_t nsUnescapeCount(char * str)
 //----------------------------------------------------------------------------------------
 {
-    char *src = str;
-    char *dst = str;
+    register char *src = str;
+    register char *dst = str;
     static const char hexChars[] = "0123456789ABCDEFabcdef";
 
     char c1[] = " ";
     char c2[] = " ";
     char* const pc1 = c1;
     char* const pc2 = c2;
-
-    if (!*src) {
-      // A null string was passed in.  Nothing to escape.
-      // Returns early as the string might not actually be mutable with
-      // length 0.
-      return 0;
-    }
 
     while (*src)
     {
@@ -260,8 +253,8 @@ nsEscapeHTML(const char * string)
     return(rv);
 }
 
-char16_t *
-nsEscapeHTML2(const char16_t *aSourceBuffer, int32_t aSourceBufferLen)
+PRUnichar *
+nsEscapeHTML2(const PRUnichar *aSourceBuffer, int32_t aSourceBufferLen)
 {
   // Calculate the length, if the caller didn't.
   if (aSourceBufferLen < 0) {
@@ -270,12 +263,12 @@ nsEscapeHTML2(const char16_t *aSourceBuffer, int32_t aSourceBufferLen)
 
   /* XXX Hardcoded max entity len. */
   if (uint32_t(aSourceBufferLen) >=
-      ((UINT32_MAX - sizeof(char16_t)) / (6 * sizeof(char16_t))) )
+      ((UINT32_MAX - sizeof(PRUnichar)) / (6 * sizeof(PRUnichar))) )
     return nullptr;
 
-  char16_t *resultBuffer = (char16_t *)nsMemory::Alloc(aSourceBufferLen *
-                            6 * sizeof(char16_t) + sizeof(char16_t('\0')));
-  char16_t *ptr = resultBuffer;
+  PRUnichar *resultBuffer = (PRUnichar *)nsMemory::Alloc(aSourceBufferLen *
+                            6 * sizeof(PRUnichar) + sizeof(PRUnichar('\0')));
+  PRUnichar *ptr = resultBuffer;
 
   if (resultBuffer) {
     int32_t i;
@@ -386,7 +379,7 @@ bool NS_EscapeURL(const char *part,
     bool writing = !!(flags & esc_AlwaysCopy);
     bool colon = !!(flags & esc_Colon);
 
-    const unsigned char* src = (const unsigned char *) part;
+    register const unsigned char* src = (const unsigned char *) part;
 
     char tempBuffer[100];
     unsigned int tempBufferPos = 0;

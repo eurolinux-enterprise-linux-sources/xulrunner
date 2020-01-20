@@ -7,7 +7,6 @@
 
 #include "nsFind.h"
 #include "nsContentCID.h"
-#include "nsIContent.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsISelection.h"
@@ -32,19 +31,12 @@
 using namespace mozilla;
 
 // Yikes!  Casting a char to unichar can fill with ones!
-#define CHAR_TO_UNICHAR(c) ((char16_t)(const unsigned char)c)
+#define CHAR_TO_UNICHAR(c) ((PRUnichar)(const unsigned char)c)
 
 static NS_DEFINE_CID(kCContentIteratorCID, NS_CONTENTITERATOR_CID);
 static NS_DEFINE_CID(kCPreContentIteratorCID, NS_PRECONTENTITERATOR_CID);
 
-#define CH_QUOTE ((char16_t) 0x22)
-#define CH_APOSTROPHE ((char16_t) 0x27)
-#define CH_LEFT_SINGLE_QUOTE ((char16_t) 0x2018)
-#define CH_RIGHT_SINGLE_QUOTE ((char16_t) 0x2019)
-#define CH_LEFT_DOUBLE_QUOTE ((char16_t) 0x201C)
-#define CH_RIGHT_DOUBLE_QUOTE ((char16_t) 0x201D)
-
-#define CH_SHY ((char16_t) 0xAD)
+#define CH_SHY ((PRUnichar) 0xAD)
 
 // nsFind::Find casts CH_SHY to char before calling StripChars
 // This works correctly if and only if CH_SHY <= 255
@@ -146,8 +138,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFindContentIterator)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFindContentIterator)
 
-NS_IMPL_CYCLE_COLLECTION(nsFindContentIterator, mOuterIterator, mInnerIterator,
-                         mStartOuterContent, mEndOuterContent, mEndNode, mStartNode)
+NS_IMPL_CYCLE_COLLECTION_6(nsFindContentIterator, mOuterIterator, mInnerIterator,
+                           mStartOuterContent, mEndOuterContent, mEndNode, mStartNode)
 
 
 nsresult
@@ -455,7 +447,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFind)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFind)
 
-  NS_IMPL_CYCLE_COLLECTION(nsFind, mLastBlockParent, mIterNode, mIterator)
+  NS_IMPL_CYCLE_COLLECTION_3(nsFind, mLastBlockParent, mIterNode, mIterator)
 
 nsFind::nsFind()
   : mFindBackward(false)
@@ -866,7 +858,7 @@ void nsFind::ResetAll()
 // until null (NextNode will return 0 at the end of our range).
 //
 NS_IMETHODIMP
-nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
+nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
              nsIDOMRange* aStartPoint, nsIDOMRange* aEndPoint,
              nsIDOMRange** aRangeRet)
 {
@@ -896,7 +888,7 @@ nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
   static const char kShy[] = { char(CH_SHY), 0 };
   patAutoStr.StripChars(kShy);
 
-  const char16_t* patStr = patAutoStr.get();
+  const PRUnichar* patStr = patAutoStr.get();
   int32_t patLen = patAutoStr.Length() - 1;
 
   // current offset into the pattern -- reset to beginning/end:
@@ -913,7 +905,7 @@ nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
   int32_t fragLen = 0;
 
   // Pointers into the current fragment:
-  const char16_t *t2b = nullptr;
+  const PRUnichar *t2b = nullptr;
   const char      *t1b = nullptr;
 
   // Keep track of when we're in whitespace:
@@ -930,7 +922,7 @@ nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
   aEndPoint->GetEndContainer(getter_AddRefs(endNode));
   aEndPoint->GetEndOffset(&endOffset);
 
-  char16_t prevChar = 0;
+  PRUnichar prevChar = 0;
   while (1)
   {
 #ifdef DEBUG_FIND
@@ -1077,8 +1069,8 @@ nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
     }
 
     // The two characters we'll be comparing:
-    char16_t c = (t2b ? t2b[findex] : CHAR_TO_UNICHAR(t1b[findex]));
-    char16_t patc = patStr[pindex];
+    PRUnichar c = (t2b ? t2b[findex] : CHAR_TO_UNICHAR(t1b[findex]));
+    PRUnichar patc = patStr[pindex];
 
 #ifdef DEBUG_FIND
     printf("Comparing '%c'=%x to '%c' (%d of %d), findex=%d%s\n",
@@ -1109,32 +1101,9 @@ nsFind::Find(const char16_t *aPatText, nsIDOMRange* aSearchRange,
     else if (!inWhitespace && !mCaseSensitive && IsUpperCase(c))
       c = ToLowerCase(c);
 
-    switch (c) {
-      // ignore soft hyphens in the document
-      case CH_SHY:
-        continue;
-      // treat curly and straight quotes as identical
-      case CH_LEFT_SINGLE_QUOTE:
-      case CH_RIGHT_SINGLE_QUOTE:
-        c = CH_APOSTROPHE;
-        break;
-      case CH_LEFT_DOUBLE_QUOTE:
-      case CH_RIGHT_DOUBLE_QUOTE:
-        c = CH_QUOTE;
-        break;
-    }
-
-    switch (patc) {
-      // treat curly and straight quotes as identical
-      case CH_LEFT_SINGLE_QUOTE:
-      case CH_RIGHT_SINGLE_QUOTE:
-        patc = CH_APOSTROPHE;
-        break;
-      case CH_LEFT_DOUBLE_QUOTE:
-      case CH_RIGHT_DOUBLE_QUOTE:
-        patc = CH_QUOTE;
-        break;
-    }
+    // ignore soft hyphens in the document
+    if (c == CH_SHY)
+      continue;
 
     // a '\n' between CJ characters is ignored
     if (pindex != (mFindBackward ? patLen : 0) && c != patc && !inWhitespace) {

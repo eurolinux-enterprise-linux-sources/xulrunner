@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AccGroupInfo.h"
-#include "nsAccUtils.h"
 
 #include "Role.h"
 #include "States.h"
@@ -11,20 +10,14 @@
 using namespace mozilla::a11y;
 
 AccGroupInfo::AccGroupInfo(Accessible* aItem, role aRole) :
-  mPosInSet(0), mSetSize(0), mParent(nullptr), mItem(aItem), mRole(aRole)
+  mPosInSet(0), mSetSize(0), mParent(nullptr)
 {
   MOZ_COUNT_CTOR(AccGroupInfo);
-  Update();
-}
-
-void
-AccGroupInfo::Update()
-{
-  Accessible* parent = mItem->Parent();
+  Accessible* parent = aItem->Parent();
   if (!parent)
     return;
 
-  int32_t indexInParent = mItem->IndexInParent();
+  int32_t indexInParent = aItem->IndexInParent();
   uint32_t siblingCount = parent->ChildCount();
   if (indexInParent == -1 ||
       indexInParent >= static_cast<int32_t>(siblingCount)) {
@@ -32,7 +25,7 @@ AccGroupInfo::Update()
     return;
   }
 
-  int32_t level = nsAccUtils::GetARIAOrDefaultLevel(mItem);
+  int32_t level = nsAccUtils::GetARIAOrDefaultLevel(aItem);
 
   // Compute position in set.
   mPosInSet = 1;
@@ -45,7 +38,7 @@ AccGroupInfo::Update()
       break;
 
     // If sibling is not visible and hasn't the same base role.
-    if (BaseRole(siblingRole) != mRole || sibling->State() & states::INVISIBLE)
+    if (BaseRole(siblingRole) != aRole || sibling->State() & states::INVISIBLE)
       continue;
 
     // Check if it's hierarchical flatten structure, i.e. if the sibling
@@ -87,7 +80,7 @@ AccGroupInfo::Update()
       break;
 
     // If sibling is visible and has the same base role
-    if (BaseRole(siblingRole) != mRole || sibling->State() & states::INVISIBLE)
+    if (BaseRole(siblingRole) != aRole || sibling->State() & states::INVISIBLE)
       continue;
 
     // and check if it's hierarchical flatten structure.
@@ -114,7 +107,7 @@ AccGroupInfo::Update()
     return;
 
   roles::Role parentRole = parent->Role();
-  if (ShouldReportRelations(mRole, parentRole))
+  if (IsConceptualParent(aRole, parentRole))
     mParent = parent;
 
   // ARIA tree and list can be arranged by using ARIA groups to organize levels.
@@ -125,9 +118,9 @@ AccGroupInfo::Update()
   // parent. In other words the parent of the tree item will be a group and
   // the previous tree item of the group is a conceptual parent of the tree
   // item.
-  if (mRole == roles::OUTLINEITEM) {
+  if (aRole == roles::OUTLINEITEM) {
     Accessible* parentPrevSibling = parent->PrevSibling();
-    if (parentPrevSibling && parentPrevSibling->Role() == mRole) {
+    if (parentPrevSibling && parentPrevSibling->Role() == aRole) {
       mParent = parentPrevSibling;
       return;
     }
@@ -136,9 +129,9 @@ AccGroupInfo::Update()
   // Way #2 for ARIA list and tree: group is a child of an item. In other words
   // the parent of the item will be a group and containing item of the group is
   // a conceptual parent of the item.
-  if (mRole == roles::LISTITEM || mRole == roles::OUTLINEITEM) {
+  if (aRole == roles::LISTITEM || aRole == roles::OUTLINEITEM) {
     Accessible* grandParent = parent->Parent();
-    if (grandParent && grandParent->Role() == mRole)
+    if (grandParent && grandParent->Role() == aRole)
       mParent = grandParent;
   }
 }
@@ -177,9 +170,9 @@ AccGroupInfo::FirstItemOf(Accessible* aContainer)
     }
   }
 
-  // Otherwise, it can be a direct child if the container is a list or tree.
+  // Otherwise it can be a direct child.
   item = aContainer->FirstChild();
-  if (ShouldReportRelations(item->Role(), containerRole))
+  if (IsConceptualParent(BaseRole(item->Role()), containerRole))
     return item;
 
   return nullptr;
@@ -207,20 +200,31 @@ AccGroupInfo::NextItemTo(Accessible* aItem)
     }
   }
 
-  NS_NOTREACHED("Item in the middle of the group but there's no next item!");
+  NS_NOTREACHED("Item in the midle of the group but there's no next item!");
   return nullptr;
 }
 
 bool
-AccGroupInfo::ShouldReportRelations(role aRole, role aParentRole)
+AccGroupInfo::IsConceptualParent(role aRole, role aParentRole)
 {
-  // We only want to report hierarchy-based node relations for items in tree or
-  // list form.  ARIA level/owns relations are always reported.
   if (aParentRole == roles::OUTLINE && aRole == roles::OUTLINEITEM)
     return true;
-  if (aParentRole == roles::TREE_TABLE && aRole == roles::ROW)
+  if ((aParentRole == roles::TABLE || aParentRole == roles::TREE_TABLE) &&
+      aRole == roles::ROW)
+    return true;
+  if (aParentRole == roles::ROW &&
+      (aRole == roles::CELL || aRole == roles::GRID_CELL))
     return true;
   if (aParentRole == roles::LIST && aRole == roles::LISTITEM)
+    return true;
+  if (aParentRole == roles::COMBOBOX_LIST && aRole == roles::COMBOBOX_OPTION)
+    return true;
+  if (aParentRole == roles::LISTBOX && aRole == roles::OPTION)
+    return true;
+  if (aParentRole == roles::PAGETABLIST && aRole == roles::PAGETAB)
+    return true;
+  if ((aParentRole == roles::POPUP_MENU || aParentRole == roles::MENUPOPUP) &&
+      aRole == roles::MENUITEM)
     return true;
 
   return false;

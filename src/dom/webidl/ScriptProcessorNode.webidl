@@ -10,8 +10,10 @@
  * liability, trademark and document use rules apply.
  */
 
+[PrefControlled]
 interface ScriptProcessorNode : AudioNode {
 
+    [SetterThrows]
     attribute EventHandler onaudioprocess;
 
     readonly attribute long bufferSize;

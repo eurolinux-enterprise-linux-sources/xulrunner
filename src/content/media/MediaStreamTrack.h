@@ -6,14 +6,12 @@
 #ifndef MEDIASTREAMTRACK_H_
 #define MEDIASTREAMTRACK_H_
 
-#include "mozilla/DOMEventTargetHelper.h"
+#include "nsDOMEventTargetHelper.h"
+#include "DOMMediaStream.h"
 #include "nsID.h"
 #include "StreamBuffer.h"
 
 namespace mozilla {
-
-class DOMMediaStream;
-
 namespace dom {
 
 class AudioStreamTrack;
@@ -22,7 +20,7 @@ class VideoStreamTrack;
 /**
  * Class representing a track in a DOMMediaStream.
  */
-class MediaStreamTrack : public DOMEventTargetHelper {
+class MediaStreamTrack : public nsDOMEventTargetHelper {
 public:
   /**
    * aTrackID is the MediaStreamGraph track ID for the track in the
@@ -32,11 +30,11 @@ public:
   virtual ~MediaStreamTrack();
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamTrack,
-                                           DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamTrack, nsDOMEventTargetHelper)
 
   DOMMediaStream* GetParentObject() const { return mStream; }
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE = 0;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE = 0;
 
   DOMMediaStream* GetStream() const { return mStream; }
   TrackID GetTrackID() const { return mTrackID; }

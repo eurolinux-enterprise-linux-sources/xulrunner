@@ -15,10 +15,10 @@
 #ifndef SHARED_SURFACE_H_
 #define SHARED_SURFACE_H_
 
-#include <stdint.h>
+#include "mozilla/StandardInteger.h"
 #include "mozilla/Attributes.h"
 #include "GLDefs.h"
-#include "mozilla/gfx/Point.h"
+#include "gfxPoint.h"
 #include "SurfaceTypes.h"
 
 namespace mozilla {
@@ -32,14 +32,14 @@ protected:
     const SharedSurfaceType mType;
     const APITypeT mAPI;
     const AttachmentType mAttachType;
-    const gfx::IntSize mSize;
+    const gfxIntSize mSize;
     const bool mHasAlpha;
     bool mIsLocked;
 
     SharedSurface(SharedSurfaceType type,
                   APITypeT api,
                   AttachmentType attachType,
-                  const gfx::IntSize& size,
+                  const gfxIntSize& size,
                   bool hasAlpha)
         : mType(type)
         , mAPI(api)
@@ -93,12 +93,26 @@ public:
         return mAttachType;
     }
 
-    const gfx::IntSize& Size() const {
+    const gfxIntSize& Size() const {
         return mSize;
     }
 
     bool HasAlpha() const {
         return mHasAlpha;
+    }
+
+
+    // For use when AttachType is correct.
+    virtual GLuint Texture() const {
+        MOZ_ASSERT(AttachType() == AttachmentType::GLTexture);
+        MOZ_NOT_REACHED("Did you forget to override this function?");
+        return 0;
+    }
+
+    virtual GLuint Renderbuffer() const {
+        MOZ_ASSERT(AttachType() == AttachmentType::GLRenderbuffer);
+        MOZ_NOT_REACHED("Did you forget to override this function?");
+        return 0;
     }
 };
 

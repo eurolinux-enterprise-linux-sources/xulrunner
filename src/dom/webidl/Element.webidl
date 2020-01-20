@@ -35,11 +35,9 @@ interface Element : Node {
   [Constant]
   readonly attribute DOMTokenList? classList;
 
-  [SameObject]
+  [Constant]
   readonly attribute MozNamedAttrMap attributes;
-  [Pure]
   DOMString? getAttribute(DOMString name);
-  [Pure]
   DOMString? getAttributeNS(DOMString? namespace, DOMString localName);
   [Throws]
   void setAttribute(DOMString name, DOMString value);
@@ -49,17 +47,26 @@ interface Element : Node {
   void removeAttribute(DOMString name);
   [Throws]
   void removeAttributeNS(DOMString? namespace, DOMString localName);
-  [Pure]
   boolean hasAttribute(DOMString name);
-  [Pure]
   boolean hasAttributeNS(DOMString? namespace, DOMString localName);
 
-  [Pure]
   HTMLCollection getElementsByTagName(DOMString localName);
-  [Throws, Pure]
+  [Throws]
   HTMLCollection getElementsByTagNameNS(DOMString? namespace, DOMString localName);
-  [Pure]
   HTMLCollection getElementsByClassName(DOMString classNames);
+
+  [Constant]
+  readonly attribute HTMLCollection children;
+  [Pure]
+  readonly attribute Element? firstElementChild;
+  [Pure]
+  readonly attribute Element? lastElementChild;
+  [Pure]
+  readonly attribute Element? previousElementSibling;
+  [Pure]
+  readonly attribute Element? nextElementSibling;
+  [Pure]
+  readonly attribute unsigned long childElementCount;
 
   /**
    * The ratio of font-size-inflated text font size to computed font
@@ -76,7 +83,12 @@ interface Element : Node {
   readonly attribute float fontSizeInflation;
 
   // Mozilla specific stuff
-  [Pure]
+
+  [SetterThrows,LenientThis]
+           attribute EventHandler onmouseenter;
+  [SetterThrows,LenientThis]
+           attribute EventHandler onmouseleave;
+  [SetterThrows]
            attribute EventHandler onwheel;
 
   // Selectors API
@@ -86,15 +98,8 @@ interface Element : Node {
    *
    * See <http://dev.w3.org/2006/webapi/selectors-api2/#matchesselector>
    */
-  [Throws, Pure]
+  [Throws]
   boolean mozMatchesSelector(DOMString selector);
-
-  // Pointer events methods.
-  [Throws, Pref="dom.w3c_pointer_events.enabled"]
-  void setPointerCapture(long pointerId);
-
-  [Throws, Pref="dom.w3c_pointer_events.enabled"]
-  void releasePointerCapture(long pointerId);
 
   // Proprietary extensions
   /**
@@ -139,23 +144,15 @@ interface Element : Node {
   Attr? getAttributeNodeNS(DOMString? namespaceURI, DOMString localName);
   [Throws]
   Attr? setAttributeNodeNS(Attr newAttr);
-
-  [ChromeOnly]
-  /**
-   * Scrolls the element by (dx, dy) CSS pixels without doing any
-   * layout flushing.
-   */
-  boolean scrollByNoFlush(long dx, long dy);
 };
 
 // http://dev.w3.org/csswg/cssom-view/#extensions-to-the-element-interface
 partial interface Element {
-  DOMRectList getClientRects();
-  DOMRect getBoundingClientRect();
+  ClientRectList getClientRects();
+  ClientRect getBoundingClientRect();
 
   // scrolling
-  void scrollIntoView();
-  void scrollIntoView(boolean top);
+  void scrollIntoView(optional boolean top = true);
   // None of the CSSOM attributes are [Pure], because they flush
            attribute long scrollTop;   // scroll on setting
            attribute long scrollLeft;  // scroll on setting
@@ -185,9 +182,9 @@ partial interface Element {
 
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
-  [Pure,SetterThrows,TreatNullAs=EmptyString]
+  [Throws,TreatNullAs=EmptyString]
   attribute DOMString innerHTML;
-  [Pure,SetterThrows,TreatNullAs=EmptyString]
+  [Throws,TreatNullAs=EmptyString]
   attribute DOMString outerHTML;
   [Throws]
   void insertAdjacentHTML(DOMString position, DOMString text);
@@ -195,20 +192,10 @@ partial interface Element {
 
 // http://www.w3.org/TR/selectors-api/#interface-definitions
 partial interface Element {
-  [Throws, Pure]
+  [Throws]
   Element?  querySelector(DOMString selectors);
-  [Throws, Pure]
+  [Throws]
   NodeList  querySelectorAll(DOMString selectors);
 };
 
-// https://dvcs.w3.org/hg/webcomponents/raw-file/tip/spec/shadow/index.html#shadow-root-object
-partial interface Element {
-  [Throws,Pref="dom.webcomponents.enabled"]
-  ShadowRoot createShadowRoot();
-  [Pref="dom.webcomponents.enabled"]
-  readonly attribute ShadowRoot? shadowRoot;
-};
-
 Element implements ChildNode;
-Element implements NonDocumentTypeChildNode;
-Element implements ParentNode;

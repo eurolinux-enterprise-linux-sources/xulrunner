@@ -1,23 +1,22 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=2 sw=2 sts=2 ci et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/AvailableMemoryTracker.h"
 
-#if defined(XP_WIN)
 #include "prinrval.h"
+#include "pratom.h"
 #include "prenv.h"
-#include "nsIMemoryReporter.h"
-#include "nsMemoryPressure.h"
-#endif
 
+#include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIRunnable.h"
 #include "nsISupports.h"
-#include "nsThreadUtils.h"
+#include "nsPrintfCString.h"
+#include "nsThread.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
@@ -128,9 +127,9 @@ uint32_t sLowCommitSpaceThreshold = 0;
 uint32_t sLowPhysicalMemoryThreshold = 0;
 uint32_t sLowMemoryNotificationIntervalMS = 0;
 
-Atomic<uint32_t> sNumLowVirtualMemEvents;
-Atomic<uint32_t> sNumLowCommitSpaceEvents;
-Atomic<uint32_t> sNumLowPhysicalMemEvents;
+uint32_t sNumLowVirtualMemEvents = 0;
+uint32_t sNumLowCommitSpaceEvents = 0;
+uint32_t sNumLowPhysicalMemEvents = 0;
 
 WindowsDllInterceptor sKernel32Intercept;
 WindowsDllInterceptor sGdi32Intercept;
@@ -188,7 +187,7 @@ bool MaybeScheduleMemoryPressureEvent()
   sLastLowMemoryNotificationTime = PR_IntervalNow();
 
   LOG("Scheduling memory pressure notification.");
-  NS_DispatchEventualMemoryPressure(MemPressure_New);
+  ScheduleMemoryPressureEvent();
   return true;
 }
 
@@ -212,19 +211,19 @@ void CheckMemAvailable()
       // notification.  We'll probably crash if we run out of virtual memory,
       // so don't worry about firing this notification too often.
       LOG("Detected low virtual memory.");
-      ++sNumLowVirtualMemEvents;
-      NS_DispatchEventualMemoryPressure(MemPressure_New);
+      PR_ATOMIC_INCREMENT(&sNumLowVirtualMemEvents);
+      ScheduleMemoryPressureEvent();
     }
     else if (stat.ullAvailPageFile < sLowCommitSpaceThreshold * 1024 * 1024) {
       LOG("Detected low available page file space.");
       if (MaybeScheduleMemoryPressureEvent()) {
-        ++sNumLowCommitSpaceEvents;
+        PR_ATOMIC_INCREMENT(&sNumLowCommitSpaceEvents);
       }
     }
     else if (stat.ullAvailPhys < sLowPhysicalMemoryThreshold * 1024 * 1024) {
       LOG("Detected low physical memory.");
       if (MaybeScheduleMemoryPressureEvent()) {
-        ++sNumLowPhysicalMemEvents;
+        PR_ATOMIC_INCREMENT(&sNumLowPhysicalMemEvents);
       }
     }
   }
@@ -325,65 +324,157 @@ CreateDIBSectionHook(HDC aDC,
   return result;
 }
 
-static int64_t
-LowMemoryEventsVirtualDistinguishedAmount()
+class NumLowMemoryEventsReporter : public nsIMemoryReporter
 {
-  return sNumLowVirtualMemEvents;
-}
+  NS_IMETHOD GetProcess(nsACString &aProcess)
+  {
+    aProcess.Truncate();
+    return NS_OK;
+  }
 
-static int64_t
-LowMemoryEventsPhysicalDistinguishedAmount()
-{
-  return sNumLowPhysicalMemEvents;
-}
+  NS_IMETHOD GetKind(int *aKind)
+  {
+    *aKind = KIND_OTHER;
+    return NS_OK;
+  }
 
-class LowEventsReporter MOZ_FINAL : public nsIMemoryReporter
+  NS_IMETHOD GetUnits(int *aUnits)
+  {
+    *aUnits = UNITS_COUNT_CUMULATIVE;
+    return NS_OK;
+  }
+};
+
+class NumLowVirtualMemoryEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
 {
 public:
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
-                            nsISupports* aData)
+  NS_IMETHOD GetPath(nsACString &aPath)
   {
-    nsresult rv;
+    aPath.AssignLiteral("low-memory-events/virtual");
+    return NS_OK;
+  }
 
-    // We only do virtual-memory tracking on 32-bit builds.
-    if (sizeof(void*) == 4) {
-      rv = MOZ_COLLECT_REPORT(
-        "low-memory-events/virtual", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
-        LowMemoryEventsVirtualDistinguishedAmount(),
-"Number of low-virtual-memory events fired since startup. We fire such an "
-"event if we notice there is less than memory.low_virtual_mem_threshold_mb of "
-"virtual address space available (if zero, this behavior is disabled). The "
-"process will probably crash if it runs out of virtual address space, so "
-"this event is dire.");
-      NS_ENSURE_SUCCESS(rv, rv);
+  NS_IMETHOD GetAmount(int64_t *aAmount)
+  {
+    // This memory reporter shouldn't be installed on 64-bit machines, since we
+    // force-disable virtual-memory tracking there.
+    MOZ_ASSERT(sizeof(void*) == 4);
+
+    *aAmount = sNumLowVirtualMemEvents;
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetDescription(nsACString &aDescription)
+  {
+    aDescription.AssignLiteral(
+      "Number of low-virtual-memory events fired since startup. ");
+
+    if (sLowVirtualMemoryThreshold == 0) {
+      aDescription.AppendLiteral(
+        "Tracking low-virtual-memory events is disabled, but you can enable it "
+        "by giving the memory.low_virtual_mem_threshold_mb pref a non-zero "
+        "value.");
     }
-
-    rv = MOZ_COLLECT_REPORT(
-      "low-commit-space-events", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
-      sNumLowCommitSpaceEvents,
-"Number of low-commit-space events fired since startup. We fire such an "
-"event if we notice there is less than memory.low_commit_space_threshold_mb of "
-"commit space available (if zero, this behavior is disabled). Windows will "
-"likely kill the process if it runs out of commit space, so this event is "
-"dire.");
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = MOZ_COLLECT_REPORT(
-      "low-memory-events/physical", KIND_OTHER, UNITS_COUNT_CUMULATIVE,
-      LowMemoryEventsPhysicalDistinguishedAmount(),
-"Number of low-physical-memory events fired since startup. We fire such an "
-"event if we notice there is less than memory.low_physical_memory_threshold_mb "
-"of physical memory available (if zero, this behavior is disabled).  The "
-"machine will start to page if it runs out of physical memory.  This may "
-"cause it to run slowly, but it shouldn't cause it to crash.");
-    NS_ENSURE_SUCCESS(rv, rv);
-
+    else {
+      aDescription.Append(nsPrintfCString(
+        "We fire such an event if we notice there is less than %d MB of virtual "
+        "address space available (controlled by the "
+        "'memory.low_virtual_mem_threshold_mb' pref).  We'll likely crash if "
+        "we run out of virtual address space, so this event is somewhat dire.",
+        sLowVirtualMemoryThreshold));
+    }
     return NS_OK;
   }
 };
-NS_IMPL_ISUPPORTS(LowEventsReporter, nsIMemoryReporter)
+
+NS_IMPL_ISUPPORTS1(NumLowVirtualMemoryEventsMemoryReporter, nsIMemoryReporter)
+
+class NumLowCommitSpaceEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHOD GetPath(nsACString &aPath)
+  {
+    aPath.AssignLiteral("low-commit-space-events");
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetAmount(int64_t *aAmount)
+  {
+    *aAmount = sNumLowCommitSpaceEvents;
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetDescription(nsACString &aDescription)
+  {
+    aDescription.AssignLiteral(
+      "Number of low-commit-space events fired since startup. ");
+
+    if (sLowCommitSpaceThreshold == 0) {
+      aDescription.Append(
+        "Tracking low-commit-space events is disabled, but you can enable it "
+        "by giving the memory.low_commit_space_threshold_mb pref a non-zero "
+        "value.");
+    }
+    else {
+      aDescription.Append(nsPrintfCString(
+        "We fire such an event if we notice there is less than %d MB of "
+        "available commit space (controlled by the "
+        "'memory.low_commit_space_threshold_mb' pref).  Windows will likely "
+        "kill us if we run out of commit space, so this event is somewhat dire.",
+        sLowCommitSpaceThreshold));
+    }
+    return NS_OK;
+  }
+};
+
+NS_IMPL_ISUPPORTS1(NumLowCommitSpaceEventsMemoryReporter, nsIMemoryReporter)
+
+class NumLowPhysicalMemoryEventsMemoryReporter MOZ_FINAL : public NumLowMemoryEventsReporter
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHOD GetPath(nsACString &aPath)
+  {
+    aPath.AssignLiteral("low-memory-events/physical");
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetAmount(int64_t *aAmount)
+  {
+    *aAmount = sNumLowPhysicalMemEvents;
+    return NS_OK;
+  }
+
+  NS_IMETHOD GetDescription(nsACString &aDescription)
+  {
+    aDescription.AssignLiteral(
+      "Number of low-physical-memory events fired since startup. ");
+
+    if (sLowPhysicalMemoryThreshold == 0) {
+      aDescription.Append(
+        "Tracking low-physical-memory events is disabled, but you can enable it "
+        "by giving the memory.low_physical_memory_threshold_mb pref a non-zero "
+        "value.");
+    }
+    else {
+      aDescription.Append(nsPrintfCString(
+        "We fire such an event if we notice there is less than %d MB of "
+        "available physical memory (controlled by the "
+        "'memory.low_physical_memory_threshold_mb' pref).  The machine will start "
+        "to page if it runs out of physical memory; this may cause it to run "
+        "slowly, but it shouldn't cause us to crash.",
+        sLowPhysicalMemoryThreshold));
+    }
+    return NS_OK;
+  }
+};
+
+NS_IMPL_ISUPPORTS1(NumLowPhysicalMemoryEventsMemoryReporter, nsIMemoryReporter)
 
 #endif // defined(XP_WIN)
 
@@ -400,7 +491,7 @@ public:
   NS_DECL_NSIRUNNABLE
 };
 
-NS_IMPL_ISUPPORTS(nsJemallocFreeDirtyPagesRunnable, nsIRunnable)
+NS_IMPL_ISUPPORTS1(nsJemallocFreeDirtyPagesRunnable, nsIRunnable)
 
 NS_IMETHODIMP
 nsJemallocFreeDirtyPagesRunnable::Run()
@@ -431,7 +522,7 @@ private:
   static bool sFreeDirtyPages;
 };
 
-NS_IMPL_ISUPPORTS(nsMemoryPressureWatcher, nsIObserver)
+NS_IMPL_ISUPPORTS1(nsMemoryPressureWatcher, nsIObserver)
 
 bool nsMemoryPressureWatcher::sFreeDirtyPages = false;
 
@@ -459,7 +550,7 @@ nsMemoryPressureWatcher::Init()
  */
 NS_IMETHODIMP
 nsMemoryPressureWatcher::Observe(nsISupports *subject, const char *topic,
-                                 const char16_t *data)
+                                 const PRUnichar *data)
 {
   MOZ_ASSERT(!strcmp(topic, "memory-pressure"), "Unknown topic");
 
@@ -500,9 +591,11 @@ void Activate()
   Preferences::AddUintVarCache(&sLowMemoryNotificationIntervalMS,
       "memory.low_memory_notification_interval_ms", 10000);
 
-  RegisterStrongMemoryReporter(new LowEventsReporter());
-  RegisterLowMemoryEventsVirtualDistinguishedAmount(LowMemoryEventsVirtualDistinguishedAmount);
-  RegisterLowMemoryEventsPhysicalDistinguishedAmount(LowMemoryEventsPhysicalDistinguishedAmount);
+  NS_RegisterMemoryReporter(new NumLowCommitSpaceEventsMemoryReporter());
+  NS_RegisterMemoryReporter(new NumLowPhysicalMemoryEventsMemoryReporter());
+  if (sizeof(void*) == 4) {
+    NS_RegisterMemoryReporter(new NumLowVirtualMemoryEventsMemoryReporter());
+  }
   sHooksActive = true;
 #endif
 

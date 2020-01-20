@@ -9,8 +9,11 @@
 
 #include "nsURLParsers.h"
 #include "nsURLHelper.h"
+#include "nsIURI.h"
+#include "prtypes.h"
 #include "nsString.h"
 #include "nsCRT.h"
+#include "netCore.h"
 
 using namespace mozilla;
 
@@ -29,8 +32,11 @@ CountConsecutiveSlashes(const char *str, int32_t len)
 // nsBaseURLParser implementation
 //----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS(nsAuthURLParser, nsIURLParser)
-NS_IMPL_ISUPPORTS(nsNoAuthURLParser, nsIURLParser)
+// The URL parser service does not have any internal state; however, it can
+// be called from multiple threads, so we must use a threadsafe AddRef and
+// Release implementation.
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsAuthURLParser, nsIURLParser)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsNoAuthURLParser, nsIURLParser)
 
 #define SET_RESULT(component, pos, len) \
     PR_BEGIN_MACRO \
@@ -147,13 +153,12 @@ nsBaseURLParser::ParseURL(const char *spec, int32_t specLen,
         // spec = <path-no-slashes-or-colon>
         //
         SET_RESULT(scheme, 0, -1);
-        if (authorityLen || pathLen) {
+        if (authorityLen || pathLen)
             ParseAfterScheme(spec, specLen,
                              authorityPos, authorityLen,
                              pathPos, pathLen);
             OFFSET_RESULT(authority, offset);
             OFFSET_RESULT(path, offset);
-        }
     }
     return NS_OK;
 }
@@ -368,7 +373,7 @@ nsNoAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
             const char *p = nullptr;
             if (specLen > 2) {
                 // looks like there is an authority section
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
                 // if the authority looks like a drive number then we
                 // really want to treat it as part of the path
                 // [a-zA-Z][:|]{/\}
@@ -401,7 +406,7 @@ nsNoAuthURLParser::ParseAfterScheme(const char *spec, int32_t specLen,
     SET_RESULT(path, pos, specLen - pos);
 }
 
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_OS2)
 NS_IMETHODIMP
 nsNoAuthURLParser::ParseFilePath(const char *filepath, int32_t filepathLen,
                                  uint32_t *directoryPos, int32_t *directoryLen,
@@ -580,7 +585,7 @@ nsAuthURLParser::ParseServerInfo(const char *serverinfo, int32_t serverinfoLen,
 
                 nsresult err;
                 *port = buf.ToInteger(&err);
-                if (NS_FAILED(err) || *port < 0)
+                if (NS_FAILED(err) || *port <= 0)
                     return NS_ERROR_MALFORMED_URI;
             }
         }

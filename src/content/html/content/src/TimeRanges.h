@@ -30,16 +30,13 @@ public:
 
   void Add(double aStart, double aEnd);
 
-  // Returns the start time of the first range, or -1 if no ranges exist.
-  double GetStartTime();
-
-  // Returns the end time of the last range, or -1 if no ranges exist.
-  double GetEndTime();
+  // Returns the end time of the last range, or -1 if no ranges added.
+  double GetFinalEndTime();
 
   // See http://www.whatwg.org/html/#normalized-timeranges-object
   void Normalize();
 
-  JSObject* WrapObject(JSContext* aCx);
+  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope);
 
   uint32_t Length() const
   {

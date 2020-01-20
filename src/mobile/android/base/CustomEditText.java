@@ -5,14 +5,12 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.widget.ThemedEditText;
-
 import android.content.Context;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.View;
 
-public class CustomEditText extends ThemedEditText {
+public class CustomEditText extends GeckoEditText {
     private OnKeyPreImeListener mOnKeyPreImeListener;
     private OnSelectionChangedListener mOnSelectionChangedListener;
     private OnWindowFocusChangeListener mOnWindowFocusChangeListener;

@@ -30,6 +30,8 @@ DECL_CLASS(nsILocalFile);
 DECL_CLASS(nsIDirectoryServiceProvider);
 DECL_CLASS(nsIMemory);
 DECL_CLASS(nsIDebug);
+DECL_CLASS(nsITraceRefcnt);
+DECL_STRUCT(nsPurpleBufferEntry);
 
 #ifdef __cplusplus
 namespace mozilla {
@@ -324,12 +326,9 @@ NS_LogCOMPtrRelease(void *aCOMPtr, nsISupports *aObject);
 #ifdef __cplusplus
 
 class nsCycleCollectionParticipant;
-class nsCycleCollectingAutoRefCnt;
 
-XPCOM_API(void)
-NS_CycleCollectorSuspect3(void *n, nsCycleCollectionParticipant *p,
-                          nsCycleCollectingAutoRefCnt *aRefCnt,
-                          bool* aShouldDelete);
+XPCOM_API(nsPurpleBufferEntry*)
+NS_CycleCollectorSuspect2(void *n, nsCycleCollectionParticipant *p);
 
 #endif
 
@@ -410,5 +409,8 @@ NS_CycleCollectorSuspect3(void *n, nsCycleCollectionParticipant *p,
 
 XPCOM_API(nsresult)
 NS_GetDebug(nsIDebug* *result);
+
+XPCOM_API(nsresult)
+NS_GetTraceRefcnt(nsITraceRefcnt* *result);
 
 #endif

@@ -26,8 +26,6 @@ interface TextTrack : EventTarget {
   readonly attribute TextTrackKind kind;
   readonly attribute DOMString label;
   readonly attribute DOMString language;
-
-  readonly attribute DOMString id;
   readonly attribute DOMString inBandMetadataTrackDispatchType;
 
            attribute TextTrackMode mode;
@@ -35,15 +33,9 @@ interface TextTrack : EventTarget {
   readonly attribute TextTrackCueList? cues;
   readonly attribute TextTrackCueList? activeCues;
 
-  void addCue(VTTCue cue);
-  [Throws]
-  void removeCue(VTTCue cue);
+  void addCue(TextTrackCue cue);
+  void removeCue(TextTrackCue cue);
 
-           //(Not implemented)attribute EventHandler oncuechange;
-};
-
-// Mozilla Extensions
-partial interface TextTrack {
-  [ChromeOnly]
-  readonly attribute TextTrackList? textTrackList;
+  [SetterThrows]
+           attribute EventHandler oncuechange;
 };

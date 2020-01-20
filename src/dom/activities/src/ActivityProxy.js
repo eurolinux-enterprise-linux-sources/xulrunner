@@ -10,6 +10,7 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
@@ -75,13 +76,11 @@ ActivityProxy.prototype = {
       case "Activity:FireSuccess":
         debug("FireSuccess");
         Services.DOMRequest.fireSuccess(this.activity,
-                                        Cu.cloneInto(msg.result, this.window));
-        Services.obs.notifyObservers(null, "Activity:Success", null);
+                                        ObjectWrapper.wrap(msg.result, this.window));
         break;
       case "Activity:FireError":
         debug("FireError");
         Services.DOMRequest.fireError(this.activity, msg.error);
-        Services.obs.notifyObservers(null, "Activity:Error", null);
         break;
     }
     // We can only get one FireSuccess / FireError message, so cleanup as soon as possible.
@@ -90,7 +89,7 @@ ActivityProxy.prototype = {
 
   cleanup: function actProxy_cleanup() {
     debug("cleanup");
-    if (cpmm && !this.cleanedUp) {
+    if (!this.cleanedUp) {
       cpmm.removeMessageListener("Activity:FireSuccess", this);
       cpmm.removeMessageListener("Activity:FireError", this);
     }

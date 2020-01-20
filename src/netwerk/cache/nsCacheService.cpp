@@ -4,10 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/Util.h"
 
 #include "necko-config.h"
 
@@ -22,7 +21,6 @@
 #include "nsDiskCacheDevice.h"
 #include "nsDiskCacheDeviceSQL.h"
 #include "nsCacheUtils.h"
-#include "../cache2/CacheObserver.h"
 
 #include "nsIObserverService.h"
 #include "nsIPrefService.h"
@@ -108,6 +106,7 @@ static const char * prefList[] = {
 
 // Cache sizes, in KB
 const int32_t DEFAULT_CACHE_SIZE = 250 * 1024;  // 250 MB
+const int32_t MIN_CACHE_SIZE = 50 * 1024;       //  50 MB
 #ifdef ANDROID
 const int32_t MAX_CACHE_SIZE = 200 * 1024;      // 200 MB
 const int32_t OLD_MAX_CACHE_SIZE = 200 * 1024;  // 200 MB
@@ -121,7 +120,7 @@ const int32_t PRE_GECKO_2_0_DEFAULT_CACHE_SIZE = 50 * 1024;
 class nsCacheProfilePrefObserver : public nsIObserver
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
 
     nsCacheProfilePrefObserver()
@@ -201,12 +200,12 @@ private:
     bool                    mClearCacheOnShutdown;
 };
 
-NS_IMPL_ISUPPORTS(nsCacheProfilePrefObserver, nsIObserver)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsCacheProfilePrefObserver, nsIObserver)
 
 class nsSetDiskSmartSizeCallback MOZ_FINAL : public nsITimerCallback
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
 
     NS_IMETHOD Notify(nsITimer* aTimer) {
         if (nsCacheService::gService) {
@@ -218,7 +217,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS(nsSetDiskSmartSizeCallback, nsITimerCallback)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsSetDiskSmartSizeCallback, nsITimerCallback)
 
 // Runnable sent to main thread after the cache IO thread calculates available
 // disk space, so that there is no race in setting mDiskCacheCapacity.
@@ -381,7 +380,7 @@ nsCacheProfilePrefObserver::SetDiskCacheCapacity(int32_t capacity)
 NS_IMETHODIMP
 nsCacheProfilePrefObserver::Observe(nsISupports *     subject,
                                     const char *      topic,
-                                    const char16_t * data_unicode)
+                                    const PRUnichar * data_unicode)
 {
     nsresult rv;
     NS_ConvertUTF16toUTF8 data(data_unicode);
@@ -1072,8 +1071,7 @@ private:
  *****************************************************************************/
 nsCacheService *   nsCacheService::gService = nullptr;
 
-NS_IMPL_ISUPPORTS(nsCacheService, nsICacheService, nsICacheServiceInternal,
-                  nsIMemoryReporter)
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsCacheService, nsICacheService, nsICacheServiceInternal)
 
 nsCacheService::nsCacheService()
     : mObserver(nullptr),
@@ -1101,6 +1099,7 @@ nsCacheService::nsCacheService()
 
     // create list of cache devices
     PR_INIT_CLIST(&mDoomedEntries);
+    mCustomOfflineDevices.Init();
 }
 
 nsCacheService::~nsCacheService()
@@ -1158,7 +1157,7 @@ nsCacheService::Init()
     // initialize hashtable for active cache entries
     rv = mActiveEntries.Init();
     if (NS_FAILED(rv)) return rv;
-
+    
     // create profile/preference observer
     if (!mObserver) {
       mObserver = new nsCacheProfilePrefObserver();
@@ -1169,8 +1168,6 @@ nsCacheService::Init()
     mEnableDiskDevice    = mObserver->DiskCacheEnabled();
     mEnableOfflineDevice = mObserver->OfflineCacheEnabled();
     mEnableMemoryDevice  = mObserver->MemoryCacheEnabled();
-
-    RegisterWeakMemoryReporter(this);
 
     mInitialized = true;
     return NS_OK;
@@ -1213,8 +1210,6 @@ nsCacheService::Shutdown()
     }
 
     CloseAllStreams();
-
-    UnregisterWeakMemoryReporter(this);
 
     {
         nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_SHUTDOWN));
@@ -1362,8 +1357,7 @@ nsresult
 nsCacheService::EvictEntriesForClient(const char *          clientID,
                                       nsCacheStoragePolicy  storagePolicy)
 {
-    nsRefPtr<EvictionNotifierRunnable> r =
-        new EvictionNotifierRunnable(NS_ISUPPORTS_CAST(nsICacheService*, this));
+    nsRefPtr<EvictionNotifierRunnable> r = new EvictionNotifierRunnable(this);
     NS_DispatchToMainThread(r);
 
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHESERVICE_EVICTENTRIESFORCLIENT));
@@ -1502,31 +1496,10 @@ NS_IMETHODIMP nsCacheService::VisitEntries(nsICacheVisitor *visitor)
     return NS_OK;
 }
 
-void nsCacheService::FireClearNetworkCacheStoredAnywhereNotification()
-{
-    MOZ_ASSERT(NS_IsMainThread());
-    nsCOMPtr<nsIObserverService> obsvc = mozilla::services::GetObserverService();
-    if (obsvc) {
-        obsvc->NotifyObservers(nullptr,
-                               "network-clear-cache-stored-anywhere",
-                               nullptr);
-    }
-}
 
 NS_IMETHODIMP nsCacheService::EvictEntries(nsCacheStoragePolicy storagePolicy)
 {
-    if (storagePolicy == nsICache::STORE_ANYWHERE) {
-        // if not called on main thread, dispatch the notification to the main thread to notify observers
-        if (!NS_IsMainThread()) { 
-            nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this,
-                                                               &nsCacheService::FireClearNetworkCacheStoredAnywhereNotification);
-            NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
-        } else {
-            // else you're already on main thread - notify observers
-            FireClearNetworkCacheStoredAnywhereNotification(); 
-        }
-    }
-    return EvictEntriesForClient(nullptr, storagePolicy);
+    return  EvictEntriesForClient(nullptr, storagePolicy);
 }
 
 NS_IMETHODIMP nsCacheService::GetCacheIOTarget(nsIEventTarget * *aCacheIOTarget)
@@ -3054,51 +3027,6 @@ nsCacheService::GetClearingEntries()
     return gService->mClearingEntries;
 }
 
-// static
-void nsCacheService::GetCacheBaseDirectoty(nsIFile ** result)
-{
-    *result = nullptr;
-    if (!gService || !gService->mObserver)
-        return;
-
-    nsCOMPtr<nsIFile> directory =
-        gService->mObserver->DiskCacheParentDirectory();
-    if (!directory)
-        return;
-
-    directory->Clone(result);
-}
-
-// static
-void nsCacheService::GetDiskCacheDirectory(nsIFile ** result)
-{
-    nsCOMPtr<nsIFile> directory;
-    GetCacheBaseDirectoty(getter_AddRefs(directory));
-    if (!directory)
-        return;
-
-    nsresult rv = directory->AppendNative(NS_LITERAL_CSTRING("Cache"));
-    if (NS_FAILED(rv))
-        return;
-
-    directory.forget(result);
-}
-
-// static
-void nsCacheService::GetAppCacheDirectory(nsIFile ** result)
-{
-    nsCOMPtr<nsIFile> directory;
-    GetCacheBaseDirectoty(getter_AddRefs(directory));
-    if (!directory)
-        return;
-
-    nsresult rv = directory->AppendNative(NS_LITERAL_CSTRING("OfflineCache"));
-    if (NS_FAILED(rv))
-        return;
-
-    directory.forget(result);
-}
-
 
 #if defined(PR_LOGGING)
 void
@@ -3136,10 +3064,6 @@ nsresult
 nsCacheService::SetDiskSmartSize_Locked()
 {
     nsresult rv;
-
-    if (mozilla::net::CacheObserver::UseNewCache()) {
-        return NS_ERROR_NOT_AVAILABLE;
-    }
 
     if (!mObserver->DiskCacheParentDirectory())
         return NS_ERROR_NOT_AVAILABLE;
@@ -3200,15 +3124,13 @@ nsCacheService::MoveOrRemoveDiskCache(nsIFile *aOldCacheDir,
     if (NS_SUCCEEDED(aNewCacheSubdir->Exists(&exists)) && !exists) {
         // New cache directory does not exist, try to move the old one here
         // rename needs an empty target directory
-
-        // Make sure the parent of the target sub-dir exists
-        rv = aNewCacheDir->Create(nsIFile::DIRECTORY_TYPE, 0777);
-        if (NS_SUCCEEDED(rv) || NS_ERROR_FILE_ALREADY_EXISTS == rv) {
+        rv = aNewCacheSubdir->Create(nsIFile::DIRECTORY_TYPE, 0777); 
+        if (NS_SUCCEEDED(rv)) {
             nsAutoCString oldPath;
             rv = aOldCacheSubdir->GetNativePath(oldPath);
             if (NS_FAILED(rv))
                 return;
-            if (rename(oldPath.get(), newPath.get()) == 0)
+            if(rename(oldPath.get(), newPath.get()) == 0)
                 return;
         }
     }
@@ -3234,38 +3156,4 @@ nsCacheService::LeavePrivateBrowsing()
         // clear memory cache
         gService->mMemoryDevice->EvictPrivateEntries();
     }
-}
-
-MOZ_DEFINE_MALLOC_SIZE_OF(DiskCacheDeviceMallocSizeOf)
-
-NS_IMETHODIMP
-nsCacheService::CollectReports(nsIHandleReportCallback* aHandleReport,
-                               nsISupports* aData)
-{
-    size_t disk = 0;
-    if (mDiskDevice) {
-        nsCacheServiceAutoLock
-            lock(LOCK_TELEM(NSCACHESERVICE_DISKDEVICEHEAPSIZE));
-        disk = mDiskDevice->SizeOfIncludingThis(DiskCacheDeviceMallocSizeOf);
-    }
-
-    size_t memory = mMemoryDevice ? mMemoryDevice->TotalSize() : 0;
-
-#define REPORT(_path, _amount, _desc)                                         \
-    do {                                                                      \
-        nsresult rv;                                                          \
-        rv = aHandleReport->Callback(EmptyCString(),                          \
-                                     NS_LITERAL_CSTRING(_path),               \
-                                     KIND_HEAP, UNITS_BYTES, _amount,         \
-                                     NS_LITERAL_CSTRING(_desc), aData);       \
-        NS_ENSURE_SUCCESS(rv, rv);                                            \
-    } while (0)
-
-    REPORT("explicit/network/disk-cache", disk,
-           "Memory used by the network disk cache.");
-
-    REPORT("explicit/network/memory-cache", memory,
-           "Memory used by the network memory cache.");
-
-    return NS_OK;
 }

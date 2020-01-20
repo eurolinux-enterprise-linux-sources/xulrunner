@@ -63,16 +63,10 @@ public:
    , mNestedActivityCounter(0)
    , mIsActive(false)
    , mIsFading(false)
-   , mListeningForScrollbarEvents(false)
-   , mListeningForScrollAreaEvents(false)
+   , mListeningForEvents(false)
    , mHScrollbarHovered(false)
    , mVScrollbarHovered(false)
-   , mDisplayOnMouseMove(false)
-   , mScrollbarFadeBeginDelay(0)
-   , mScrollbarFadeDuration(0)
-  {
-    QueryLookAndFeelVals();
-  }
+  {}
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMEVENTLISTENER
@@ -88,17 +82,17 @@ public:
   virtual void WillRefresh(TimeStamp aTime) MOZ_OVERRIDE;
 
   static void FadeBeginTimerFired(nsITimer* aTimer, void* aSelf) {
-    nsRefPtr<ScrollbarActivity> scrollbarActivity(
-      reinterpret_cast<ScrollbarActivity*>(aSelf));
-    scrollbarActivity->BeginFade();
+    reinterpret_cast<ScrollbarActivity*>(aSelf)->BeginFade();
   }
+
+  static const uint32_t kScrollbarFadeBeginDelay = 450; // milliseconds
+  static const uint32_t kScrollbarFadeDuration = 200; // milliseconds
 
 protected:
 
   bool IsActivityOngoing()
   { return mNestedActivityCounter > 0; }
   bool IsStillFading(TimeStamp aTime);
-  void QueryLookAndFeelVals();
 
   void HandleEventForScrollbar(const nsAString& aType,
                                nsIContent* aTarget,
@@ -113,14 +107,10 @@ protected:
 
   void StartFadeBeginTimer();
   void CancelFadeBeginTimer();
-
-  void StartListeningForScrollbarEvents();
-  void StartListeningForScrollAreaEvents();
-  void StopListeningForScrollbarEvents();
-  void StopListeningForScrollAreaEvents();
-  void AddScrollbarEventListeners(nsIDOMEventTarget* aScrollbar);
-  void RemoveScrollbarEventListeners(nsIDOMEventTarget* aScrollbar);
-
+  void StartListeningForEvents();
+  void StartListeningForEventsOnScrollbar(nsIDOMEventTarget* aScrollbar);
+  void StopListeningForEvents();
+  void StopListeningForEventsOnScrollbar(nsIDOMEventTarget* aScrollbar);
   void RegisterWithRefreshDriver();
   void UnregisterFromRefreshDriver();
 
@@ -132,8 +122,8 @@ protected:
   nsIContent* GetHorizontalScrollbar() { return GetScrollbarContent(false); }
   nsIContent* GetVerticalScrollbar() { return GetScrollbarContent(true); }
 
-  const TimeDuration FadeDuration() {
-    return TimeDuration::FromMilliseconds(mScrollbarFadeDuration);
+  static const TimeDuration FadeDuration() {
+    return TimeDuration::FromMilliseconds(kScrollbarFadeDuration);
   }
 
   nsIScrollbarOwner* mScrollableFrame;
@@ -144,15 +134,9 @@ protected:
   int mNestedActivityCounter;
   bool mIsActive;
   bool mIsFading;
-  bool mListeningForScrollbarEvents;
-  bool mListeningForScrollAreaEvents;
+  bool mListeningForEvents;
   bool mHScrollbarHovered;
   bool mVScrollbarHovered;
-
-  // LookAndFeel values we load on creation
-  bool mDisplayOnMouseMove;
-  int mScrollbarFadeBeginDelay;
-  int mScrollbarFadeDuration;
 };
 
 } // namespace layout

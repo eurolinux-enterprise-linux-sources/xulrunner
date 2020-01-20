@@ -6,6 +6,7 @@
 #include "nsDateTimeFormatWin.h"
 #include "nsIServiceManager.h"
 #include "nsIComponentManager.h"
+#include "nsLocaleCID.h"
 #include "nsILocaleService.h"
 #include "nsWin32Locale.h"
 #include "nsUnicharUtils.h"
@@ -15,7 +16,7 @@
 
 #define NSDATETIMEFORMAT_BUFFER_LEN  80
 
-NS_IMPL_ISUPPORTS(nsDateTimeFormatWin, nsIDateTimeFormat)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsDateTimeFormatWin, nsIDateTimeFormat)
 
 
 // init this interface to a specified locale
@@ -93,7 +94,7 @@ nsresult nsDateTimeFormatWin::FormatTMTime(nsILocale* locale,
   SYSTEMTIME system_time;
   DWORD dwFlags_Date = 0, dwFlags_Time = 0;
   int dateLen, timeLen;
-  char16_t dateBuffer[NSDATETIMEFORMAT_BUFFER_LEN], timeBuffer[NSDATETIMEFORMAT_BUFFER_LEN];
+  PRUnichar dateBuffer[NSDATETIMEFORMAT_BUFFER_LEN], timeBuffer[NSDATETIMEFORMAT_BUFFER_LEN];
 
   // set up locale data
   (void) Initialize(locale);
@@ -154,7 +155,7 @@ nsresult nsDateTimeFormatWin::FormatTMTime(nsILocale* locale,
                                  dateBuffer, NSDATETIMEFORMAT_BUFFER_LEN);
     }
     else {
-      dateLen = nsGetDateFormatW(dwFlags_Date, &system_time, nullptr,
+      dateLen = nsGetDateFormatW(dwFlags_Date, &system_time, NULL, 
                                  dateBuffer, NSDATETIMEFORMAT_BUFFER_LEN);
     }
     if (dateLen != 0) {
@@ -167,7 +168,7 @@ nsresult nsDateTimeFormatWin::FormatTMTime(nsILocale* locale,
     timeLen = 0;
   }
   else {
-    timeLen = nsGetTimeFormatW(dwFlags_Time, &system_time, nullptr, 
+    timeLen = nsGetTimeFormatW(dwFlags_Time, &system_time, NULL, 
                                timeBuffer, NSDATETIMEFORMAT_BUFFER_LEN);
     if (timeLen != 0) {
       timeLen--;  // Since the count includes the terminating null.
@@ -181,7 +182,7 @@ nsresult nsDateTimeFormatWin::FormatTMTime(nsILocale* locale,
   stringOut.Truncate();
   if (dateLen != 0 && timeLen != 0) {
     stringOut.Assign(dateBuffer, dateLen);
-    stringOut.Append((char16_t *)(L" "), 1);
+    stringOut.Append((PRUnichar *)(L" "), 1);
     stringOut.Append(timeBuffer, timeLen);
   }
   else if (dateLen != 0 && timeLen == 0) {
@@ -231,23 +232,27 @@ nsresult nsDateTimeFormatWin::FormatPRExplodedTime(nsILocale* locale,
 }
 
 int nsDateTimeFormatWin::nsGetTimeFormatW(DWORD dwFlags, const SYSTEMTIME *lpTime,
-                                          const char* format, char16_t *timeStr, int cchTime)
+                                          const char* format, PRUnichar *timeStr, int cchTime)
 {
   int len = 0;
   len = GetTimeFormatW(mLCID, dwFlags, lpTime, 
                        format ?
-                       NS_ConvertASCIItoUTF16(format).get() :
-                       nullptr,
+                       const_cast<LPCWSTR>
+                                 (NS_ConvertASCIItoUTF16(format).get()) :
+                       NULL,
                        (LPWSTR) timeStr, cchTime);
   return len;
 }
 
 int nsDateTimeFormatWin::nsGetDateFormatW(DWORD dwFlags, const SYSTEMTIME *lpDate,
-                                          const char* format, char16_t *dateStr, int cchDate)
+                                          const char* format, PRUnichar *dateStr, int cchDate)
 {
   int len = 0;
   len = GetDateFormatW(mLCID, dwFlags, lpDate, 
-                       format ? NS_ConvertASCIItoUTF16(format).get() : nullptr,
+                       format ?
+                       const_cast<LPCWSTR>
+                                 (NS_ConvertASCIItoUTF16(format).get()) :
+                       NULL,
                        (LPWSTR) dateStr, cchDate);
   return len;
 }

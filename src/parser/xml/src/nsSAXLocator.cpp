@@ -5,7 +5,7 @@
 
 #include "nsSAXLocator.h"
 
-NS_IMPL_ISUPPORTS(nsSAXLocator, nsISAXLocator)
+NS_IMPL_ISUPPORTS1(nsSAXLocator, nsISAXLocator)
 
 nsSAXLocator::nsSAXLocator(nsString& aPublicId,
                            nsString& aSystemId,

@@ -16,11 +16,16 @@
 #include <unistd.h>
 #elif defined(XP_WIN)
 #include <windows.h>
+#elif defined(XP_OS2)
+#define INCL_DOSERRORS
+#include <os2.h>
 #else
 // XXX add necessary include file for ftruncate (or equivalent)
 #endif
 
+#include "prtypes.h"
 #include "prthread.h"
+#include "prbit.h"
 
 #include "private/pprio.h"
 
@@ -44,7 +49,6 @@
 #include "nsISimpleEnumerator.h"
 
 #include "nsThreadUtils.h"
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/Telemetry.h"
 
 static const char DISK_CACHE_DEVICE_ID[] = { "disk" };
@@ -193,7 +197,7 @@ private:
     nsDiskCacheDevice* mDevice;
 };
 
-NS_IMPL_ISUPPORTS(nsDiskCacheDeviceInfo, nsICacheDeviceInfo)
+NS_IMPL_ISUPPORTS1(nsDiskCacheDeviceInfo, nsICacheDeviceInfo)
 
 /* readonly attribute string description; */
 NS_IMETHODIMP nsDiskCacheDeviceInfo::GetDescription(char ** aDescription)
@@ -349,6 +353,11 @@ nsDiskCache::Truncate(PRFileDesc *  fd, uint32_t  newEOF)
         return NS_ERROR_FAILURE;
     }
 
+#elif defined(XP_OS2)
+    if (DosSetFileSize((HFILE) PR_FileDesc2NativeHandle(fd), newEOF) != NO_ERROR) {
+        NS_ERROR("DosSetFileSize failed");
+        return NS_ERROR_FAILURE;
+    }
 #else
     // add implementations for other platforms here
 #endif
@@ -360,16 +369,43 @@ nsDiskCache::Truncate(PRFileDesc *  fd, uint32_t  newEOF)
  *  nsDiskCacheDevice
  *****************************************************************************/
 
+class NetworkDiskCacheReporter MOZ_FINAL : public MemoryReporterBase
+{
+public:
+    NetworkDiskCacheReporter(nsDiskCacheDevice* aDevice)
+      : MemoryReporterBase(
+            "explicit/network/disk-cache",
+            KIND_HEAP,
+            UNITS_BYTES,
+            "Memory used by the network disk cache.")
+      , mDevice(aDevice)
+    {}
+
+private:
+    int64_t Amount()
+    {
+        nsCacheServiceAutoLock
+            lock(LOCK_TELEM(NSCACHESERVICE_DISKDEVICEHEAPSIZE));
+        return mDevice->SizeOfIncludingThis(MallocSizeOf);
+    }
+
+    nsDiskCacheDevice* mDevice;
+};
+
 nsDiskCacheDevice::nsDiskCacheDevice()
     : mCacheCapacity(0)
     , mMaxEntrySize(-1) // -1 means "no limit"
     , mInitialized(false)
     , mClearingDiskCache(false)
+    , mReporter(nullptr)
 {
+    mReporter = new NetworkDiskCacheReporter(this);
+    NS_RegisterMemoryReporter(mReporter);
 }
 
 nsDiskCacheDevice::~nsDiskCacheDevice()
 {
+    NS_UnregisterMemoryReporter(mReporter);
     Shutdown();
 }
 
@@ -1154,7 +1190,7 @@ nsDiskCacheDevice::SetMaxEntrySize(int32_t maxSizeInKilobytes)
 }
 
 size_t
-nsDiskCacheDevice::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
+nsDiskCacheDevice::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
 {
     size_t usage = aMallocSizeOf(this);
 

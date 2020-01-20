@@ -74,7 +74,6 @@ var FeedHandler = {
       if (feeds.length > 1) {
         let p = new Prompt({
           window: browser.contentWindow,
-          title: Strings.browser.GetStringFromName("feedHandler.chooseFeed")
         }).setSingleChoiceItems(feeds.map(function(feed) {
           return { label: feed.title || feed.href }
         })).show((function(data) {
@@ -92,29 +91,29 @@ var FeedHandler = {
   },
 
   loadFeed: function fh_loadFeed(aFeed, aBrowser) {
-    let feedURL = aFeed.href;
+      let feedURL = aFeed.href;
 
-    // Next, we decide on which service to send the feed
-    let handlers = this.getContentHandlers(this.TYPE_MAYBE_FEED);
-    if (handlers.length == 0)
-      return;
-
-    // JSON for Prompt
-    let p = new Prompt({
-      window: aBrowser.contentWindow,
-      title: Strings.browser.GetStringFromName("feedHandler.subscribeWith")
-    }).setSingleChoiceItems(handlers.map(function(handler) {
-      return { label: handler.name };
-    })).show(function(data) {
-      if (data.button == -1)
+      // Next, we decide on which service to send the feed
+      let handlers = this.getContentHandlers(this.TYPE_MAYBE_FEED);
+      if (handlers.length == 0)
         return;
 
-      // Merge the handler URL and the feed URL
-      let readerURL = handlers[data.button].uri;
-      readerURL = readerURL.replace(/%s/gi, encodeURIComponent(feedURL));
+      // JSON for Prompt
+      let p = new Prompt({
+        window: aBrowser.contentWindow
+      }).setSingleChoiceItems(handlers.map(function(handler) {
+        return { label: handler.name };
+      })).show(function(data) {
+        if (data.button == -1)
+          return;
 
-      // Open the resultant URL in a new tab
-      BrowserApp.addTab(readerURL, { parentId: BrowserApp.selectedTab.id });
-    });
+        // Merge the handler URL and the feed URL
+        let readerURL = handlers[data.button].uri;
+        readerURL = readerURL.replace(/%s/gi, encodeURIComponent(feedURL));
+
+        // Open the resultant URL in a new tab
+        BrowserApp.addTab(readerURL, { parentId: BrowserApp.selectedTab.id });
+      });
+
   }
 };

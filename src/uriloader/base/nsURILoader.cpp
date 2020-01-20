@@ -30,12 +30,10 @@
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIThreadRetargetableStreamListener.h"
 
 #include "nsXPIDLString.h"
 #include "nsString.h"
 #include "nsNetUtil.h"
-#include "nsThreadUtils.h"
 #include "nsReadableUtils.h"
 #include "nsError.h"
 
@@ -49,7 +47,6 @@
 
 #include "nsDocLoader.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Preferences.h"
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* nsURILoader::mLog = nullptr;
@@ -59,9 +56,6 @@ PRLogModuleInfo* nsURILoader::mLog = nullptr;
 #define LOG_ERROR(args) PR_LOG(nsURILoader::mLog, PR_LOG_ERROR, args)
 #define LOG_ENABLED() PR_LOG_TEST(nsURILoader::mLog, PR_LOG_DEBUG)
 
-#define NS_PREF_DISABLE_BACKGROUND_HANDLING \
-    "security.exthelperapp.disable_background_handling"
-
 /**
  * The nsDocumentOpenInfo contains the state required when a single
  * document is being opened in order to discover the content type...
@@ -69,7 +63,6 @@ PRLogModuleInfo* nsURILoader::mLog = nullptr;
  * (or aborted).
  */
 class nsDocumentOpenInfo MOZ_FINAL : public nsIStreamListener
-                                   , public nsIThreadRetargetableStreamListener
 {
 public:
   // Needed for nsCOMPtr to work right... Don't call this!
@@ -81,7 +74,7 @@ public:
                      uint32_t aFlags,
                      nsURILoader* aURILoader);
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
 
   /**
    * Prepares this object for receiving data. The stream
@@ -117,8 +110,6 @@ public:
   // nsIStreamListener methods:
   NS_DECL_NSISTREAMLISTENER
 
-  // nsIThreadRetargetableStreamListener
-  NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 protected:
   ~nsDocumentOpenInfo();
 
@@ -161,14 +152,13 @@ protected:
   nsRefPtr<nsURILoader> mURILoader;
 };
 
-NS_IMPL_ADDREF(nsDocumentOpenInfo)
-NS_IMPL_RELEASE(nsDocumentOpenInfo)
+NS_IMPL_THREADSAFE_ADDREF(nsDocumentOpenInfo)
+NS_IMPL_THREADSAFE_RELEASE(nsDocumentOpenInfo)
 
 NS_INTERFACE_MAP_BEGIN(nsDocumentOpenInfo)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
-  NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableStreamListener)
 NS_INTERFACE_MAP_END_THREADSAFE
 
 nsDocumentOpenInfo::nsDocumentOpenInfo()
@@ -273,22 +263,6 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest *request, nsISupport
 
   LOG(("  OnStartRequest returning: 0x%08X", rv));
   
-  return rv;
-}
-
-NS_IMETHODIMP
-nsDocumentOpenInfo::CheckListenerChain()
-{
-  NS_ASSERTION(NS_IsMainThread(), "Should be on the main thread!");
-  nsresult rv = NS_OK;
-  nsCOMPtr<nsIThreadRetargetableStreamListener> retargetableListener =
-    do_QueryInterface(m_targetStreamListener, &rv);
-  if (retargetableListener) {
-    rv = retargetableListener->CheckListenerChain();
-  }
-  LOG(("[0x%p] nsDocumentOpenInfo::CheckListenerChain %s listener %p rv %x",
-       this, (NS_SUCCEEDED(rv) ? "success" : "failure"),
-       (nsIStreamListener*)m_targetStreamListener, rv));
   return rv;
 }
 
@@ -523,35 +497,6 @@ nsresult nsDocumentOpenInfo::DispatchContent(nsIRequest *request, nsISupports * 
   // All attempts to dispatch this content have failed.  Just pass it off to
   // the helper app service.
   //
-
-  //
-  // Optionally, we may want to disable background handling by the external
-  // helper application service.
-  //
-  if (mozilla::Preferences::GetBool(NS_PREF_DISABLE_BACKGROUND_HANDLING,
-                                    false)) {
-    // First, we will ensure that the parent docshell is in an active
-    // state as we will disallow all external application handling unless it is
-    // in the foreground.
-    nsCOMPtr<nsIDocShell> docShell(do_GetInterface(m_originalContext));
-    if (!docShell) {
-      // If we can't perform our security check we definitely don't want to go
-      // any further!
-      LOG(("Failed to get DocShell to ensure it is active before anding off to "
-           "helper app service. Aborting."));
-      return NS_ERROR_FAILURE;
-    }
-
-    // Ensure the DocShell is active before continuing.
-    bool isActive = false;
-    docShell->GetIsActive(&isActive);
-    if (!isActive) {
-      LOG(("  Check for active DocShell returned false. Aborting hand off to "
-           "helper app service."));
-      return NS_ERROR_DOM_SECURITY_ERR;
-    }
-  }
-
   nsCOMPtr<nsIExternalHelperAppService> helperAppService =
     do_GetService(NS_EXTERNALHELPERAPPSERVICE_CONTRACTID, &rv);
   if (helperAppService) {
@@ -613,7 +558,7 @@ nsDocumentOpenInfo::ConvertData(nsIRequest *request,
   // stream is split up into multiple destination streams.  This
   // intermediate instance is used to target these "decoded" streams...
   //
-  nsRefPtr<nsDocumentOpenInfo> nextLink =
+  nsCOMPtr<nsDocumentOpenInfo> nextLink =
     new nsDocumentOpenInfo(m_originalContext, mFlags, mURILoader);
   if (!nextLink) return NS_ERROR_OUT_OF_MEMORY;
 
@@ -786,7 +731,7 @@ NS_IMETHODIMP nsURILoader::UnRegisterContentListener(nsIURIContentListener * aCo
 }
 
 NS_IMETHODIMP nsURILoader::OpenURI(nsIChannel *channel, 
-                                   uint32_t aFlags,
+                                   bool aIsContentPreferred,
                                    nsIInterfaceRequestor *aWindowContext)
 {
   NS_ENSURE_ARG_POINTER(channel);
@@ -803,7 +748,7 @@ NS_IMETHODIMP nsURILoader::OpenURI(nsIChannel *channel,
 
   nsCOMPtr<nsIStreamListener> loader;
   nsresult rv = OpenChannel(channel,
-                            aFlags,
+                            aIsContentPreferred ? IS_CONTENT_PREFERRED : 0,
                             aWindowContext,
                             false,
                             getter_AddRefs(loader));
@@ -867,7 +812,7 @@ nsresult nsURILoader::OpenChannel(nsIChannel* channel,
 
   // we need to create a DocumentOpenInfo object which will go ahead and open
   // the url and discover the content type....
-  nsRefPtr<nsDocumentOpenInfo> loader =
+  nsCOMPtr<nsDocumentOpenInfo> loader =
     new nsDocumentOpenInfo(aWindowContext, aFlags, this);
 
   if (!loader) return NS_ERROR_OUT_OF_MEMORY;

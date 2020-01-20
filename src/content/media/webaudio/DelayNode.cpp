@@ -10,14 +10,12 @@
 #include "AudioNodeStream.h"
 #include "AudioDestinationNode.h"
 #include "WebAudioUtils.h"
-#include "DelayBuffer.h"
-#include "PlayingRefChangeHandler.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(DelayNode, AudioNode,
-                                   mDelay)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(DelayNode, AudioNode,
+                                     mDelay)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(DelayNode)
 NS_INTERFACE_MAP_END_INHERITING(AudioNode)
@@ -27,29 +25,19 @@ NS_IMPL_RELEASE_INHERITED(DelayNode, AudioNode)
 
 class DelayNodeEngine : public AudioNodeEngine
 {
-  typedef PlayingRefChangeHandler PlayingRefChanged;
+  typedef PlayingRefChangeHandler<DelayNode> PlayingRefChanged;
 public:
-  DelayNodeEngine(AudioNode* aNode, AudioDestinationNode* aDestination,
-                  double aMaxDelayTicks)
+  DelayNodeEngine(AudioNode* aNode, AudioDestinationNode* aDestination)
     : AudioNodeEngine(aNode)
     , mSource(nullptr)
     , mDestination(static_cast<AudioNodeStream*> (aDestination->Stream()))
     // Keep the default value in sync with the default value in DelayNode::DelayNode.
     , mDelay(0.f)
-    // Use a smoothing range of 20ms
-    , mBuffer(std::max(aMaxDelayTicks,
-                       static_cast<double>(WEBAUDIO_BLOCK_SIZE)),
-              WebAudioUtils::ComputeSmoothingRate(0.02,
-                                                  mDestination->SampleRate()))
-    , mMaxDelay(aMaxDelayTicks)
-    , mLastOutputPosition(-1)
+    , mMaxDelay(0.)
+    , mWriteIndex(0)
     , mLeftOverData(INT32_MIN)
+    , mCurrentDelayTime(0.)
   {
-  }
-
-  virtual DelayNodeEngine* AsDelayNodeEngine()
-  {
-    return this;
   }
 
   void SetSourceStream(AudioNodeStream* aSource)
@@ -59,6 +47,7 @@ public:
 
   enum Parameters {
     DELAY,
+    MAX_DELAY
   };
   void SetTimelineParameter(uint32_t aIndex,
                             const AudioParamTimeline& aValue,
@@ -74,116 +63,183 @@ public:
       NS_ERROR("Bad DelayNodeEngine TimelineParameter");
     }
   }
+  void SetDoubleParameter(uint32_t aIndex, double aValue) MOZ_OVERRIDE
+  {
+    switch (aIndex) {
+    case MAX_DELAY: mMaxDelay = aValue; break;
+    default:
+      NS_ERROR("Bad DelayNodeEngine DoubleParameter");
+    }
+  }
 
-  virtual void ProcessBlock(AudioNodeStream* aStream,
-                            const AudioChunk& aInput,
-                            AudioChunk* aOutput,
-                            bool* aFinished) MOZ_OVERRIDE
+  bool EnsureBuffer(uint32_t aNumberOfChannels, TrackRate aSampleRate)
+  {
+    if (aNumberOfChannels == 0) {
+      return false;
+    }
+    if (mBuffer.Length() == 0) {
+      if (!mBuffer.SetLength(aNumberOfChannels)) {
+        return false;
+      }
+      const int32_t numFrames = ceil(mMaxDelay * aSampleRate);
+      for (uint32_t channel = 0; channel < aNumberOfChannels; ++channel) {
+        if (!mBuffer[channel].SetLength(numFrames)) {
+          return false;
+        }
+        memset(mBuffer[channel].Elements(), 0, numFrames * sizeof(float));
+      }
+    } else if (mBuffer.Length() != aNumberOfChannels) {
+      // TODO: Handle changes in the channel count
+      return false;
+    }
+    return true;
+  }
+
+  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
+                                 const AudioChunk& aInput,
+                                 AudioChunk* aOutput,
+                                 bool* aFinished)
   {
     MOZ_ASSERT(mSource == aStream, "Invalid source stream");
-    MOZ_ASSERT(aStream->SampleRate() == mDestination->SampleRate());
 
-    if (!aInput.IsNull()) {
-      if (mLeftOverData <= 0) {
+    const bool firstTime = !!!mBuffer.Length();
+    const uint32_t numChannels = aInput.IsNull() ?
+                                 mBuffer.Length() :
+                                 aInput.mChannelData.Length();
+
+    bool playedBackAllLeftOvers = false;
+    if (!mBuffer.IsEmpty() &&
+        mLeftOverData == INT32_MIN &&
+        aStream->AllInputsFinished()) {
+      mLeftOverData = static_cast<int32_t>(mCurrentDelayTime * aStream->SampleRate()) - WEBAUDIO_BLOCK_SIZE;
+
+      if (mLeftOverData > 0) {
         nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::ADDREF);
-        aStream->Graph()->
-          DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
+        NS_DispatchToMainThread(refchanged);
       }
-      mLeftOverData = mBuffer.MaxDelayTicks();
-    } else if (mLeftOverData > 0) {
+    } else if (mLeftOverData != INT32_MIN) {
       mLeftOverData -= WEBAUDIO_BLOCK_SIZE;
-    } else {
-      if (mLeftOverData != INT32_MIN) {
-        mLeftOverData = INT32_MIN;
-        // Delete our buffered data now we no longer need it
-        mBuffer.Reset();
+      if (mLeftOverData <= 0) {
+        // Continue spamming the main thread with messages until we are destroyed.
+        // This isn't great, but it ensures a message will get through even if
+        // some are ignored by DelayNode::AcceptPlayingRefRelease
+        mLeftOverData = 0;
+        playedBackAllLeftOvers = true;
 
         nsRefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
-        aStream->Graph()->
-          DispatchToMainThreadAfterStreamStateUpdate(refchanged.forget());
+        NS_DispatchToMainThread(refchanged);
       }
-      *aOutput = aInput;
+    }
+
+    if (!EnsureBuffer(numChannels, aStream->SampleRate())) {
+      aOutput->SetNull(0);
       return;
     }
 
-    mBuffer.Write(aInput);
+    AllocateAudioBlock(numChannels, aOutput);
 
-    UpdateOutputBlock(aOutput);
-    mBuffer.NextBlock();
-  }
+    double delayTime = 0;
+    double computedDelay[WEBAUDIO_BLOCK_SIZE];
+    // Use a smoothing range of 20ms
+    const double smoothingRate = WebAudioUtils::ComputeSmoothingRate(0.02, aStream->SampleRate());
 
-  void UpdateOutputBlock(AudioChunk* aOutput)
-  {
-    TrackTicks tick = mSource->GetCurrentPosition();
-    if (tick == mLastOutputPosition) {
-      return; // mLastChunks is already set on the stream
-    }
-
-    mLastOutputPosition = tick;
-    bool inCycle = mSource->AsProcessedStream()->InCycle();
-    double minDelay = inCycle ? static_cast<double>(WEBAUDIO_BLOCK_SIZE) : 0.0;
-    double maxDelay = mMaxDelay;
-    double sampleRate = mSource->SampleRate();
-    ChannelInterpretation channelInterpretation =
-      mSource->GetChannelInterpretation();
     if (mDelay.HasSimpleValue()) {
-      // If this DelayNode is in a cycle, make sure the delay value is at least
-      // one block, even if that is greater than maxDelay.
-      double delayFrames = mDelay.GetValue() * sampleRate;
-      double delayFramesClamped =
-        std::max(minDelay, std::min(delayFrames, maxDelay));
-      mBuffer.Read(delayFramesClamped, aOutput, channelInterpretation);
+      delayTime = std::max(0.0, std::min(mMaxDelay, double(mDelay.GetValue())));
+      if (firstTime) {
+        // Initialize this only the first time to make sure that mCurrentDelayTime
+        // has a valid value when we try to change the delay time further below.
+        mCurrentDelayTime = delayTime;
+      }
     } else {
       // Compute the delay values for the duration of the input AudioChunk
-      // If this DelayNode is in a cycle, make sure the delay value is at least
-      // one block.
-      double computedDelay[WEBAUDIO_BLOCK_SIZE];
+      TrackTicks tick = aStream->GetCurrentPosition();
       for (size_t counter = 0; counter < WEBAUDIO_BLOCK_SIZE; ++counter) {
-        double delayAtTick = mDelay.GetValueAtTime(tick, counter) * sampleRate;
-        double delayAtTickClamped =
-          std::max(minDelay, std::min(delayAtTick, maxDelay));
-        computedDelay[counter] = delayAtTickClamped;
+        computedDelay[counter] = std::max(0.0, std::min(mMaxDelay,
+                                   double(mDelay.GetValueAtTime(tick, counter))));
       }
-      mBuffer.Read(computedDelay, aOutput, channelInterpretation);
     }
-  }
 
-  virtual void ProduceBlockBeforeInput(AudioChunk* aOutput) MOZ_OVERRIDE
-  {
-    if (mLeftOverData <= 0) {
-      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
-    } else {
-      UpdateOutputBlock(aOutput);
+    for (uint32_t channel = 0; channel < numChannels; ++channel) {
+      double currentDelayTime = mCurrentDelayTime;
+      uint32_t writeIndex = mWriteIndex;
+
+      float* buffer = mBuffer[channel].Elements();
+      const uint32_t bufferLength = mBuffer[channel].Length();
+      const float* input = static_cast<const float*>(aInput.mChannelData.SafeElementAt(channel));
+      float* output = static_cast<float*>(const_cast<void*>(aOutput->mChannelData[channel]));
+
+      for (uint32_t i = 0; i < WEBAUDIO_BLOCK_SIZE; ++i) {
+        if (mDelay.HasSimpleValue()) {
+          // If the simple value has changed, smoothly approach it
+          currentDelayTime += (delayTime - currentDelayTime) * smoothingRate;
+        } else {
+          currentDelayTime = computedDelay[i];
+        }
+
+        // Write the input sample to the correct location in our buffer
+        if (input) {
+          buffer[writeIndex] = input[i] * aInput.mVolume;
+        }
+
+        // Now, determine the correct read position.  We adjust the read position to be
+        // from currentDelayTime seconds in the past.  We also interpolate the two input
+        // frames in case the read position does not match an integer index.
+        double readPosition = writeIndex + bufferLength -
+                              (currentDelayTime * aStream->SampleRate());
+        if (readPosition >= bufferLength) {
+          readPosition -= bufferLength;
+        }
+        MOZ_ASSERT(readPosition >= 0.0, "Why are we reading before the beginning of the buffer?");
+
+        // Here is a the reason why readIndex1 and readIndex will never be out
+        // of bounds.  The maximum value for bufferLength is 180 * 48000 (see
+        // AudioContext::CreateDelay).  The maximum value for mCurrentDelay is
+        // 180.0, so initially readPosition cannot be more than bufferLength +
+        // a fraction less than 1.  Then we take care of that case by
+        // subtracting bufferLength from it if needed.  So, if
+        // |bufferLength-readPosition<1.0|, readIndex1 will end up being zero.
+        // If |1.0<=bufferLength-readPosition<2.0|, readIndex1 will be
+        // bufferLength-1 and readIndex2 will be 0.
+        int readIndex1 = int(readPosition);
+        int readIndex2 = (readIndex1 + 1) % bufferLength;
+        double interpolationFactor = readPosition - readIndex1;
+
+        output[i] = (1.0 - interpolationFactor) * buffer[readIndex1] +
+                           interpolationFactor  * buffer[readIndex2];
+        writeIndex = (writeIndex + 1) % bufferLength;
+      }
+
+      // Remember currentDelayTime and writeIndex for the next ProduceAudioBlock
+      // call when processing the last channel.
+      if (channel == numChannels - 1) {
+        mCurrentDelayTime = currentDelayTime;
+        mWriteIndex = writeIndex;
+      }
     }
-  }
 
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    size_t amount = AudioNodeEngine::SizeOfExcludingThis(aMallocSizeOf);
-    // Not owned:
-    // - mSource - probably not owned
-    // - mDestination - probably not owned
-    // - mDelay - shares ref with AudioNode, don't count
-    amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
-    return amount;
-  }
-
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+    if (playedBackAllLeftOvers) {
+      // Delete our buffered data once we no longer need it
+      mBuffer.Clear();
+    }
   }
 
   AudioNodeStream* mSource;
   AudioNodeStream* mDestination;
   AudioParamTimeline mDelay;
-  DelayBuffer mBuffer;
+  // Maximum delay time in seconds
   double mMaxDelay;
-  TrackTicks mLastOutputPosition;
+  // Circular buffer for capturing delayed samples.
+  AutoFallibleTArray<FallibleTArray<float>, 2> mBuffer;
+  // Write index for the buffer, to write the frames to the correct index of the buffer
+  // given the current delay.
+  uint32_t mWriteIndex;
   // How much data we have in our buffer which needs to be flushed out when our inputs
   // finish.
   int32_t mLeftOverData;
+  // Current delay time, in seconds
+  double mCurrentDelayTime;
 };
 
 DelayNode::DelayNode(AudioContext* aContext, double aMaxDelay)
@@ -191,34 +247,20 @@ DelayNode::DelayNode(AudioContext* aContext, double aMaxDelay)
               2,
               ChannelCountMode::Max,
               ChannelInterpretation::Speakers)
-  , mDelay(new AudioParam(MOZ_THIS_IN_INITIALIZER_LIST(),
-                          SendDelayToStream, 0.0f))
+  , mMediaStreamGraphUpdateIndexAtLastInputConnection(0)
+  , mDelay(new AudioParam(this, SendDelayToStream, 0.0f))
 {
-  DelayNodeEngine* engine =
-    new DelayNodeEngine(this, aContext->Destination(),
-                        aContext->SampleRate() * aMaxDelay);
+  DelayNodeEngine* engine = new DelayNodeEngine(this, aContext->Destination());
   mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
-}
-
-size_t
-DelayNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
-  amount += mDelay->SizeOfIncludingThis(aMallocSizeOf);
-  return amount;
-}
-
-size_t
-DelayNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+  AudioNodeStream* ns = static_cast<AudioNodeStream*>(mStream.get());
+  ns->SetDoubleParameter(DelayNodeEngine::MAX_DELAY, aMaxDelay);
 }
 
 JSObject*
-DelayNode::WrapObject(JSContext* aCx)
+DelayNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return DelayNodeBinding::Wrap(aCx, this);
+  return DelayNodeBinding::Wrap(aCx, aScope, this);
 }
 
 void

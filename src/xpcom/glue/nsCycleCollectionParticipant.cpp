@@ -23,25 +23,27 @@ nsScriptObjectTracer::NoteJSChild(void *aScriptThing, const char *name,
   cb->NoteJSChild(aScriptThing);
 }
 
-NS_IMETHODIMP_(void)
-nsXPCOMCycleCollectionParticipant::Root(void *p)
+nsresult
+nsXPCOMCycleCollectionParticipant::RootImpl(void *p)
 {
     nsISupports *s = static_cast<nsISupports*>(p);
     NS_ADDREF(s);
+    return NS_OK;
 }
 
-NS_IMETHODIMP_(void)
-nsXPCOMCycleCollectionParticipant::Unroot(void *p)
+nsresult
+nsXPCOMCycleCollectionParticipant::UnrootImpl(void *p)
 {
     nsISupports *s = static_cast<nsISupports*>(p);
     NS_RELEASE(s);
+    return NS_OK;
 }
 
 // We define a default trace function because some participants don't need
 // to trace anything, so it is okay for them not to define one.
 NS_IMETHODIMP_(void)
-nsXPCOMCycleCollectionParticipant::Trace(void *p, const TraceCallbacks &cb,
-                                         void *closure)
+nsXPCOMCycleCollectionParticipant::TraceImpl(void *p, const TraceCallbacks &cb,
+                                             void *closure)
 {
 }
 
@@ -69,9 +71,7 @@ CycleCollectionNoteEdgeNameImpl(nsCycleCollectionTraversalCallback& aCallback,
 void
 TraceCallbackFunc::Trace(JS::Heap<JS::Value>* p, const char* name, void* closure) const
 {
-  if (p->isMarkable()) {
-    mCallback(p->toGCThing(), name, closure);
-  }
+  mCallback(JSVAL_TO_TRACEABLE(p->get()), name, closure);
 }
 
 void
@@ -85,18 +85,6 @@ TraceCallbackFunc::Trace(JS::Heap<jsid>* p, const char* name, void* closure) con
 
 void
 TraceCallbackFunc::Trace(JS::Heap<JSObject*>* p, const char* name, void* closure) const
-{
-  mCallback(*p, name, closure);
-}
-
-void
-TraceCallbackFunc::Trace(JS::TenuredHeap<JSObject*>* p, const char* name, void* closure) const
-{
-  mCallback(*p, name, closure);
-}
-
-void
-TraceCallbackFunc::Trace(JS::Heap<JSFunction*>* p, const char* name, void* closure) const
 {
   mCallback(*p, name, closure);
 }

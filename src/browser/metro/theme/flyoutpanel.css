@@ -63,13 +63,8 @@ flyoutpanel[visible] {
   border-width: 1px;
   -moz-border-start-style: solid;
   border-color: #c2c2c2;
-  padding: @metro_spacing_large@;
+  padding: 40px;
   width: 100%;
-}
-
-.flyoutpanel-contents[input="precise"] {
-  overflow-y: scroll;
-  overflow-x: hidden;
 }
 
 .flyout-close-button {
@@ -77,10 +72,6 @@ flyoutpanel[visible] {
   -moz-appearance: none;
   list-style-image: url(chrome://browser/skin/images/flyout-back-button.png);
   -moz-image-region: rect(0 32px 32px 0);
-}
-
-.flyout-close-button:-moz-locale-dir(rtl) {
-  transform: scaleX(-1);
 }
 
 .flyout-close-button:hover {

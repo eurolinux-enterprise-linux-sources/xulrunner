@@ -37,8 +37,8 @@ nsJARURI::~nsJARURI()
 }
 
 // XXX Why is this threadsafe?
-NS_IMPL_ADDREF(nsJARURI)
-NS_IMPL_RELEASE(nsJARURI)
+NS_IMPL_THREADSAFE_ADDREF(nsJARURI)
+NS_IMPL_THREADSAFE_RELEASE(nsJARURI)
 NS_INTERFACE_MAP_BEGIN(nsJARURI)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIJARURI)
   NS_INTERFACE_MAP_ENTRY(nsIURI)
@@ -120,17 +120,10 @@ nsJARURI::Read(nsIObjectInputStream* aInputStream)
 {
     nsresult rv;
 
-    nsCOMPtr<nsISupports> supports;
-    rv = aInputStream->ReadObject(true, getter_AddRefs(supports));
+    rv = aInputStream->ReadObject(true, getter_AddRefs(mJARFile));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    mJARFile = do_QueryInterface(supports, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = aInputStream->ReadObject(true, getter_AddRefs(supports));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    mJAREntry = do_QueryInterface(supports);
+    rv = aInputStream->ReadObject(true, getter_AddRefs(mJAREntry));
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = aInputStream->ReadCString(mCharsetHint);

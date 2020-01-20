@@ -22,10 +22,7 @@
 #include "TextInputHandler.h"
 #include "nsCocoaUtils.h"
 #include "gfxQuartzSurface.h"
-#include "GLContextTypes.h"
-#include "mozilla/Mutex.h"
-#include "nsRegion.h"
-#include "mozilla/MouseEvents.h"
+#include "GLContext.h"
 
 #include "nsString.h"
 #include "nsIDragService.h"
@@ -87,12 +84,11 @@ class nsChildView;
 class nsCocoaWindow;
 union nsPluginPort;
 
-namespace {
-class GLPresenter;
-class RectTextureImage;
+namespace mozilla {
+namespace gl {
+class TextureImage;
 }
 
-namespace mozilla {
 namespace layers {
 class GLManager;
 }
@@ -129,14 +125,6 @@ class GLManager;
 // Unlike -[NSView getRectsBeingDrawn:count:], these methods can be called
 // outside a call to -[NSView drawRect:].
 - (NSRect)_dirtyRect;
-
-// Undocumented method of one or more of NSFrameView's subclasses.  Called
-// when one or more of the titlebar buttons needs to be repositioned, to
-// disappear, or to reappear (say if the window's style changes).  If
-// 'redisplay' is true, the entire titlebar (the window's top 22 pixels) is
-// marked as needing redisplay.  This method has been present in the same
-// format since at least OS X 10.5.
-- (void)_tileTitlebarAndRedisplay:(BOOL)redisplay;
 
 @end
 
@@ -185,14 +173,6 @@ enum {
 };
 typedef NSUInteger NSEventPhase;
 
-enum {
-   NSFullScreenWindowMask = 1 << 14
-};
-
-@interface NSWindow (LionWindowFeatures)
-- (NSRect)convertRectToScreen:(NSRect)aRect;
-@end
-
 #ifdef __LP64__
 enum {
   NSEventSwipeTrackingLockDirection = 0x1 << 0,
@@ -221,12 +201,6 @@ typedef NSInteger NSEventGestureAxis;
 #endif // #ifdef __LP64__
 #endif // #if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
 
-#if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
-enum {
-  NSEventPhaseMayBegin    = 0x1 << 5
-};
-#endif // #if !defined(MAC_OS_X_VERSION_10_8) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_8
-
 // Undocumented scrollPhase flag that lets us discern between real scrolls and
 // automatically firing momentum scroll events.
 @interface NSEvent (ScrollPhase)
@@ -240,7 +214,7 @@ enum {
 #ifdef ACCESSIBILITY
                               mozAccessible,
 #endif
-                              mozView, NSTextInput, NSTextInputClient>
+                              mozView, NSTextInput>
 {
 @private
   // the nsChildView that created the view. It retains this NSView, so
@@ -273,11 +247,6 @@ enum {
   NSMutableArray* mPendingDirtyRects;
   BOOL mPendingFullDisplay;
   BOOL mPendingDisplay;
-
-  // WheelStart/Stop events should always come in pairs. This BOOL records the
-  // last received event so that, when we receive one of the events, we make sure
-  // to send its pair event first, in case we didn't yet for any reason.
-  BOOL mExpectingWheelStop;
 
   // Holds our drag service across multiple drag calls. The reference to the
   // service is obtained when the mouse enters the view and is released when
@@ -316,8 +285,7 @@ enum {
 
 #ifdef __LP64__
   // Support for fluid swipe tracking.
-  BOOL* mCancelSwipeAnimation;
-  uint32_t mCurrentSwipeDir;
+  void (^mCancelSwipeAnimation)();
 #endif
 
   // Whether this uses off-main-thread compositing.
@@ -348,10 +316,11 @@ enum {
 
 - (void)sendMouseEnterOrExitEvent:(NSEvent*)aEvent
                             enter:(BOOL)aEnter
-                             type:(mozilla::WidgetMouseEvent::exitType)aType;
+                             type:(nsMouseEvent::exitType)aType;
 
-- (void)updateGLContext;
-- (void)_surfaceNeedsUpdate:(NSNotification*)notification;
+- (void)update;
+- (void)lockFocus;
+- (void) _surfaceNeedsUpdate:(NSNotification*)notification;
 
 - (BOOL)isPluginView;
 
@@ -360,8 +329,7 @@ enum {
 - (BOOL)isInFailingLeftClickThrough;
 
 - (void)setGLContext:(NSOpenGLContext *)aGLContext;
-- (bool)preRender:(NSOpenGLContext *)aGLContext;
-- (void)postRender:(NSOpenGLContext *)aGLContext;
+- (void)preRender:(NSOpenGLContext *)aGLContext;
 
 - (BOOL)isCoveringTitlebar;
 
@@ -382,17 +350,13 @@ enum {
 - (void)rotateWithEvent:(NSEvent *)anEvent;
 - (void)endGestureWithEvent:(NSEvent *)anEvent;
 
-- (void)scrollWheel:(NSEvent *)anEvent;
-
 // Helper function for Lion smart magnify events
 + (BOOL)isLionSmartMagnifyEvent:(NSEvent*)anEvent;
 
 // Support for fluid swipe tracking.
 #ifdef __LP64__
 - (void)maybeTrackScrollEventAsSwipe:(NSEvent *)anEvent
-                     scrollOverflowX:(double)anOverflowX
-                     scrollOverflowY:(double)anOverflowY
-              viewPortIsOverscrolled:(BOOL)aViewPortIsOverscrolled;
+                      scrollOverflow:(double)overflow;
 #endif
 
 - (void)setUsingOMTCompositor:(BOOL)aUseOMTC;
@@ -410,14 +374,9 @@ public:
                                  ChildView* aView, BOOL isClickThrough = NO);
   static void MouseExitedWindow(NSEvent* aEvent);
   static void MouseEnteredWindow(NSEvent* aEvent);
-  static void ReEvaluateMouseEnterState(NSEvent* aEvent = nil, ChildView* aOldView = nil);
+  static void ReEvaluateMouseEnterState(NSEvent* aEvent = nil);
   static void ResendLastMouseMoveEvent();
   static ChildView* ViewForEvent(NSEvent* aEvent);
-  static void AttachPluginEvent(mozilla::WidgetMouseEventBase& aMouseEvent,
-                                ChildView* aView,
-                                NSEvent* aNativeMouseEvent,
-                                int aPluginEventType,
-                                void* aPluginEventHolder);
 
   static ChildView* sLastMouseEventView;
   static NSEvent* sLastMouseMoveEvent;
@@ -487,8 +446,6 @@ public:
 
   virtual double          GetDefaultScaleInternal();
 
-  virtual int32_t         RoundsWidgetCoordinatesTo() MOZ_OVERRIDE;
-
   NS_IMETHOD              Invalidate(const nsIntRect &aRect);
 
   virtual void*           GetNativeData(uint32_t aDataType);
@@ -498,8 +455,7 @@ public:
 
   static  bool            ConvertStatus(nsEventStatus aStatus)
                           { return aStatus == nsEventStatus_eConsumeNoDefault; }
-  NS_IMETHOD              DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
-                                        nsEventStatus& aStatus);
+  NS_IMETHOD              DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus);
 
   virtual bool            ComputeShouldAccelerate(bool aDefault);
   virtual bool            ShouldUseOffMainThreadCompositing() MOZ_OVERRIDE;
@@ -517,17 +473,10 @@ public:
   NS_IMETHOD        ActivateNativeMenuItemAt(const nsAString& indexString);
   NS_IMETHOD        ForceUpdateNativeMenuAt(const nsAString& indexString);
 
-  NS_IMETHOD        NotifyIME(const IMENotification& aIMENotification) MOZ_OVERRIDE;
+  NS_IMETHOD        NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD        AttachNativeKeyEvent(mozilla::WidgetKeyboardEvent& aEvent);
-  NS_IMETHOD_(bool) ExecuteNativeKeyBinding(
-                      NativeKeyBindingsType aType,
-                      const mozilla::WidgetKeyboardEvent& aEvent,
-                      DoCommandCallback aCallback,
-                      void* aCallbackData) MOZ_OVERRIDE;
-  virtual nsIMEUpdatePreference GetIMEUpdatePreference() MOZ_OVERRIDE;
   NS_IMETHOD        GetToggledKeyState(uint32_t aKeyCode,
                                        bool* aLEDState);
 
@@ -562,7 +511,7 @@ public:
 
   // Mac specific methods
   
-  virtual bool      DispatchWindowEvent(mozilla::WidgetGUIEvent& event);
+  virtual bool      DispatchWindowEvent(nsGUIEvent& event);
 
   void WillPaintWindow();
   bool PaintWindow(nsIntRegion aRegion);
@@ -575,9 +524,8 @@ public:
   virtual gfxASurface* GetThebesSurface();
   virtual void PrepareWindowEffects() MOZ_OVERRIDE;
   virtual void CleanupWindowEffects() MOZ_OVERRIDE;
-  virtual bool PreRender(LayerManagerComposite* aManager) MOZ_OVERRIDE;
-  virtual void PostRender(LayerManagerComposite* aManager) MOZ_OVERRIDE;
-  virtual void DrawWindowOverlay(LayerManagerComposite* aManager, nsIntRect aRect) MOZ_OVERRIDE;
+  virtual void PreRender(LayerManager* aManager) MOZ_OVERRIDE;
+  virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect) MOZ_OVERRIDE;
 
   virtual void UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries);
 
@@ -622,10 +570,6 @@ public:
     return nsCocoaUtils::DevPixelsToCocoaPoints(aRect, BackingScaleFactor());
   }
 
-  mozilla::TemporaryRef<mozilla::gfx::DrawTarget> StartRemoteDrawing() MOZ_OVERRIDE;
-  void EndRemoteDrawing() MOZ_OVERRIDE;
-  void CleanupRemoteDrawing() MOZ_OVERRIDE;
-
 protected:
 
   void              ReportMoveEvent();
@@ -644,17 +588,18 @@ protected:
     return widget.forget();
   }
 
-  void DoRemoteComposition(const nsIntRect& aRenderRect);
-
   // Overlay drawing functions for OpenGL drawing
-  void DrawWindowOverlay(mozilla::layers::GLManager* aManager, nsIntRect aRect);
   void MaybeDrawResizeIndicator(mozilla::layers::GLManager* aManager, const nsIntRect& aRect);
   void MaybeDrawRoundedCorners(mozilla::layers::GLManager* aManager, const nsIntRect& aRect);
   void MaybeDrawTitlebar(mozilla::layers::GLManager* aManager, const nsIntRect& aRect);
 
-  // Redraw the contents of mTitlebarCGContext on the main thread, as
+  // Redraw the contents of mTitlebarImageBuffer on the main thread, as
   // determined by mDirtyTitlebarRegion.
-  void UpdateTitlebarCGContext();
+  void UpdateTitlebarImageBuffer();
+
+  // Upload the contents of mTitlebarImageBuffer to mTitlebarImage on the
+  // compositor thread, as determined by mUpdatedTitlebarRegion.
+  void UpdateTitlebarImage(mozilla::layers::GLManager* aManager, const nsIntRect& aRect);
 
   nsIntRect RectContainingTitlebarControls();
 
@@ -675,11 +620,8 @@ protected:
   nsWeakPtr             mAccessible;
 #endif
 
-  nsRefPtr<gfxASurface> mTempThebesSurface;
 
-  // Protects the view from being teared down while a composition is in
-  // progress on the compositor thread.
-  mozilla::Mutex mViewTearDownLock;
+  nsRefPtr<gfxASurface> mTempThebesSurface;
 
   mozilla::Mutex mEffectsLock;
 
@@ -690,21 +632,22 @@ protected:
   bool mHasRoundedBottomCorners;
   int mDevPixelCornerRadius;
   bool mIsCoveringTitlebar;
-  bool mIsFullscreen;
   nsIntRect mTitlebarRect;
 
-  // The area of mTitlebarCGContext that needs to be redrawn during the next
+  // The area of mTitlebarImageBuffer that needs to be redrawn during the next
   // transaction. Accessed from any thread, protected by mEffectsLock.
   nsIntRegion mUpdatedTitlebarRegion;
-  CGContextRef mTitlebarCGContext;
+
+  nsRefPtr<gfxQuartzSurface> mTitlebarImageBuffer;
 
   // Compositor thread only
-  nsAutoPtr<RectTextureImage> mResizerImage;
-  nsAutoPtr<RectTextureImage> mCornerMaskImage;
-  nsAutoPtr<RectTextureImage> mTitlebarImage;
-  nsAutoPtr<RectTextureImage> mBasicCompositorImage;
+  bool                  mFailedResizerImage;
+  bool                  mFailedCornerMaskImage;
+  nsRefPtr<mozilla::gl::TextureImage> mResizerImage;
+  nsRefPtr<mozilla::gl::TextureImage> mCornerMaskImage;
+  nsRefPtr<mozilla::gl::TextureImage> mTitlebarImage;
 
-  // The area of mTitlebarCGContext that has changed and needs to be
+  // The area of mTitlebarImageBuffer that has changed and needs to be
   // uploaded to to mTitlebarImage. Main thread only.
   nsIntRegion           mDirtyTitlebarRegion;
 
@@ -722,13 +665,7 @@ protected:
   NP_CGContext          mPluginCGContext;
   nsIPluginInstanceOwner* mPluginInstanceOwner; // [WEAK]
 
-  // Used in OMTC BasicLayers mode. Presents the BasicCompositor result
-  // surface to the screen using an OpenGL context.
-  nsAutoPtr<GLPresenter> mGLPresenter;
-
   static uint32_t sLastInputEventCount;
-
-  void ReleaseTitlebarCGContext();
 };
 
 void NS_InstallPluginKeyEventsHandler();

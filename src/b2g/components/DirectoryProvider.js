@@ -28,10 +28,6 @@ XPCOMUtils.defineLazyServiceGetter(Services, "volumeService",
                                    "@mozilla.org/telephony/volume-service;1",
                                    "nsIVolumeService");
 
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsISyncMessageSender");
-
 XPCOMUtils.defineLazyGetter(this, "gExtStorage", function dp_gExtStorage() {
     return Services.env.get("EXTERNAL_STORAGE");
 });
@@ -54,8 +50,6 @@ DirectoryProvider.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIDirectoryServiceProvider]),
   _xpcom_factory: XPCOMUtils.generateSingletonFactory(DirectoryProvider),
 
-  _profD: null,
-
   getFile: function dp_getFile(prop, persistent) {
 #ifdef MOZ_WIDGET_GONK
     let localProps = ["cachePDir", "webappsDir", "PrefD", "indexedDBPDir",
@@ -67,15 +61,6 @@ DirectoryProvider.prototype = {
       persistent.value = true;
       return file;
     }
-    if (prop == "ProfD") {
-      let dir = Cc["@mozilla.org/file/local;1"]
-                  .createInstance(Ci.nsILocalFile);
-      dir.initWithPath(LOCAL_DIR+"/tests/profile");
-      if (dir.exists()) {
-        persistent.value = true;
-        return dir;
-      }
-    }
     if (prop == "coreAppsDir") {
       let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile)
       file.initWithPath("/system/b2g");
@@ -86,40 +71,13 @@ DirectoryProvider.prototype = {
       // getUpdateDir will set persistent to false since it may toggle between
       // /data/local/ and /mnt/sdcard based on free space and/or availability
       // of the sdcard.
-      // before download, check if free space is 2.1 times of update.mar
-      return this.getUpdateDir(persistent, UPDATES_DIR, 2.1);
+      return this.getUpdateDir(persistent, UPDATES_DIR);
     }
     if (prop == XRE_OS_UPDATE_APPLY_TO_DIR) {
       // getUpdateDir will set persistent to false since it may toggle between
       // /data/local/ and /mnt/sdcard based on free space and/or availability
       // of the sdcard.
-      // before apply, check if free space is 1.1 times of update.mar
-      return this.getUpdateDir(persistent, FOTA_DIR, 1.1);
-    }
-#else
-    // In desktop builds, coreAppsDir is the same as the profile directory.
-    // We just need to get the path from the parent, and it is then used to
-    // build jar:remoteopenfile:// uris.
-    if (prop == "coreAppsDir") {
-      let appsDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
-      appsDir.append("webapps");
-      persistent.value = true;
-      return appsDir;
-    } else if (prop == "ProfD") {
-      let inParent = Cc["@mozilla.org/xre/app-info;1"]
-                       .getService(Ci.nsIXULRuntime)
-                       .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
-      if (inParent) {
-        // Just bail out to use the default from toolkit.
-        return null;
-      }
-      if (!this._profD) {
-        this._profD = cpmm.sendSyncMessage("getProfD", {})[0];
-      }
-      let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
-      file.initWithPath(this._profD);
-      persistent.value = true;
-      return file;
+      return this.getUpdateDir(persistent, FOTA_DIR);
     }
 #endif
     return null;
@@ -173,7 +131,7 @@ DirectoryProvider.prototype = {
     return null;
   },
 
-  getUpdateDir: function dp_getUpdateDir(persistent, subdir, multiple) {
+  getUpdateDir: function dp_getUpdateDir(persistent, subdir) {
     let defaultUpdateDir = this.getDefaultUpdateDir();
     persistent.value = false;
 
@@ -191,7 +149,7 @@ DirectoryProvider.prototype = {
       return defaultUpdateDir;
     }
 
-    let requiredSpace = selectedPatch.size * multiple;
+    let requiredSpace = selectedPatch.size * 2;
     let updateDir = this.findUpdateDirWithFreeSpace(requiredSpace, subdir);
     if (updateDir) {
       return updateDir;

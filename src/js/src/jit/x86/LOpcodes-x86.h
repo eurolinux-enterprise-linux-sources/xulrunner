@@ -9,18 +9,16 @@
 
 #define LIR_CPU_OPCODE_LIST(_)  \
     _(Unbox)                    \
-    _(UnboxFloatingPoint)       \
+    _(UnboxDouble)              \
     _(Box)                      \
-    _(BoxFloatingPoint)         \
+    _(BoxDouble)                \
     _(DivI)                     \
     _(DivPowTwoI)               \
-    _(DivOrModConstantI)        \
     _(ModI)                     \
     _(ModPowTwoI)               \
     _(PowHalfD)                 \
-    _(AsmJSUInt32ToDouble)      \
-    _(AsmJSUInt32ToFloat32)     \
+    _(UInt32ToDouble)           \
     _(AsmJSLoadFuncPtr)         \
-    _(UDivOrMod)
+    _(AsmJSDivOrMod)
 
 #endif /* jit_x86_LOpcodes_x86_h */

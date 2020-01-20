@@ -11,6 +11,7 @@ import java.util.concurrent.ExecutorService;
 
 import org.json.simple.parser.ParseException;
 import org.mozilla.gecko.background.common.log.Logger;
+import org.mozilla.gecko.sync.CredentialsSource;
 import org.mozilla.gecko.sync.EngineSettings;
 import org.mozilla.gecko.sync.GlobalSession;
 import org.mozilla.gecko.sync.HTTPFailureException;
@@ -22,7 +23,6 @@ import org.mozilla.gecko.sync.Utils;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
 import org.mozilla.gecko.sync.delegates.WipeServerDelegate;
 import org.mozilla.gecko.sync.middleware.Crypto5MiddlewareRepository;
-import org.mozilla.gecko.sync.net.AuthHeaderProvider;
 import org.mozilla.gecko.sync.net.BaseResource;
 import org.mozilla.gecko.sync.net.SyncStorageRequest;
 import org.mozilla.gecko.sync.net.SyncStorageRequestDelegate;
@@ -77,7 +77,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     // We can be disabled by the server's meta/global record, or malformed in the server's meta/global record,
     // or by the user manually in Sync Settings.
     // We catch the subclasses of MetaGlobalException to trigger various resets and wipes in execute().
-    boolean enabledInMetaGlobal = session.isEngineRemotelyEnabled(this.getEngineName(), engineSettings);
+    boolean enabledInMetaGlobal = session.engineIsEnabled(this.getEngineName(), engineSettings);
 
     // Check for manual changes to engines by the user.
     checkAndUpdateUserSelectedEngines(enabledInMetaGlobal);
@@ -89,7 +89,10 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     }
 
     // We can also be disabled just for this sync.
-    boolean enabledThisSync = session.isEngineLocallyEnabled(this.getEngineName()); // For ServerSyncStage, stage name == engine name.
+    if (session.config.stagesToSync == null) {
+      return true;
+    }
+    boolean enabledThisSync = session.config.stagesToSync.contains(this.getEngineName()); // For ServerSyncStage, stage name == engine name.
     if (!enabledThisSync) {
       Logger.debug(LOG_TAG, "Stage " + this.getEngineName() + " disabled just for this sync.");
     }
@@ -142,11 +145,10 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
 
   // Override this in subclasses.
   protected Repository getRemoteRepository() throws URISyntaxException {
-    String collection = getCollection();
-    return new Server11Repository(collection,
-                                  session.config.storageURL(),
-                                  session.getAuthHeaderProvider(),
-                                  session.config.infoCollections);
+    return new Server11Repository(session.config.getClusterURLString(),
+                                  session.config.username,
+                                  getCollection(),
+                                  session);
   }
 
   /**
@@ -372,7 +374,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
   /**
    * Asynchronously wipe collection on server.
    */
-  protected void wipeServer(final AuthHeaderProvider authHeaderProvider, final WipeServerDelegate wipeDelegate) {
+  protected void wipeServer(final CredentialsSource credentials, final WipeServerDelegate wipeDelegate) {
     SyncStorageRequest request;
 
     try {
@@ -413,8 +415,8 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
       }
 
       @Override
-      public AuthHeaderProvider getAuthHeaderProvider() {
-        return authHeaderProvider;
+      public String credentials() {
+        return credentials.credentials();
       }
     };
 
@@ -434,7 +436,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
     final Runnable doWipe = new Runnable() {
       @Override
       public void run() {
-        wipeServer(session.getAuthHeaderProvider(), new WipeServerDelegate() {
+        wipeServer(session, new WipeServerDelegate() {
           @Override
           public void onWiped(long timestamp) {
             synchronized (monitor) {
@@ -513,9 +515,7 @@ public abstract class ServerSyncStage extends AbstractSessionManagingSyncStage i
       if (!isEnabled) {
         // Engine has been disabled; update meta/global with engine removal for upload.
         session.removeEngineFromMetaGlobal(name);
-        session.config.declinedEngineNames.add(name);
       } else {
-        session.config.declinedEngineNames.remove(name);
         // Add engine with new syncID to meta/global for upload.
         String newSyncID = Utils.generateGuid();
         session.recordForMetaGlobalUpdate(name, new EngineSettings(newSyncID, this.getStorageVersion()));

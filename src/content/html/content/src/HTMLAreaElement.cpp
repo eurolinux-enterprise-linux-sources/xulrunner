@@ -5,50 +5,38 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLAreaElement.h"
-
-#include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
-#include "mozilla/EventDispatcher.h"
-#include "mozilla/EventStates.h"
-#include "mozilla/MemoryReporting.h"
+#include "base/compiler_specific.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Area)
 
 namespace mozilla {
 namespace dom {
 
-HTMLAreaElement::HTMLAreaElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo)
-  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
+HTMLAreaElement::HTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
+  : nsGenericHTMLElement(aNodeInfo),
+    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
 {
+  SetIsDOMBinding();
 }
 
 HTMLAreaElement::~HTMLAreaElement()
 {
 }
 
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLAreaElement)
-  NS_INTERFACE_TABLE_INHERITED(HTMLAreaElement,
-                               nsIDOMHTMLAreaElement,
-                               Link)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
-
 NS_IMPL_ADDREF_INHERITED(HTMLAreaElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLAreaElement, Element)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLAreaElement)
+// QueryInterface implementation for HTMLAreaElement
+NS_INTERFACE_TABLE_HEAD(HTMLAreaElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED3(HTMLAreaElement,
+                                nsIDOMHTMLAreaElement,
+                                nsILink,
+                                Link)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLAreaElement,
-                                                  nsGenericHTMLElement)
-  tmp->Link::Traverse(cb);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRelList)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLAreaElement,
-                                                nsGenericHTMLElement)
-  tmp->Link::Unlink();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRelList)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLAreaElement)
 
@@ -94,13 +82,13 @@ HTMLAreaElement::SetTarget(const nsAString& aValue)
 }
 
 nsresult
-HTMLAreaElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLAreaElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 {
   return PreHandleEventForAnchors(aVisitor);
 }
 
 nsresult
-HTMLAreaElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
+HTMLAreaElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 {
   return PostHandleEventForAnchors(aVisitor);
 }
@@ -118,15 +106,6 @@ HTMLAreaElement::GetLinkTarget(nsAString& aTarget)
   if (aTarget.IsEmpty()) {
     GetBaseTarget(aTarget);
   }
-}
-
-nsDOMTokenList* 
-HTMLAreaElement::RelList()
-{
-  if (!mRelList) {
-    mRelList = new nsDOMTokenList(this, nsGkAtoms::rel);
-  }
-  return mRelList;
 }
 
 nsresult
@@ -246,23 +225,23 @@ HTMLAreaElement::GetHrefURI() const
   return GetHrefURIForAnchors();
 }
 
-EventStates
+nsEventStates
 HTMLAreaElement::IntrinsicState() const
 {
   return Link::LinkState() | nsGenericHTMLElement::IntrinsicState();
 }
 
 size_t
-HTMLAreaElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+HTMLAreaElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   return nsGenericHTMLElement::SizeOfExcludingThis(aMallocSizeOf) +
          Link::SizeOfExcludingThis(aMallocSizeOf);
 }
 
 JSObject*
-HTMLAreaElement::WrapNode(JSContext* aCx)
+HTMLAreaElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLAreaElementBinding::Wrap(aCx, this);
+  return HTMLAreaElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

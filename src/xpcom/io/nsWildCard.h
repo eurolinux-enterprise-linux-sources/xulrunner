@@ -20,6 +20,7 @@
 #ifndef nsWildCard_h__
 #define nsWildCard_h__
 
+#include "prtypes.h"
 #include "nscore.h"
 
 /* --------------------------- Public routines ---------------------------- */
@@ -39,7 +40,7 @@
 
 int NS_WildCardValid(const char *expr);
 
-int NS_WildCardValid(const char16_t *expr);
+int NS_WildCardValid(const PRUnichar *expr);
 
 /* return values for the search routines */
 #define MATCH 0
@@ -57,7 +58,7 @@ int NS_WildCardValid(const char16_t *expr);
 int NS_WildCardMatch(const char *str, const char *expr,
                             bool case_insensitive);
 
-int NS_WildCardMatch(const char16_t *str, const char16_t *expr,
+int NS_WildCardMatch(const PRUnichar *str, const PRUnichar *expr,
                             bool case_insensitive);
 
 #endif /* nsWildCard_h__ */

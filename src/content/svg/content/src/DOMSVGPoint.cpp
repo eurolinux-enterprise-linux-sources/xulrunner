@@ -6,51 +6,14 @@
 #include "DOMSVGPoint.h"
 #include "DOMSVGPointList.h"
 #include "SVGPoint.h"
-#include "gfx2DGlue.h"
 #include "nsSVGElement.h"
 #include "nsError.h"
+#include "nsContentUtils.h" // NS_ENSURE_FINITE
 #include "mozilla/dom/SVGMatrix.h"
 
 // See the architecture comment in DOMSVGPointList.h.
 
 using namespace mozilla;
-using namespace mozilla::gfx;
-
-namespace mozilla {
-
-//----------------------------------------------------------------------
-// Helper class: AutoChangePointNotifier
-// Stack-based helper class to pair calls to WillChangePointList and
-// DidChangePointList.
-class MOZ_STACK_CLASS AutoChangePointNotifier
-{
-public:
-  AutoChangePointNotifier(DOMSVGPoint* aPoint MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-    : mPoint(aPoint)
-  {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    MOZ_ASSERT(mPoint, "Expecting non-null point");
-    MOZ_ASSERT(mPoint->HasOwner(),
-               "Expecting list to have an owner for notification");
-    mEmptyOrOldValue =
-      mPoint->Element()->WillChangePointList();
-  }
-
-  ~AutoChangePointNotifier()
-  {
-    mPoint->Element()->DidChangePointList(mEmptyOrOldValue);
-    if (mPoint->mList->AttrIsAnimating()) {
-      mPoint->Element()->AnimationNeedsResample();
-    }
-  }
-
-private:
-  DOMSVGPoint* const mPoint;
-  nsAttrValue  mEmptyOrOldValue;
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
-}
 
 float
 DOMSVGPoint::X()
@@ -73,8 +36,12 @@ DOMSVGPoint::SetX(float aX, ErrorResult& rv)
     if (InternalItem().mX == aX) {
       return;
     }
-    AutoChangePointNotifier notifier(this);
+    nsAttrValue emptyOrOldValue = Element()->WillChangePointList();
     InternalItem().mX = aX;
+    Element()->DidChangePointList(emptyOrOldValue);
+    if (mList->AttrIsAnimating()) {
+      Element()->AnimationNeedsResample();
+    }
     return;
   }
   mPt.mX = aX;
@@ -101,8 +68,12 @@ DOMSVGPoint::SetY(float aY, ErrorResult& rv)
     if (InternalItem().mY == aY) {
       return;
     }
-    AutoChangePointNotifier notifier(this);
+    nsAttrValue emptyOrOldValue = Element()->WillChangePointList();
     InternalItem().mY = aY;
+    Element()->DidChangePointList(emptyOrOldValue);
+    if (mList->AttrIsAnimating()) {
+      Element()->AnimationNeedsResample();
+    }
     return;
   }
   mPt.mY = aY;
@@ -114,7 +85,7 @@ DOMSVGPoint::MatrixTransform(dom::SVGMatrix& matrix)
   float x = HasOwner() ? InternalItem().mX : mPt.mX;
   float y = HasOwner() ? InternalItem().mY : mPt.mY;
 
-  Point pt = ToMatrix(matrix.GetMatrix()) * Point(x, y);
+  gfxPoint pt = matrix.Matrix().Transform(gfxPoint(x, y));
   nsCOMPtr<nsISVGPoint> newPoint = new DOMSVGPoint(pt);
   return newPoint.forget();
 }

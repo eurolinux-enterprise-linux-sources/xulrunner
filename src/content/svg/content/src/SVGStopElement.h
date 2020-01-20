@@ -10,7 +10,7 @@
 #include "nsSVGNumber2.h"
 
 nsresult NS_NewSVGStopElement(nsIContent **aResult,
-                              already_AddRefed<nsINodeInfo>&& aNodeInfo);
+                              already_AddRefed<nsINodeInfo> aNodeInfo);
 
 typedef nsSVGElement SVGStopElementBase;
 
@@ -21,9 +21,10 @@ class SVGStopElement MOZ_FINAL : public SVGStopElementBase
 {
 protected:
   friend nsresult (::NS_NewSVGStopElement(nsIContent **aResult,
-                                          already_AddRefed<nsINodeInfo>&& aNodeInfo));
-  SVGStopElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+                                          already_AddRefed<nsINodeInfo> aNodeInfo));
+  SVGStopElement(already_AddRefed<nsINodeInfo> aNodeInfo);
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 public:
   // nsIContent interface
@@ -32,7 +33,7 @@ public:
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedNumber> Offset();
+  already_AddRefed<nsIDOMSVGAnimatedNumber> Offset();
 
 protected:
 

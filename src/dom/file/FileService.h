@@ -69,10 +69,10 @@ private:
     friend class FileService;
 
   public:
-    NS_IMETHOD_(MozExternalRefCountType)
+    NS_IMETHOD_(nsrefcnt)
     AddRef() MOZ_OVERRIDE;
 
-    NS_IMETHOD_(MozExternalRefCountType)
+    NS_IMETHOD_(nsrefcnt)
     Release() MOZ_OVERRIDE;
 
     inline nsresult
@@ -88,7 +88,7 @@ private:
     nsresult
     ProcessQueue();
 
-    ThreadSafeAutoRefCnt mRefCnt;
+    nsAutoRefCnt mRefCnt;
     NS_DECL_OWNINGTHREAD
     nsRefPtr<LockedFile> mLockedFile;
     nsTArray<nsRefPtr<FileHelper> > mQueue;
@@ -159,6 +159,8 @@ private:
   private:
     FileStorageInfo()
     {
+      mFilesReading.Init();
+      mFilesWriting.Init();
     }
 
     nsTArray<nsRefPtr<LockedFileQueue> > mLockedFileQueues;
@@ -186,7 +188,7 @@ private:
   MaybeFireCallback(StoragesCompleteCallback& aCallback);
 
   nsCOMPtr<nsIEventTarget> mStreamTransportTarget;
-  nsClassHashtable<nsCStringHashKey, FileStorageInfo> mFileStorageInfos;
+  nsClassHashtable<nsISupportsHashKey, FileStorageInfo> mFileStorageInfos;
   nsTArray<StoragesCompleteCallback> mCompleteCallbacks;
 };
 

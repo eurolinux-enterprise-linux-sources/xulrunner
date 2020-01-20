@@ -8,10 +8,10 @@
 #define mozilla_PreallocatedProcessManager_h
 
 #include "base/basictypes.h"
+#include "mozilla/StaticPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
-
-class nsIRunnable;
+#include "nsAutoPtr.h"
 
 namespace mozilla {
 namespace dom {
@@ -79,14 +79,6 @@ public:
    * false to true) before we'll create a new process.
    */
   static already_AddRefed<ContentParent> Take();
-
-#ifdef MOZ_NUWA_PROCESS
-  static void PublishSpareProcess(ContentParent* aContent);
-  static void MaybeForgetSpare(ContentParent* aContent);
-  static void OnNuwaReady();
-  static bool PreallocatedProcessReady();
-  static void RunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
-#endif
 
 private:
   PreallocatedProcessManager();

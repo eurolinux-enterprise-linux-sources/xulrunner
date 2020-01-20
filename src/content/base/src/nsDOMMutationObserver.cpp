@@ -4,18 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsDOMMutationObserver.h"
-
-#include "mozilla/dom/OwningNonNull.h"
+#include "nsDOMMutationObserver.h"        
+#include "nsDOMClassInfoID.h"
 #include "nsError.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsTextFragment.h"
+#include "jsapi.h"
 #include "nsServiceManagerUtils.h"
 
-nsAutoTArray<nsRefPtr<nsDOMMutationObserver>, 4>*
+nsTArray<nsRefPtr<nsDOMMutationObserver> >*
   nsDOMMutationObserver::sScheduledMutationObservers = nullptr;
 
 nsDOMMutationObserver* nsDOMMutationObserver::sCurrentObserver = nullptr;
@@ -23,7 +23,7 @@ nsDOMMutationObserver* nsDOMMutationObserver::sCurrentObserver = nullptr;
 uint32_t nsDOMMutationObserver::sMutationLevel = 0;
 uint64_t nsDOMMutationObserver::sCount = 0;
 
-nsAutoTArray<nsAutoTArray<nsRefPtr<nsDOMMutationObserver>, 4>, 4>*
+nsAutoTArray<nsTArray<nsRefPtr<nsDOMMutationObserver> >, 4>*
 nsDOMMutationObserver::sCurrentlyHandlingObservers = nullptr;
 
 nsINodeList*
@@ -52,11 +52,11 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMMutationRecord)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMMutationRecord)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_7(nsDOMMutationRecord,
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_6(nsDOMMutationRecord,
                                         mTarget,
                                         mPreviousSibling, mNextSibling,
                                         mAddedNodes, mRemovedNodes,
-                                        mNext, mOwner)
+                                        mOwner)
 
 // Observer
 
@@ -66,6 +66,7 @@ NS_IMPL_RELEASE(nsMutationReceiver)
 NS_INTERFACE_MAP_BEGIN(nsMutationReceiver)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
+  NS_INTERFACE_MAP_ENTRY(nsMutationReceiver)
 NS_INTERFACE_MAP_END
 
 nsMutationReceiver::nsMutationReceiver(nsINode* aTarget,
@@ -113,15 +114,16 @@ nsMutationReceiver::AttributeWillChange(nsIDocument* aDocument,
   }
 
   nsDOMMutationRecord* m =
-    Observer()->CurrentRecord(nsGkAtoms::attributes);
+    Observer()->CurrentRecord(NS_LITERAL_STRING("attributes"));
 
   NS_ASSERTION(!m->mTarget || m->mTarget == aElement,
                "Wrong target!");
-  NS_ASSERTION(!m->mAttrName || m->mAttrName == aAttribute,
+  NS_ASSERTION(m->mAttrName.IsVoid() ||
+               m->mAttrName.Equals(nsDependentAtomString(aAttribute)),
                "Wrong attribute!");
   if (!m->mTarget) {
     m->mTarget = aElement;
-    m->mAttrName = aAttribute;
+    m->mAttrName = nsAtomString(aAttribute);
     if (aNameSpaceID == kNameSpaceID_None) {
       m->mAttrNamespace.SetIsVoid(true);
     } else {
@@ -149,7 +151,7 @@ nsMutationReceiver::CharacterDataWillChange(nsIDocument *aDocument,
   }
   
   nsDOMMutationRecord* m =
-    Observer()->CurrentRecord(nsGkAtoms::characterData);
+    Observer()->CurrentRecord(NS_LITERAL_STRING("characterData"));
  
   NS_ASSERTION(!m->mTarget || m->mTarget == aContent,
                "Wrong target!");
@@ -182,7 +184,7 @@ nsMutationReceiver::ContentAppended(nsIDocument* aDocument,
   }
 
   nsDOMMutationRecord* m =
-    Observer()->CurrentRecord(nsGkAtoms::childList);
+    Observer()->CurrentRecord(NS_LITERAL_STRING("childList"));
   NS_ASSERTION(!m->mTarget || m->mTarget == parent,
                "Wrong target!");
   if (m->mTarget) {
@@ -220,7 +222,7 @@ nsMutationReceiver::ContentInserted(nsIDocument* aDocument,
   }
 
   nsDOMMutationRecord* m =
-    Observer()->CurrentRecord(nsGkAtoms::childList);
+    Observer()->CurrentRecord(NS_LITERAL_STRING("childList"));
   if (m->mTarget) {
     // Already handled case.
     return;  
@@ -292,7 +294,7 @@ nsMutationReceiver::ContentRemoved(nsIDocument* aDocument,
 
   if (ChildList() && (Subtree() || parent == Target())) {
     nsDOMMutationRecord* m =
-      Observer()->CurrentRecord(nsGkAtoms::childList);
+      Observer()->CurrentRecord(NS_LITERAL_STRING("childList"));
     if (m->mTarget) {
       // Already handled case.
       return;
@@ -319,13 +321,10 @@ void nsMutationReceiver::NodeWillBeDestroyed(const nsINode *aNode)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMMutationObserver)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_INTERFACE_MAP_ENTRY(nsDOMMutationObserver)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMMutationObserver)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMMutationObserver)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMMutationObserver)
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDOMMutationObserver)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
@@ -338,7 +337,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMMutationObserver)
     tmp->mReceivers[i]->Disconnect(false);
   }
   tmp->mReceivers.Clear();
-  tmp->ClearPendingRecords();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPendingMutations)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCallback)
   // No need to handle mTransientReceivers
   NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -347,7 +346,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMMutationObserver)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mReceivers)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstPendingMutation)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingMutations)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCallback)
   // No need to handle mTransientReceivers
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -430,7 +429,7 @@ void
 nsDOMMutationObserver::RescheduleForRun()
 {
   if (!sScheduledMutationObservers) {
-    sScheduledMutationObservers = new nsAutoTArray<nsRefPtr<nsDOMMutationObserver>, 4>;
+    sScheduledMutationObservers = new nsTArray<nsRefPtr<nsDOMMutationObserver> >;
   }
 
   bool didInsert = false;
@@ -513,7 +512,7 @@ nsDOMMutationObserver::Disconnect()
   }
   mReceivers.Clear();
   mCurrentMutations.Clear();
-  ClearPendingRecords();
+  mPendingMutations.Clear();
 }
 
 void
@@ -521,42 +520,7 @@ nsDOMMutationObserver::TakeRecords(
                          nsTArray<nsRefPtr<nsDOMMutationRecord> >& aRetVal)
 {
   aRetVal.Clear();
-  aRetVal.SetCapacity(mPendingMutationCount);
-  nsRefPtr<nsDOMMutationRecord> current;
-  current.swap(mFirstPendingMutation);
-  for (uint32_t i = 0; i < mPendingMutationCount; ++i) {
-    nsRefPtr<nsDOMMutationRecord> next;
-    current->mNext.swap(next);
-    *aRetVal.AppendElement() = current.forget();
-    current.swap(next);
-  }
-  ClearPendingRecords();
-}
-
-void
-nsDOMMutationObserver::GetObservingInfo(nsTArray<Nullable<MutationObservingInfo> >& aResult)
-{
-  aResult.SetCapacity(mReceivers.Count());
-  for (int32_t i = 0; i < mReceivers.Count(); ++i) {
-    MutationObservingInfo& info = aResult.AppendElement()->SetValue();
-    nsMutationReceiver* mr = mReceivers[i];
-    info.mChildList = mr->ChildList();
-    info.mAttributes = mr->Attributes();
-    info.mCharacterData = mr->CharacterData();
-    info.mSubtree = mr->Subtree();
-    info.mAttributeOldValue = mr->AttributeOldValue();
-    info.mCharacterDataOldValue = mr->CharacterDataOldValue();
-    nsCOMArray<nsIAtom>& filters = mr->AttributeFilter();
-    if (filters.Count()) {
-      info.mAttributeFilter.Construct();
-      mozilla::dom::Sequence<nsString>& filtersAsStrings =
-        info.mAttributeFilter.Value();
-      for (int32_t j = 0; j < filters.Count(); ++j) {
-        filtersAsStrings.AppendElement(nsDependentAtomString(filters[j]));
-      }
-    }
-    info.mObservedNode = mr->Target();
-  }
+  mPendingMutations.SwapElements(aRetVal);
 }
 
 // static
@@ -565,7 +529,7 @@ nsDOMMutationObserver::Constructor(const mozilla::dom::GlobalObject& aGlobal,
                                    mozilla::dom::MutationCallback& aCb,
                                    mozilla::ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -591,28 +555,21 @@ nsDOMMutationObserver::HandleMutation()
   mTransientReceivers.Clear();
 
   nsPIDOMWindow* outer = mOwner->GetOuterWindow();
-  if (!mPendingMutationCount || !outer ||
+  if (!mPendingMutations.Length() || !outer ||
       outer->GetCurrentInnerWindow() != mOwner) {
-    ClearPendingRecords();
+    mPendingMutations.Clear();
     return;
   }
 
+  nsTArray<nsRefPtr<nsDOMMutationRecord> > mutationsArray;
+  TakeRecords(mutationsArray);
   mozilla::dom::Sequence<mozilla::dom::OwningNonNull<nsDOMMutationRecord> >
     mutations;
-  if (mutations.SetCapacity(mPendingMutationCount)) {
-    // We can't use TakeRecords easily here, because it deals with a
-    // different type of array, and we want to optimize out any extra copying.
-    nsRefPtr<nsDOMMutationRecord> current;
-    current.swap(mFirstPendingMutation);
-    for (uint32_t i = 0; i < mPendingMutationCount; ++i) {
-      nsRefPtr<nsDOMMutationRecord> next;
-      current->mNext.swap(next);
-      *mutations.AppendElement() = current;
-      current.swap(next);
-    }
+  uint32_t len = mutationsArray.Length();
+  NS_ENSURE_TRUE_VOID(mutations.SetCapacity(len));
+  for (uint32_t i = 0; i < len; ++i) {
+    *mutations.AppendElement() = mutationsArray[i].forget();
   }
-  ClearPendingRecords();
-
   mozilla::ErrorResult rv;
   mCallback->Call(this, mutations, *this, rv);
 }
@@ -648,8 +605,7 @@ nsDOMMutationObserver::HandleMutationsInternal()
   nsTArray<nsRefPtr<nsDOMMutationObserver> >* suppressedObservers = nullptr;
 
   while (sScheduledMutationObservers) {
-    nsAutoTArray<nsRefPtr<nsDOMMutationObserver>, 4>* observers =
-      sScheduledMutationObservers;
+    nsTArray<nsRefPtr<nsDOMMutationObserver> >* observers = sScheduledMutationObservers;
     sScheduledMutationObservers = nullptr;
     for (uint32_t i = 0; i < observers->Length(); ++i) {
       sCurrentObserver = static_cast<nsDOMMutationObserver*>((*observers)[i]);
@@ -679,7 +635,7 @@ nsDOMMutationObserver::HandleMutationsInternal()
 }
 
 nsDOMMutationRecord*
-nsDOMMutationObserver::CurrentRecord(nsIAtom* aType)
+nsDOMMutationObserver::CurrentRecord(const nsAString& aType)
 {
   NS_ASSERTION(sMutationLevel > 0, "Unexpected mutation level!");
 
@@ -689,13 +645,13 @@ nsDOMMutationObserver::CurrentRecord(nsIAtom* aType)
 
   uint32_t last = sMutationLevel - 1;
   if (!mCurrentMutations[last]) {
-    nsRefPtr<nsDOMMutationRecord> r = new nsDOMMutationRecord(aType, GetParentObject());
+    nsDOMMutationRecord* r = new nsDOMMutationRecord(aType, GetParentObject());
     mCurrentMutations[last] = r;
-    AppendMutationRecord(r.forget());
+    mPendingMutations.AppendElement(r);
     ScheduleForRun();
   }
 
-  NS_ASSERTION(mCurrentMutations[last]->mType == aType,
+  NS_ASSERTION(mCurrentMutations[last]->mType.Equals(aType),
                "Unexpected MutationRecord type!");
 
   return mCurrentMutations[last];
@@ -745,7 +701,7 @@ nsDOMMutationObserver::AddCurrentlyHandlingObserver(nsDOMMutationObserver* aObse
 
   if (!sCurrentlyHandlingObservers) {
     sCurrentlyHandlingObservers =
-      new nsAutoTArray<nsAutoTArray<nsRefPtr<nsDOMMutationObserver>, 4>, 4>;
+      new nsAutoTArray<nsTArray<nsRefPtr<nsDOMMutationObserver> >, 4>;
   }
 
   while (sCurrentlyHandlingObservers->Length() < sMutationLevel) {
@@ -830,15 +786,15 @@ nsAutoMutationBatch::Done()
       for (uint32_t i = 0; i < mAddedNodes.Length(); ++i) {
         addedList->AppendElement(mAddedNodes[i]);
       }
-      nsRefPtr<nsDOMMutationRecord> m =
-        new nsDOMMutationRecord(nsGkAtoms::childList,
+      nsDOMMutationRecord* m =
+        new nsDOMMutationRecord(NS_LITERAL_STRING("childList"),
                                 ob->GetParentObject());
+      ob->mPendingMutations.AppendElement(m);
       m->mTarget = mBatchTarget;
       m->mRemovedNodes = removedList;
       m->mAddedNodes = addedList;
       m->mPreviousSibling = mPrevSibling;
       m->mNextSibling = mNextSibling;
-      ob->AppendMutationRecord(m.forget());
     }
     // Always schedule the observer so that transient receivers are
     // removed correctly.

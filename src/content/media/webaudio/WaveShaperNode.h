@@ -8,8 +8,7 @@
 #define WaveShaperNode_h_
 
 #include "AudioNode.h"
-#include "mozilla/dom/WaveShaperNodeBinding.h"
-#include "mozilla/dom/TypedArray.h"
+#include "AudioParam.h"
 
 namespace mozilla {
 namespace dom {
@@ -25,46 +24,20 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(WaveShaperNode, AudioNode)
 
-  virtual JSObject* WrapObject(JSContext *aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  void GetCurve(JSContext* aCx, JS::MutableHandle<JSObject*> aRetval) const
+  JSObject* GetCurve(JSContext* aCx) const
   {
-    if (mCurve) {
-      JS::ExposeObjectToActiveJS(mCurve);
-    }
-    aRetval.set(mCurve);
+    return mCurve;
   }
-  void SetCurve(const Nullable<Float32Array>& aData);
-
-  OverSampleType Oversample() const
-  {
-    return mType;
-  }
-  void SetOversample(OverSampleType aType);
-
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    // Possibly track in the future:
-    // - mCurve
-    return AudioNode::SizeOfExcludingThis(aMallocSizeOf);
-  }
-
-  virtual const char* NodeType() const
-  {
-    return "WaveShaperNode";
-  }
-
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-  }
+  void SetCurve(const Float32Array* aData);
 
 private:
   void ClearCurve();
 
 private:
   JS::Heap<JSObject*> mCurve;
-  OverSampleType mType;
 };
 
 }

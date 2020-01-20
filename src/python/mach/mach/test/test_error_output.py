@@ -4,19 +4,33 @@
 
 from __future__ import unicode_literals
 
-from mach.main import (
-    COMMAND_ERROR,
-    MODULE_ERROR
-)
-from mach.test.common import TestBase
+import imp
+import os
+import sys
+import unittest
 
-from mozunit import main
+from StringIO import StringIO
+
+import mach.main
 
 
-class TestErrorOutput(TestBase):
+class TestErrorOutput(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        common_path = os.path.join(os.path.dirname(__file__), 'common.py')
+        imp.load_source('mach.commands.error_output_test', common_path)
 
     def _run_mach(self, args):
-        return TestBase._run_mach(self, args, 'throw.py')
+        m = mach.main.Mach(os.getcwd())
+
+        stdout = StringIO()
+        stderr = StringIO()
+        stdout.encoding = 'UTF-8'
+        stderr.encoding = 'UTF-8'
+
+        result = m.run(args, stdout=stdout, stderr=stderr)
+
+        return (result, stdout.getvalue(), stderr.getvalue())
 
     def test_command_error(self):
         result, stdout, stderr = self._run_mach(['throw', '--message',
@@ -24,7 +38,7 @@ class TestErrorOutput(TestBase):
 
         self.assertEqual(result, 1)
 
-        self.assertIn(COMMAND_ERROR, stdout)
+        self.assertIn(mach.main.COMMAND_ERROR, stdout)
 
     def test_invoked_error(self):
         result, stdout, stderr = self._run_mach(['throw_deep', '--message',
@@ -32,8 +46,4 @@ class TestErrorOutput(TestBase):
 
         self.assertEqual(result, 1)
 
-        self.assertIn(MODULE_ERROR, stdout)
-
-
-if __name__ == '__main__':
-    main()
+        self.assertIn(mach.main.MODULE_ERROR, stdout)

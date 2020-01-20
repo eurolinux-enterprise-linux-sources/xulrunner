@@ -8,7 +8,6 @@
 #include "logging.h"
 #include "transportflow.h"
 #include "transportlayer.h"
-#include "nsThreadUtils.h"
 
 // Logging context
 namespace mozilla {
@@ -33,35 +32,18 @@ nsresult TransportLayer::Init() {
 void TransportLayer::Inserted(TransportFlow *flow, TransportLayer *downward) {
   downward_ = downward;
   flow_id_ = flow->id();
-  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "Inserted: downward='" <<
+  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "Inserted: downward='" <<
     (downward ? downward->id(): "none") << "'");
 
   WasInserted();
 }
 
-void TransportLayer::SetState(State state, const char *file, unsigned line) {
+void TransportLayer::SetState(State state) {
   if (state != state_) {
-    MOZ_MTLOG(state == TS_ERROR ? ML_ERROR : ML_DEBUG,
-              file << ":" << line << ": " <<
-              LAYER_INFO << "state " << state_ << "->" << state);
+    MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "state " << state_ << "->" << state);
     state_ = state;
     SignalStateChange(this, state);
   }
-}
-
-nsresult TransportLayer::RunOnThread(nsIRunnable *event) {
-  if (target_) {
-    nsIThread *thr;
-
-    DebugOnly<nsresult> rv = NS_GetCurrentThread(&thr);
-    MOZ_ASSERT(NS_SUCCEEDED(rv));
-
-    if (target_ != thr) {
-      return target_->Dispatch(event, NS_DISPATCH_SYNC);
-    }
-  }
-
-  return event->Run();
 }
 
 }  // close namespace

@@ -46,10 +46,8 @@ GetPNGDecoderAccountingLog()
 }
 #endif
 
-/* limit image dimensions (bug #251381, #591822, and #967656) */
-#ifndef MOZ_PNG_MAX_DIMENSION
-#  define MOZ_PNG_MAX_DIMENSION 32767
-#endif
+/* limit image dimensions (bug #251381) */
+#define MOZ_PNG_MAX_DIMENSION 1000000L
 
 // For size decodes
 #define WIDTH_OFFSET 16
@@ -123,7 +121,7 @@ nsPNGDecoder::nsPNGDecoder(RasterImage &aImage)
 nsPNGDecoder::~nsPNGDecoder()
 {
   if (mPNG)
-    png_destroy_read_struct(&mPNG, mInfo ? &mInfo : nullptr, nullptr);
+    png_destroy_read_struct(&mPNG, mInfo ? &mInfo : NULL, NULL);
   if (mCMSLine)
     nsMemory::Free(mCMSLine);
   if (interlacebuf)
@@ -140,7 +138,7 @@ nsPNGDecoder::~nsPNGDecoder()
 // CreateFrame() is used for both simple and animated images
 void nsPNGDecoder::CreateFrame(png_uint_32 x_offset, png_uint_32 y_offset,
                                int32_t width, int32_t height,
-                               gfxImageFormat format)
+                               gfxASurface::gfxImageFormat format)
 {
   // Our first full frame is automatically created by the image decoding
   // infrastructure. Just use it as long as it matches up.
@@ -150,7 +148,7 @@ void nsPNGDecoder::CreateFrame(png_uint_32 x_offset, png_uint_32 y_offset,
     NeedNewFrame(mNumFrames, x_offset, y_offset, width, height, format);
   } else if (mNumFrames == 0) {
     // Our preallocated frame matches up, with the possible exception of alpha.
-    if (format == gfxImageFormat::RGB24) {
+    if (format == gfxASurface::ImageFormatRGB24) {
       GetCurrentFrame()->SetHasNoAlpha();
     }
   }
@@ -239,7 +237,7 @@ nsPNGDecoder::InitInternal()
   /* Always decode to 24 bit pixdepth */
 
   mPNG = png_create_read_struct(PNG_LIBPNG_VER_STRING,
-                                nullptr, nsPNGDecoder::error_callback,
+                                NULL, nsPNGDecoder::error_callback,
                                 nsPNGDecoder::warning_callback);
   if (!mPNG) {
     PostDecoderError(NS_ERROR_OUT_OF_MEMORY);
@@ -249,7 +247,7 @@ nsPNGDecoder::InitInternal()
   mInfo = png_create_info_struct(mPNG);
   if (!mInfo) {
     PostDecoderError(NS_ERROR_OUT_OF_MEMORY);
-    png_destroy_read_struct(&mPNG, nullptr, nullptr);
+    png_destroy_read_struct(&mPNG, NULL, NULL);
     return;
   }
 
@@ -350,7 +348,7 @@ nsPNGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount, DecodeStrategy
       if (!HasError())
         PostDataError();
 
-      png_destroy_read_struct(&mPNG, &mInfo, nullptr);
+      png_destroy_read_struct(&mPNG, &mInfo, NULL);
       return;
     }
 
@@ -500,7 +498,7 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
   int bit_depth, color_type, interlace_type, compression_type, filter_type;
   unsigned int channels;
 
-  png_bytep trans = nullptr;
+  png_bytep trans = NULL;
   int num_trans = 0;
 
   nsPNGDecoder *decoder =
@@ -528,33 +526,31 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
     png_set_expand(png_ptr);
 
   if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS)) {
+    int sample_max = (1 << bit_depth);
     png_color_16p trans_values;
     png_get_tRNS(png_ptr, info_ptr, &trans, &num_trans, &trans_values);
     /* libpng doesn't reject a tRNS chunk with out-of-range samples
        so we check it here to avoid setting up a useless opacity
-       channel or producing unexpected transparent pixels (bug #428045) */
-    if (bit_depth < 16) {
-      png_uint_16 sample_max = (1 << bit_depth) - 1;
-      if ((color_type == PNG_COLOR_TYPE_GRAY &&
-           trans_values->gray > sample_max) ||
-           (color_type == PNG_COLOR_TYPE_RGB &&
-           (trans_values->red > sample_max ||
-           trans_values->green > sample_max ||
-           trans_values->blue > sample_max)))
+       channel or producing unexpected transparent pixels when using
+       libpng-1.2.19 through 1.2.26 (bug #428045) */
+    if ((color_type == PNG_COLOR_TYPE_GRAY &&
+       (int)trans_values->gray > sample_max) ||
+       (color_type == PNG_COLOR_TYPE_RGB &&
+       ((int)trans_values->red > sample_max ||
+       (int)trans_values->green > sample_max ||
+       (int)trans_values->blue > sample_max)))
       {
         /* clear the tRNS valid flag and release tRNS memory */
         png_free_data(png_ptr, info_ptr, PNG_FREE_TRNS, 0);
-        num_trans = 0;
       }
-    }
-    if (num_trans != 0)
+    else
       png_set_expand(png_ptr);
   }
 
   if (bit_depth == 16)
     png_set_scale_16(png_ptr);
 
-  qcms_data_type inType = QCMS_DATA_RGBA_8;
+  qcms_data_type inType;
   uint32_t intent = -1;
   uint32_t pIntent;
   if (decoder->mCMSMode != eCMSMode_Off) {
@@ -631,14 +627,13 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
 #endif
 
   if (channels == 1 || channels == 3)
-    decoder->format = gfxImageFormat::RGB24;
+    decoder->format = gfxASurface::ImageFormatRGB24;
   else if (channels == 2 || channels == 4)
-    decoder->format = gfxImageFormat::ARGB32;
+    decoder->format = gfxASurface::ImageFormatARGB32;
 
 #ifdef PNG_APNG_SUPPORTED
   if (png_get_valid(png_ptr, info_ptr, PNG_INFO_acTL))
-    png_set_progressive_frame_fn(png_ptr, nsPNGDecoder::frame_info_callback,
-                                 nullptr);
+    png_set_progressive_frame_fn(png_ptr, nsPNGDecoder::frame_info_callback, NULL);
 
   if (png_get_first_frame_is_hidden(png_ptr, info_ptr)) {
     decoder->mFrameIsHidden = true;
@@ -685,14 +680,14 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
    * image is interlacing, and you turned on the interlace handler,
    * this function will be called for every row in every pass.
    * Some of these rows will not be changed from the previous pass.
-   * When the row is not changed, the new_row variable will be
-   * nullptr. The rows and passes are called in order, so you don't
-   * really need the row_num and pass, but I'm supplying them
-   * because it may make your life easier.
+   * When the row is not changed, the new_row variable will be NULL.
+   * The rows and passes are called in order, so you don't really
+   * need the row_num and pass, but I'm supplying them because it
+   * may make your life easier.
    *
-   * For the non-nullptr rows of interlaced images, you must call
+   * For the non-NULL rows of interlaced images, you must call
    * png_progressive_combine_row() passing in the row and the
-   * old row.  You can call this function for nullptr rows (it will
+   * old row.  You can call this function for NULL rows (it will
    * just return) and for non-interlaced images (it just does the
    * memcpy for you) if it will make the code easier.  Thus, you
    * can just do this for all cases:
@@ -747,7 +742,7 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
      }
 
     switch (decoder->format) {
-      case gfxImageFormat::RGB24:
+      case gfxASurface::ImageFormatRGB24:
       {
         // counter for while() loops below
         uint32_t idx = iwidth;
@@ -774,7 +769,7 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
         }
       }
       break;
-      case gfxImageFormat::ARGB32:
+      case gfxASurface::ImageFormatARGB32:
       {
         if (!decoder->mDisablePremultipliedAlpha) {
           for (uint32_t x=width; x>0; --x) {
@@ -809,11 +804,11 @@ nsPNGDecoder::row_callback(png_structp png_ptr, png_bytep new_row,
   }
 }
 
-#ifdef PNG_APNG_SUPPORTED
 // got the header of a new frame that's coming
 void
 nsPNGDecoder::frame_info_callback(png_structp png_ptr, png_uint_32 frame_num)
 {
+#ifdef PNG_APNG_SUPPORTED
   png_uint_32 x_offset, y_offset;
   int32_t width, height;
 
@@ -839,8 +834,8 @@ nsPNGDecoder::frame_info_callback(png_structp png_ptr, png_uint_32 frame_num)
      */
     png_process_data_pause(png_ptr, /* save = */ 1);
   }
-}
 #endif
+}
 
 void
 nsPNGDecoder::end_callback(png_structp png_ptr, png_infop info_ptr)

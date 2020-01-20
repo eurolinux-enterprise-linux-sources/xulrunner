@@ -8,7 +8,7 @@
 
 #include "nsIHttpAuthenticator.h"
 
-namespace mozilla { namespace net {
+class nsIURI;
 
 //-----------------------------------------------------------------------------
 // The nsHttpBasicAuth class produces HTTP Basic-auth responses for a username/
@@ -24,7 +24,5 @@ public:
 	nsHttpBasicAuth();
 	virtual ~nsHttpBasicAuth();
 };
-
-}} // namespace mozilla::net
 
 #endif // !nsHttpBasicAuth_h__

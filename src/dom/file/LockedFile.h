@@ -7,24 +7,15 @@
 #ifndef mozilla_dom_file_lockedfile_h__
 #define mozilla_dom_file_lockedfile_h__
 
-#include "FileCommon.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/DOMEventTargetHelper.h"
+#include "FileCommon.h"
 #include "mozilla/dom/FileModeBinding.h"
-#include "mozilla/dom/TypedArray.h"
-#include "nsIInputStream.h"
+#include "nsIDOMLockedFile.h"
 #include "nsIRunnable.h"
 
-namespace mozilla {
-namespace dom {
-class DOMFileMetadataParameters;
-class DOMRequest;
-} // namespace dom
-} // namespace mozilla
+#include "nsDOMEventTargetHelper.h"
 
-namespace mozilla {
-class EventChainPreVisitor;
-} // namespace mozilla
+class nsIInputStream;
 
 BEGIN_FILE_NAMESPACE
 
@@ -32,7 +23,8 @@ class FileHandle;
 class FileRequest;
 class MetadataHelper;
 
-class LockedFile : public DOMEventTargetHelper,
+class LockedFile : public nsDOMEventTargetHelper,
+                   public nsIDOMLockedFile,
                    public nsIRunnable
 {
   friend class FinishHelper;
@@ -42,9 +34,10 @@ class LockedFile : public DOMEventTargetHelper,
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMLOCKEDFILE
   NS_DECL_NSIRUNNABLE
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(LockedFile, DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(LockedFile, nsDOMEventTargetHelper)
 
   enum RequestMode
   {
@@ -67,7 +60,7 @@ public:
 
   // nsIDOMEventTarget
   virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   nsresult
   CreateParallelStream(nsISupports** aStream);
@@ -94,106 +87,6 @@ public:
   OpenInputStream(bool aWholeFile, uint64_t aStart, uint64_t aLength,
                   nsIInputStream** aResult);
 
-  // WrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  // WebIDL
-  nsPIDOMWindow*
-  GetParentObject() const
-  {
-    return GetOwner();
-  }
-
-  FileHandle*
-  GetFileHandle() const
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return Handle();
-  }
-
-  FileMode
-  Mode() const
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return mMode;
-  }
-
-  bool
-  Active() const
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return IsOpen();
-  }
-
-  Nullable<uint64_t>
-  GetLocation() const
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    if (mLocation == UINT64_MAX) {
-      return Nullable<uint64_t>();
-    }
-
-    return Nullable<uint64_t>(mLocation);
-  }
-
-  void
-  SetLocation(const Nullable<uint64_t>& aLocation)
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    // Null means the end-of-file.
-    if (aLocation.IsNull()) {
-      mLocation = UINT64_MAX;
-    } else {
-      mLocation = aLocation.Value();
-    }
-  }
-
-  already_AddRefed<FileRequest>
-  GetMetadata(const DOMFileMetadataParameters& aParameters, ErrorResult& aRv);
-
-  already_AddRefed<FileRequest>
-  ReadAsArrayBuffer(uint64_t aSize, ErrorResult& aRv);
-
-  already_AddRefed<FileRequest>
-  ReadAsText(uint64_t aSize, const nsAString& aEncoding, ErrorResult& aRv);
-
-  template<class T>
-  already_AddRefed<FileRequest>
-  Write(const T& aValue, ErrorResult& aRv)
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return WriteOrAppend(aValue, false, aRv);
-  }
-
-  template<class T>
-  already_AddRefed<FileRequest>
-  Append(const T& aValue, ErrorResult& aRv)
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    return WriteOrAppend(aValue, true, aRv);
-  }
-
-  already_AddRefed<FileRequest>
-  Truncate(const Optional<uint64_t>& aSize, ErrorResult& aRv);
-
-  already_AddRefed<FileRequest>
-  Flush(ErrorResult& aRv);
-
-  void
-  Abort(ErrorResult& aRv);
-
-  IMPL_EVENT_HANDLER(complete)
-  IMPL_EVENT_HANDLER(abort)
-  IMPL_EVENT_HANDLER(error)
-
 private:
   LockedFile();
   ~LockedFile();
@@ -204,70 +97,15 @@ private:
   void
   OnRequestFinished();
 
-  bool
-  CheckState(ErrorResult& aRv);
-
-  bool
-  CheckStateAndArgumentsForRead(uint64_t aSize, ErrorResult& aRv);
-
-  bool
-  CheckStateForWrite(ErrorResult& aRv);
-
-  already_AddRefed<FileRequest>
+  inline already_AddRefed<FileRequest>
   GenerateFileRequest();
 
-  template<class T>
-  already_AddRefed<FileRequest>
-  WriteOrAppend(const T& aValue, bool aAppend, ErrorResult& aRv)
-  {
-    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-
-    // State checking for write
-    if (!CheckStateForWrite(aRv)) {
-      return nullptr;
-    }
-
-    // Additional state checking for write
-    if (!aAppend && mLocation == UINT64_MAX) {
-      aRv.Throw(NS_ERROR_DOM_FILEHANDLE_NOT_ALLOWED_ERR);
-      return nullptr;
-    }
-
-    uint64_t length;
-    nsCOMPtr<nsIInputStream> stream = GetInputStream(aValue, &length, aRv);
-    if (aRv.Failed()) {
-      return nullptr;
-    }
-
-    if (!length) {
-      return nullptr;
-    }
-
-    // Do nothing if the window is closed
-    if (!GetOwner()) {
-      return nullptr;
-    }
-
-    return WriteInternal(stream, length, aAppend, aRv);
-  }
-
-  already_AddRefed<FileRequest>
-  WriteInternal(nsIInputStream* aInputStream, uint64_t aInputLength,
-                bool aAppend, ErrorResult& aRv);
+  nsresult
+  WriteOrAppend(const jsval& aValue, JSContext* aCx,
+                nsISupports** _retval, bool aAppend);
 
   nsresult
   Finish();
-
-  static already_AddRefed<nsIInputStream>
-  GetInputStream(const ArrayBuffer& aValue, uint64_t* aInputLength,
-                 ErrorResult& aRv);
-
-  static already_AddRefed<nsIInputStream>
-  GetInputStream(nsIDOMBlob* aValue, uint64_t* aInputLength, ErrorResult& aRv);
-
-  static already_AddRefed<nsIInputStream>
-  GetInputStream(const nsAString& aValue, uint64_t* aInputLength,
-                 ErrorResult& aRv);
 
   nsRefPtr<FileHandle> mFileHandle;
   ReadyState mReadyState;
@@ -288,7 +126,7 @@ class FinishHelper MOZ_FINAL : public nsIRunnable
   friend class LockedFile;
 
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIRUNNABLE
 
 private:

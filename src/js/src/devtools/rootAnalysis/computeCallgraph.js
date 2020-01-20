@@ -2,15 +2,13 @@
 
 "use strict";
 
-loadRelativeToScript('utility.js');
-loadRelativeToScript('annotations.js');
-loadRelativeToScript('CFG.js');
+load('utility.js');
+load('annotations.js');
+load('suppressedPoints.js');
 
 var subclasses = {};
 var superclasses = {};
 var classFunctions = {};
-
-var fieldCallSeen = {};
 
 function addClassEntry(index, name, other)
 {
@@ -27,7 +25,6 @@ function addClassEntry(index, name, other)
     index[name].push(other);
 }
 
-// CSU is "Class/Struct/Union"
 function processCSU(csuName, csu)
 {
     if (!("FunctionField" in csu))
@@ -51,9 +48,9 @@ function processCSU(csuName, csu)
     }
 }
 
-function findVirtualFunctions(initialCSU, field, suppressed)
+function findVirtualFunctions(csu, field)
 {
-    var worklist = [initialCSU];
+    var worklist = [csu];
 
     // Virtual call targets on subclasses of nsISupports may be incomplete,
     // if the interface is scriptable. Just treat all indirect calls on
@@ -61,13 +58,11 @@ function findVirtualFunctions(initialCSU, field, suppressed)
     // which should never enter the JS engine (even when calling dtors).
     while (worklist.length) {
         var csu = worklist.pop();
-        if (csu == "nsISupports" && (field == "AddRef" || field == "Release")) {
-            suppressed[0] = true;
-            return [];
-        }
-        if (isOverridableField(initialCSU, csu, field))
+        if (csu == "nsISupports") {
+            if (field == "AddRef" || field == "Release")
+                return [];
             return null;
-
+        }
         if (csu in superclasses) {
             for (var superclass of superclasses[csu])
                 worklist.push(superclass);
@@ -111,123 +106,62 @@ function memo(name)
 var seenCallees = null;
 var seenSuppressedCallees = null;
 
-// Return a list of all callees that the given edge might be a call to. Each
-// one is represented by an object with a 'kind' field that is one of
-// ('direct', 'field', 'indirect', 'unknown').
-function getCallees(edge)
-{
-    if (edge.Kind != "Call")
-        return [];
-
-    var callee = edge.Exp[0];
-    var callees = [];
-    if (callee.Kind == "Var") {
-        assert(callee.Variable.Kind == "Func");
-        callees.push({'kind': 'direct', 'name': callee.Variable.Name[0]});
-    } else {
-        assert(callee.Kind == "Drf");
-        if (callee.Exp[0].Kind == "Fld") {
-            var field = callee.Exp[0].Field;
-            var fieldName = field.Name[0];
-            var csuName = field.FieldCSU.Type.Name;
-            var functions = null;
-            if ("FieldInstanceFunction" in field) {
-                var suppressed = [ false ];
-                functions = findVirtualFunctions(csuName, fieldName, suppressed);
-                if (suppressed[0]) {
-                    // Field call known to not GC; mark it as suppressed so
-                    // direct invocations will be ignored
-                    callees.push({'kind': "field", 'csu': csuName, 'field': fieldName,
-                                  'suppressed': true});
-                }
-            }
-            if (functions) {
-                // Known set of virtual call targets. Treat them as direct
-                // calls to all possible resolved types, but also record edges
-                // from this field call to each final callee. When the analysis
-                // is checking whether an edge can GC and it sees an unrooted
-                // pointer held live across this field call, it will know
-                // whether any of the direct callees can GC or not.
-                var targets = [];
-                for (var name of functions) {
-                    callees.push({'kind': "direct", 'name': name});
-                    targets.push({'kind': "direct", 'name': name});
-                }
-                callees.push({'kind': "resolved-field", 'csu': csuName, 'field': fieldName, 'callees': targets});
-            } else {
-                // Unknown set of call targets. Non-virtual field call,
-                // or virtual call on an nsISupports object.
-                callees.push({'kind': "field", 'csu': csuName, 'field': fieldName});
-            }
-        } else if (callee.Exp[0].Kind == "Var") {
-            // indirect call through a variable.
-            callees.push({'kind': "indirect", 'variable': callee.Exp[0].Variable.Name[0]});
-        } else {
-            // unknown call target.
-            callees.push({'kind': "unknown"});
-        }
-    }
-
-    return callees;
-}
-
-var lastline;
-function printOnce(line)
-{
-    if (line != lastline) {
-        print(line);
-        lastline = line;
-    }
-}
-
 function processBody(caller, body)
 {
     if (!('PEdge' in body))
         return;
-
-    lastline = null;
     for (var edge of body.PEdge) {
         if (edge.Kind != "Call")
             continue;
-        var edgeSuppressed = false;
+        var callee = edge.Exp[0];
+        var suppressText = "";
         var seen = seenCallees;
         if (edge.Index[0] in body.suppressed) {
-            edgeSuppressed = true;
+            suppressText = "SUPPRESS_GC ";
             seen = seenSuppressedCallees;
         }
-        for (var callee of getCallees(edge)) {
-            var prologue = (edgeSuppressed || callee.suppressed) ? "SUPPRESS_GC " : "";
-            prologue += memo(caller) + " ";
-            if (callee.kind == 'direct') {
-                if (!(callee.name in seen)) {
-                    seen[name] = true;
-                    printOnce("D " + prologue + memo(callee.name));
+        var prologue = suppressText + memo(caller) + " ";
+        if (callee.Kind == "Var") {
+            assert(callee.Variable.Kind == "Func");
+            var name = callee.Variable.Name[0];
+            if (!(name in seen)) {
+                print("D " + prologue + memo(name));
+                seen[name] = true;
+            }
+            var otherName = otherDestructorName(name);
+            if (otherName && !(otherName in seen)) {
+                print("D " + prologue + memo(otherName));
+                seen[otherName] = true;
+            }
+        } else {
+            assert(callee.Kind == "Drf");
+            if (callee.Exp[0].Kind == "Fld") {
+                var field = callee.Exp[0].Field;
+                var fieldName = field.Name[0];
+                var csuName = field.FieldCSU.Type.Name;
+                var functions = null;
+                if ("FieldInstanceFunction" in field)
+                    functions = findVirtualFunctions(csuName, fieldName);
+                if (functions) {
+                    // Known set of virtual call targets.
+                    for (var name of functions) {
+                        if (!(name in seen)) {
+                            print("D " + prologue + memo(name));
+                            seen[name] = true;
+                        }
+                    }
+                } else {
+                    // Unknown set of call targets. Non-virtual field call,
+                    // or virtual call on an nsISupports object.
+                    print("F " + prologue + "CLASS " + csuName + " FIELD " + fieldName);
                 }
-            } else if (callee.kind == 'field') {
-                var { csu, field } = callee;
-                printOnce("F " + prologue + "CLASS " + csu + " FIELD " + field);
-            } else if (callee.kind == 'resolved-field') {
-                // Fully-resolved field call (usually a virtual method). Record
-                // the callgraph edges. Do not consider suppression, since it
-                // is local to this callsite and we are writing out a global
-                // record here.
-                //
-                // Any field call that does *not* have an R entry must be
-                // assumed to call anything.
-                var { csu, field, callees } = callee;
-                var fullFieldName = csu + "." + field;
-                if (!(fullFieldName in fieldCallSeen)) {
-                    fieldCallSeen[fullFieldName] = true;
-                    for (var target of callees)
-                        printOnce("R " + memo(fullFieldName) + " " + memo(target.name));
-                }
-            } else if (callee.kind == 'indirect') {
-                printOnce("I " + prologue + "VARIABLE " + callee.variable);
-            } else if (callee.kind == 'unknown') {
-                printOnce("I " + prologue + "VARIABLE UNKNOWN");
+            } else if (callee.Exp[0].Kind == "Var") {
+                // indirect call through a variable.
+                print("I " + prologue +
+                      "VARIABLE " + callee.Exp[0].Variable.Name[0]);
             } else {
-                printErr("invalid " + callee.kind + " callee");
-                debugger;
+                // unknown call target.
+                print("I " + prologue + "VARIABLE UNKNOWN");
             }
         }
     }
@@ -253,8 +187,6 @@ for (var csuIndex = minStream; csuIndex <= maxStream; csuIndex++) {
 
 xdb.open("src_body.xdb");
 
-printErr("Finished loading data structures");
-
 var minStream = xdb.min_data_stream();
 var maxStream = xdb.max_data_stream();
 
@@ -264,17 +196,14 @@ for (var nameIndex = minStream; nameIndex <= maxStream; nameIndex++) {
     functionBodies = JSON.parse(data.readString());
     for (var body of functionBodies)
         body.suppressed = [];
-    for (var body of functionBodies) {
-        for (var [pbody, id] of allRAIIGuardedCallPoints(body, isSuppressConstructor))
-            pbody.suppressed[id] = true;
-    }
+    for (var body of functionBodies)
+        computeSuppressedPoints(body);
 
     seenCallees = {};
     seenSuppressedCallees = {};
 
-    var functionName = name.readString();
     for (var body of functionBodies)
-        processBody(functionName, body);
+        processBody(name.readString(), body);
 
     xdb.free_string(name);
     xdb.free_string(data);

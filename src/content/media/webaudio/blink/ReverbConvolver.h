@@ -29,10 +29,14 @@
 #ifndef ReverbConvolver_h
 #define ReverbConvolver_h
 
+#include "DirectConvolver.h"
+#include "FFTConvolver.h"
 #include "ReverbAccumulationBuffer.h"
+#include "ReverbConvolverStage.h"
 #include "ReverbInputBuffer.h"
 #include "nsAutoPtr.h"
-#include "mozilla/MemoryReporting.h"
+#include "nsTArray.h"
+#include "nsCOMPtr.h"
 #ifdef LOG
 #undef LOG
 #endif
@@ -42,7 +46,7 @@
 
 namespace WebCore {
 
-class ReverbConvolverStage;
+class AudioChannel;
 
 class ReverbConvolver {
 public:
@@ -66,8 +70,6 @@ public:
     void backgroundThreadEntry();
 
     size_t latencyFrames() const;
-
-    size_t sizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 private:
     nsTArray<nsAutoPtr<ReverbConvolverStage> > m_stages;
     nsTArray<nsAutoPtr<ReverbConvolverStage> > m_backgroundStages;

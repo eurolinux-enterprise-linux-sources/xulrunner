@@ -29,13 +29,7 @@ GetUserMediaLog()
 
 #include "MediaEngineWebRTC.h"
 #include "ImageContainer.h"
-#include "nsIComponentRegistrar.h"
-#include "MediaEngineTabVideoSource.h"
-#include "nsITabSource.h"
-#include "MediaTrackConstraints.h"
-
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidJNIWrapper.h"
 #include "AndroidBridge.h"
 #endif
 
@@ -44,32 +38,14 @@ GetUserMediaLog()
 
 namespace mozilla {
 
-MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
-  : mMutex("mozilla::MediaEngineWebRTC")
-  , mVideoEngine(nullptr)
-  , mVoiceEngine(nullptr)
-  , mVideoEngineInit(false)
-  , mAudioEngineInit(false)
-  , mHasTabVideoSource(false)
-{
-#ifndef MOZ_B2G_CAMERA
-  nsCOMPtr<nsIComponentRegistrar> compMgr;
-  NS_GetComponentRegistrar(getter_AddRefs(compMgr));
-  if (compMgr) {
-    compMgr->IsContractIDRegistered(NS_TABSOURCESERVICE_CONTRACTID, &mHasTabVideoSource);
-  }
-#else
-  AsyncLatencyLogger::Get()->AddRef();
-#endif
-  // XXX
-  gFarendObserver = new AudioOutputObserver();
-}
-
 void
 MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSource> >* aVSources)
 {
 #ifdef MOZ_B2G_CAMERA
   MutexAutoLock lock(mMutex);
+  if (!mCameraManager) {
+    return;
+  }
 
   /**
    * We still enumerate every time, in case a new device was plugged in since
@@ -81,14 +57,14 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
    */
   int num = 0;
   nsresult result;
-  result = ICameraControl::GetNumberOfCameras(num);
+  result = mCameraManager->GetNumberOfCameras(num);
   if (num <= 0 || result != NS_OK) {
     return;
   }
 
   for (int i = 0; i < num; i++) {
     nsCString cameraName;
-    result = ICameraControl::GetCameraName(i, cameraName);
+    result = mCameraManager->GetCameraName(i, cameraName);
     if (result != NS_OK) {
       continue;
     }
@@ -99,7 +75,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
       // We've already seen this device, just append.
       aVSources->AppendElement(vSource.get());
     } else {
-      vSource = new MediaEngineWebRTCVideoSource(i);
+      vSource = new MediaEngineWebRTCVideoSource(mCameraManager, i, mWindowId);
       mVideoSources.Put(uuid, vSource); // Hashtable takes ownership.
       aVSources->AppendElement(vSource);
     }
@@ -107,9 +83,8 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
 
   return;
 #else
-  ScopedCustomReleasePtr<webrtc::ViEBase> ptrViEBase;
-  ScopedCustomReleasePtr<webrtc::ViECapture> ptrViECapture;
-
+  webrtc::ViEBase* ptrViEBase;
+  webrtc::ViECapture* ptrViECapture;
   // We spawn threads to handle gUM runnables, so we must protect the member vars
   MutexAutoLock lock(mMutex);
 
@@ -119,11 +94,17 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
   // get the JVM
   JavaVM *jvm = mozilla::AndroidBridge::Bridge()->GetVM();
 
+  JNIEnv *env;
+  jint res = jvm->AttachCurrentThread(&env, NULL);
+
   if (webrtc::VideoEngine::SetAndroidObjects(jvm, (void*)context) != 0) {
     LOG(("VieCapture:SetAndroidObjects Failed"));
     return;
   }
+
+  env->DeleteGlobalRef(context);
 #endif
+
   if (!mVideoEngine) {
     if (!(mVideoEngine = webrtc::VideoEngine::Create())) {
       return;
@@ -140,7 +121,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
       file = "WebRTC.log";
     }
 
-    LOG(("%s Logging webrtc to %s level %d", __FUNCTION__, file, logs->level));
+    LOG(("Logging webrtc to %s level %d", __FUNCTION__, file, logs->level));
 
     mVideoEngine->SetTraceFilter(logs->level);
     mVideoEngine->SetTraceFile(file);
@@ -228,8 +209,8 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
     }
   }
 
-  if (mHasTabVideoSource)
-    aVSources->AppendElement(new MediaEngineTabVideoSource());
+  ptrViEBase->Release();
+  ptrViECapture->Release();
 
   return;
 #endif
@@ -238,8 +219,8 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
 void
 MediaEngineWebRTC::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >* aASources)
 {
-  ScopedCustomReleasePtr<webrtc::VoEBase> ptrVoEBase;
-  ScopedCustomReleasePtr<webrtc::VoEHardware> ptrVoEHw;
+  webrtc::VoEBase* ptrVoEBase = NULL;
+  webrtc::VoEHardware* ptrVoEHw = NULL;
   // We spawn threads to handle gUM runnables, so we must protect the member vars
   MutexAutoLock lock(mMutex);
 
@@ -248,12 +229,16 @@ MediaEngineWebRTC::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSourc
 
   // get the JVM
   JavaVM *jvm = mozilla::AndroidBridge::Bridge()->GetVM();
-  JNIEnv *env = GetJNIForThread();
 
-  if (webrtc::VoiceEngine::SetAndroidObjects(jvm, env, (void*)context) != 0) {
+  JNIEnv *env;
+  jvm->AttachCurrentThread(&env, NULL);
+
+  if (webrtc::VoiceEngine::SetAndroidObjects(jvm, (void*)context) != 0) {
     LOG(("VoiceEngine:SetAndroidObjects Failed"));
     return;
   }
+
+  env->DeleteGlobalRef(context);
 #endif
 
   if (!mVoiceEngine) {
@@ -261,22 +246,6 @@ MediaEngineWebRTC::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSourc
     if (!mVoiceEngine) {
       return;
     }
-  }
-
-  PRLogModuleInfo *logs = GetWebRTCLogInfo();
-  if (!gWebrtcTraceLoggingOn && logs && logs->level > 0) {
-    // no need to a critical section or lock here
-    gWebrtcTraceLoggingOn = 1;
-
-    const char *file = PR_GetEnv("WEBRTC_TRACE_FILE");
-    if (!file) {
-      file = "WebRTC.log";
-    }
-
-    LOG(("Logging webrtc to %s level %d", __FUNCTION__, file, logs->level));
-
-    mVoiceEngine->SetTraceFilter(logs->level);
-    mVoiceEngine->SetTraceFile(file);
   }
 
   ptrVoEBase = webrtc::VoEBase::GetInterface(mVoiceEngine);
@@ -332,6 +301,9 @@ MediaEngineWebRTC::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSourc
       aASources->AppendElement(aSource);
     }
   }
+
+  ptrVoEHw->Release();
+  ptrVoEBase->Release();
 }
 
 void
@@ -350,8 +322,8 @@ MediaEngineWebRTC::Shutdown()
     webrtc::VoiceEngine::Delete(mVoiceEngine);
   }
 
-  mVideoEngine = nullptr;
-  mVoiceEngine = nullptr;
+  mVideoEngine = NULL;
+  mVoiceEngine = NULL;
 }
 
 }

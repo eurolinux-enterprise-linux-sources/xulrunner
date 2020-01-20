@@ -1,5 +1,3 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,11 +8,9 @@
 #include "nscore.h"
 #include "prio.h"
 #include "prnetdb.h"
-#include "plstr.h"
 #include "mozilla/LinkedList.h"
-#include "mozilla/MemoryReporting.h"
 
-#if !defined(XP_WIN)
+#if !defined(XP_WIN) && !defined(XP_OS2)
 #include <arpa/inet.h>
 #endif
 
@@ -59,12 +55,9 @@ namespace net {
 // Windows requires longer buffers for some reason.
 const int kIPv4CStrBufSize = 22;
 const int kIPv6CStrBufSize = 65;
-const int kNetAddrMaxCStrBufSize = kIPv6CStrBufSize;
 #else
 const int kIPv4CStrBufSize = 16;
 const int kIPv6CStrBufSize = 46;
-const int kLocalCStrBufSize = 108;
-const int kNetAddrMaxCStrBufSize = kLocalCStrBufSize;
 #endif
 
 // This was all created at a time in which we were using NSPR for host
@@ -103,14 +96,16 @@ union NetAddr {
     IPv6Addr ip;                    /* the actual 128 bits of address */
     uint32_t scope_id;              /* set of interfaces for a scope */
   } inet6;
-#if defined(XP_UNIX)
+#if defined(XP_UNIX) || defined(XP_OS2)
   struct {                          /* Unix domain socket address */
     uint16_t family;                /* address family (AF_UNIX) */
+#ifdef XP_OS2
+    char path[108];                 /* null-terminated pathname */
+#else
     char path[104];                 /* null-terminated pathname */
+#endif
   } local;
 #endif
-  // introduced to support nsTArray<NetAddr> (for DNSRequestParent.cpp)
-  bool operator == (const NetAddr& other) const;
 };
 
 // This class wraps a NetAddr union to provide C++ linked list
@@ -119,7 +114,6 @@ union NetAddr {
 class NetAddrElement : public LinkedListElement<NetAddrElement> {
 public:
   NetAddrElement(const PRNetAddr *prNetAddr);
-  NetAddrElement(const NetAddrElement& netAddr);
   ~NetAddrElement();
 
   NetAddr mAddress;
@@ -127,25 +121,13 @@ public:
 
 class AddrInfo {
 public:
-  // Creates an AddrInfo object. It calls the AddrInfo(const char*, const char*)
-  // to initialize the host and the cname.
   AddrInfo(const char *host, const PRAddrInfo *prAddrInfo, bool disableIPv4,
            const char *cname);
-
-  // Creates a basic AddrInfo object (initialize only the host and the cname).
-  AddrInfo(const char *host, const char *cname);
   ~AddrInfo();
-
-  void AddAddress(NetAddrElement *address);
-
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   char *mHostName;
   char *mCanonicalName;
   LinkedList<NetAddrElement> mAddresses;
-
-private:
-  void Init(const char *host, const char *cname);
 };
 
 // Copies the contents of a PRNetAddr to a NetAddr.
@@ -163,10 +145,6 @@ bool IsLoopBackAddress(const NetAddr *addr);
 bool IsIPAddrAny(const NetAddr *addr);
 
 bool IsIPAddrV4Mapped(const NetAddr *addr);
-
-bool IsIPAddrLocal(const NetAddr *addr);
-
-nsresult GetPort(const NetAddr *aAddr, uint16_t *aResult);
 
 } // namespace net
 } // namespace mozilla

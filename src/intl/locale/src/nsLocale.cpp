@@ -4,9 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsString.h"
+#include "nsReadableUtils.h"
 #include "nsISupports.h"
 #include "nsILocale.h"
 #include "nsLocale.h"
+#include "nsLocaleCID.h"
+#include "nsCOMPtr.h"
+#include "nsVoidArray.h"
 #include "nsMemory.h"
 #include "nsCRT.h"
 
@@ -14,7 +18,7 @@
 
 
 /* nsILocale */
-NS_IMPL_ISUPPORTS(nsLocale, nsILocale)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsLocale, nsILocale)
 
 nsLocale::nsLocale(void)
 :  fHashtable(nullptr), fCategoryCount(0)
@@ -39,7 +43,7 @@ nsLocale::~nsLocale(void)
 NS_IMETHODIMP
 nsLocale::GetCategory(const nsAString& category, nsAString& result)
 {
-  const char16_t *value = (const char16_t*) 
+  const PRUnichar *value = (const PRUnichar*) 
     PL_HashTableLookup(fHashtable, PromiseFlatString(category).get());
 
   if (value)
@@ -54,11 +58,11 @@ nsLocale::GetCategory(const nsAString& category, nsAString& result)
 NS_IMETHODIMP
 nsLocale::AddCategory(const nsAString &category, const nsAString &value)
 {
-  char16_t* newKey = ToNewUnicode(category);
+  PRUnichar* newKey = ToNewUnicode(category);
   if (!newKey)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  char16_t* newValue = ToNewUnicode(value);
+  PRUnichar* newValue = ToNewUnicode(value);
   if (!newValue) {
     nsMemory::Free(newKey);
     return NS_ERROR_OUT_OF_MEMORY;
@@ -77,7 +81,7 @@ nsLocale::AddCategory(const nsAString &category, const nsAString &value)
 PLHashNumber
 nsLocale::Hash_HashFunction(const void* key)
 {
-  const char16_t* ptr = (const char16_t *) key;
+  const PRUnichar* ptr = (const PRUnichar *) key;
   PLHashNumber hash;
 
   hash = (PLHashNumber)0;
@@ -92,7 +96,7 @@ nsLocale::Hash_HashFunction(const void* key)
 int
 nsLocale::Hash_CompareNSString(const void* s1, const void* s2)
 {
-  return !nsCRT::strcmp((const char16_t *) s1, (const char16_t *) s2);
+  return !nsCRT::strcmp((const PRUnichar *) s1, (const PRUnichar *) s2);
 }
 
 
@@ -100,8 +104,8 @@ int
 nsLocale::Hash_EnumerateDelete(PLHashEntry *he, int hashIndex, void *arg)
 {
   // delete an entry
-  nsMemory::Free((char16_t *)he->key);
-  nsMemory::Free((char16_t *)he->value);
+  nsMemory::Free((PRUnichar *)he->key);
+  nsMemory::Free((PRUnichar *)he->value);
 
   return (HT_ENUMERATE_NEXT | HT_ENUMERATE_REMOVE);
 }

@@ -17,7 +17,6 @@
 #include "nsIFrame.h"
 #include "nsImageFrame.h"
 #include "nsImageMap.h"
-#include "nsIURI.h"
 
 using namespace mozilla::a11y;
 
@@ -112,7 +111,8 @@ HTMLImageMapAccessible::UpdateChildAreas(bool aDoFireEvents)
     Accessible* area = mChildren.SafeElementAt(idx);
     if (!area || area->GetContent() != areaContent) {
       nsRefPtr<Accessible> area = new HTMLAreaAccessible(areaContent, mDoc);
-      mDoc->BindToDocument(area, aria::GetRoleMap(areaContent));
+      if (!mDoc->BindToDocument(area, aria::GetRoleMap(areaContent)))
+        break;
 
       if (!InsertChildAt(idx, area)) {
         mDoc->UnbindFromDocument(area);
@@ -131,19 +131,6 @@ HTMLImageMapAccessible::UpdateChildAreas(bool aDoFireEvents)
   // Fire reorder event if needed.
   if (doReorderEvent)
     mDoc->FireDelayedEvent(reorderEvent);
-}
-
-Accessible*
-HTMLImageMapAccessible::GetChildAccessibleFor(const nsINode* aNode) const
-{
-  uint32_t length = mChildren.Length();
-  for (uint32_t i = 0; i < length; i++) {
-    Accessible* area = mChildren[i];
-    if (area->GetContent() == aNode)
-      return area;
-  }
-
-  return nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

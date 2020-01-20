@@ -11,15 +11,8 @@ interface nsIDocument;
 
 %{C++
 #include "npapi.h"
-#include "mozilla/EventForwards.h"
-class nsNPAPIPluginInstance;
-
-enum nsPluginTagType {
-  nsPluginTagType_Unknown,
-  nsPluginTagType_Embed,
-  nsPluginTagType_Object,
-  nsPluginTagType_Applet
-};
+#include "nsNPAPIPluginInstance.h"
+class nsPluginEvent;
 %}
 
 [ptr] native nsNPAPIPluginInstancePtr(nsNPAPIPluginInstance);
@@ -75,7 +68,7 @@ interface nsIPluginInstanceOwner : nsISupports
   void showStatus(in string aStatusMsg);
 
 %{C++
-  NS_IMETHOD ShowStatus(const char16_t *aStatusMsg) = 0;
+  NS_IMETHOD ShowStatus(const PRUnichar *aStatusMsg) = 0;
 %}
 
   /**

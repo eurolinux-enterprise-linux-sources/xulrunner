@@ -4,16 +4,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
 
+#include "nsIServiceManager.h"
 #include "nsIOutputStream.h"
 #include "nsICharsetConverterManager.h"
 
 #include "nsConverterOutputStream.h"
-#include "nsServiceManagerUtils.h"
 
-NS_IMPL_ISUPPORTS(nsConverterOutputStream,
-                  nsIUnicharOutputStream,
-                  nsIConverterOutputStream)
+NS_IMPL_ISUPPORTS2(nsConverterOutputStream,
+                   nsIUnicharOutputStream,
+                   nsIConverterOutputStream)
 
 nsConverterOutputStream::~nsConverterOutputStream()
 {
@@ -24,7 +25,7 @@ NS_IMETHODIMP
 nsConverterOutputStream::Init(nsIOutputStream* aOutStream,
                               const char*      aCharset,
                               uint32_t         aBufferSize /* ignored */,
-                              char16_t        aReplacementChar)
+                              PRUnichar        aReplacementChar)
 {
     NS_PRECONDITION(aOutStream, "Null output stream!");
 
@@ -51,7 +52,7 @@ nsConverterOutputStream::Init(nsIOutputStream* aOutStream,
 }
 
 NS_IMETHODIMP
-nsConverterOutputStream::Write(uint32_t aCount, const char16_t* aChars,
+nsConverterOutputStream::Write(uint32_t aCount, const PRUnichar* aChars,
                                bool* aSuccess)
 {
     if (!mOutStream) {

@@ -14,7 +14,6 @@
 #include "nsIFile.h"
 #include "nsThreadUtils.h"
 #include "prlog.h"
-#include "prtime.h"
 
 #include "mozStorageConnection.h"
 #include "mozIStorageStatement.h"
@@ -22,7 +21,6 @@
 #include "mozIStoragePendingStatement.h"
 #include "mozIStorageError.h"
 #include "mozStorageHelper.h"
-#include "nsXULAppAPI.h"
 
 #define OBSERVER_TOPIC_IDLE_DAILY "idle-daily"
 #define OBSERVER_TOPIC_XPCOM_SHUTDOWN "xpcom-shutdown"
@@ -96,7 +94,7 @@ BaseCallback::HandleCompletion(uint16_t aReason)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(
+NS_IMPL_ISUPPORTS1(
   BaseCallback
 , mozIStorageStatementCallback
 )
@@ -206,7 +204,7 @@ Vacuumer::execute()
   rv = mDBConn->CreateAsyncStatement(pageSizeQuery,
                                      getter_AddRefs(pageSizeStmt));
   NS_ENSURE_SUCCESS(rv, false);
-  nsRefPtr<BaseCallback> callback = new BaseCallback();
+  nsCOMPtr<BaseCallback> callback = new BaseCallback();
   nsCOMPtr<mozIStoragePendingStatement> ps;
   rv = pageSizeStmt->ExecuteAsync(callback, getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, false);
@@ -307,7 +305,7 @@ Vacuumer::notifyCompletion(bool aSucceeded)
 ////////////////////////////////////////////////////////////////////////////////
 //// VacuumManager
 
-NS_IMPL_ISUPPORTS(
+NS_IMPL_ISUPPORTS1(
   VacuumManager
 , nsIObserver
 )
@@ -318,11 +316,6 @@ VacuumManager::gVacuumManager = nullptr;
 VacuumManager *
 VacuumManager::getSingleton()
 {
-  //Don't allocate it in the child Process.
-  if (XRE_GetProcessType() != GeckoProcessType_Default) {
-    return nullptr;
-  }
-
   if (gVacuumManager) {
     NS_ADDREF(gVacuumManager);
     return gVacuumManager;
@@ -359,13 +352,13 @@ VacuumManager::~VacuumManager()
 NS_IMETHODIMP
 VacuumManager::Observe(nsISupports *aSubject,
                        const char *aTopic,
-                       const char16_t *aData)
+                       const PRUnichar *aData)
 {
   if (strcmp(aTopic, OBSERVER_TOPIC_IDLE_DAILY) == 0) {
     // Try to run vacuum on all registered entries.  Will stop at the first
     // successful one.
-    nsCOMArray<mozIStorageVacuumParticipant> entries;
-    mParticipants.GetEntries(entries);
+    const nsCOMArray<mozIStorageVacuumParticipant> &entries =
+      mParticipants.GetEntries();
     // If there are more entries than what a month can contain, we could end up
     // skipping some, since we run daily.  So we use a starting index.
     static const char* kPrefName = PREF_VACUUM_BRANCH "index";
@@ -375,7 +368,7 @@ VacuumManager::Observe(nsISupports *aSubject,
     }
     int32_t index;
     for (index = startIndex; index < entries.Count(); ++index) {
-      nsRefPtr<Vacuumer> vacuum = new Vacuumer(entries[index]);
+      nsCOMPtr<Vacuumer> vacuum = new Vacuumer(entries[index]);
       // Only vacuum one database per day.
       if (vacuum->execute()) {
         break;

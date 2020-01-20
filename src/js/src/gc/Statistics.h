@@ -10,11 +10,10 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsalloc.h"
+#include "jsfriendapi.h"
 #include "jspubtd.h"
 
 #include "js/GCAPI.h"
-#include "js/Vector.h"
 
 struct JSCompartment;
 
@@ -28,10 +27,12 @@ enum Phase {
     PHASE_PURGE,
     PHASE_MARK,
     PHASE_MARK_ROOTS,
+    PHASE_MARK_TYPES,
     PHASE_MARK_DELAYED,
     PHASE_SWEEP,
     PHASE_SWEEP_MARK,
     PHASE_SWEEP_MARK_TYPES,
+    PHASE_SWEEP_MARK_DELAYED,
     PHASE_SWEEP_MARK_INCOMING_BLACK,
     PHASE_SWEEP_MARK_WEAK,
     PHASE_SWEEP_MARK_INCOMING_GRAY,
@@ -52,11 +53,12 @@ enum Phase {
     PHASE_DISCARD_TI,
     PHASE_FREE_TI_ARENA,
     PHASE_SWEEP_TYPES,
+    PHASE_CLEAR_SCRIPT_ANALYSIS,
     PHASE_SWEEP_OBJECT,
     PHASE_SWEEP_STRING,
     PHASE_SWEEP_SCRIPT,
     PHASE_SWEEP_SHAPE,
-    PHASE_SWEEP_JITCODE,
+    PHASE_SWEEP_IONCODE,
     PHASE_FINALIZE_END,
     PHASE_DESTROY,
     PHASE_GC_END,
@@ -67,7 +69,6 @@ enum Phase {
 enum Stat {
     STAT_NEW_CHUNK,
     STAT_DESTROY_CHUNK,
-    STAT_MINOR_GC,
 
     STAT_LIMIT
 };
@@ -119,7 +120,7 @@ struct Statistics {
 
     struct SliceData {
         SliceData(JS::gcreason::Reason reason, int64_t start, size_t startFaults)
-          : reason(reason), resetReason(nullptr), start(start), startFaults(startFaults)
+          : reason(reason), resetReason(NULL), start(start), startFaults(startFaults)
         {
             mozilla::PodArrayZero(phaseTimes);
         }
@@ -205,30 +206,6 @@ struct AutoPhase
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-struct MaybeAutoPhase
-{
-    MaybeAutoPhase(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
-      : stats(nullptr)
-    {
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-    void construct(Statistics &statsArg, Phase phaseArg)
-    {
-        JS_ASSERT(!stats);
-        stats = &statsArg;
-        phase = phaseArg;
-        stats->beginPhase(phase);
-    }
-    ~MaybeAutoPhase() {
-        if (stats)
-            stats->endPhase(phase);
-    }
-
-    Statistics *stats;
-    Phase phase;
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
 struct AutoSCC
 {
     AutoSCC(Statistics &stats, unsigned scc
@@ -247,8 +224,6 @@ struct AutoSCC
     int64_t start;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
-
-const char *ExplainReason(JS::gcreason::Reason reason);
 
 } /* namespace gcstats */
 } /* namespace js */

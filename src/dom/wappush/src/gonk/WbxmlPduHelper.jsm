@@ -23,7 +23,6 @@ const TAG_TOKEN_VALUE_MASK    = 0x3F;
  *
  * @see WAP-192-WBXML-20010725-A, clause 7.1
  */
-const CODE_PAGE_SWITCH_TOKEN  = 0x00;
 const TAG_END_TOKEN           = 0x01;
 const INLINE_STRING_TOKEN     = 0x03;
 const STRING_TABLE_TOKEN      = 0x83;
@@ -36,52 +35,10 @@ this.DEBUG_ALL = false;
 this.DEBUG = DEBUG_ALL | false;
 
 /**
- * Handle WBXML code page switch.
- *
- * @param data
- *        A wrapped object containing raw PDU data.
- * @param decodeInfo
- *        Internal information for decode process.
- *
- * @see WAP-192-WBXML-20010725-A, clause 5.8.4.7.2 and 5.8.1
- */
-this.WbxmlCodePageSwitch = {
-  decode: function decode_wbxml_code_page_switch(data, decodeInfo) {
-    let codePage = WSP.Octet.decode(data);
-
-    if (decodeInfo.currentState === "tag") {
-      decodeInfo.currentTokenList.tag = decodeInfo.tokenList.tag[codePage];
-
-      if (!decodeInfo.currentTokenList.tag) {
-        throw new Error("Invalid tag code page: " + codePage + ".");
-      }
-
-      return "";
-    }
-
-    if (decodeInfo.currentState === "attr") {
-      decodeInfo.currentTokenList.attr = decodeInfo.tokenList.attr[codePage];
-      decodeInfo.currentTokenList.value = decodeInfo.tokenList.value[codePage];
-
-      if (!decodeInfo.currentTokenList.attr ||
-          !decodeInfo.currentTokenList.value) {
-        throw new Error("Invalid attr code page: " + codePage + ".");
-      }
-
-      return "";
-    }
-
-    throw new Error("Invalid decoder state: " + decodeInfo.currentState + ".");
-  },
-};
-
-/**
  * Parse end WBXML encoded message.
  *
  * @param data
  *        A wrapped object containing raw PDU data.
- * @param decodeInfo
- *        Internal information for decode process.
  *
  * @see WAP-192-WBXML-20010725-A, clause 5.8.4.7.1
  *
@@ -92,35 +49,6 @@ this.WbxmlEnd = {
     return "</" + tagInfo.name + ">";
   },
 };
-
-/**
- * Escape XML reserved characters &, <, >, " and ' which may appear in the
- * WBXML-encoded strings in their original form.
- *
- * @param str
- *        A string with potentially unescaped characters
- *
- * @return A string with the &, <, >, " and ' characters turned into XML
- *         character entitites
- *
- * @see WAP-192-WBXML-20010725-A, clause 6.1
- */
-this.escapeReservedCharacters = function escape_reserved_characters(str) {
-  let dst = "";
-
-  for (var i = 0; i < str.length; i++) {
-    switch (str[i]) {
-      case '&' : dst += "&amp;" ; break;
-      case '<' : dst += "&lt;"  ; break;
-      case '>' : dst += "&gt;"  ; break;
-      case '"' : dst += "&quot;"; break;
-      case '\'': dst += "&apos;"; break;
-      default  : dst += str[i];
-    }
-  }
-
-  return dst;
-}
 
 /**
  * Handle string table in WBXML message.
@@ -147,9 +75,7 @@ this.readStringTable = function decode_wbxml_read_string_table(start, stringTabl
 this.WbxmlStringTable = {
   decode: function decode_wbxml_string_table(data, decodeInfo) {
     let start = WSP.Octet.decode(data);
-    let str = readStringTable(start, decodeInfo.stringTable, decodeInfo.charset);
-
-    return escapeReservedCharacters(str);
+    return readStringTable(start, decodeInfo.stringTable, decodeInfo.charset);
   }
 };
 
@@ -158,8 +84,6 @@ this.WbxmlStringTable = {
  *
  * @param data
  *        A wrapped object containing raw PDU data.
- * @param decodeInfo
- *        Internal information for decode process.
  *
  * @see WAP-192-WBXML-20010725-A, clause 5.8.4.1
  *
@@ -173,9 +97,7 @@ this.WbxmlInlineString = {
       charCode = WSP.Octet.decode(data);
     }
 
-    let str = WSP.PduHelper.decodeStringContent(stringData, decodeInfo.charset);
-
-    return escapeReservedCharacters(str);
+    return WSP.PduHelper.decodeStringContent(stringData, decodeInfo.charset);
   },
 };
 
@@ -184,8 +106,6 @@ this.WbxmlInlineString = {
  *
  * @param data
  *        A wrapped object containing raw PDU data.
- * @param decodeInfo
- *        Internal information for decode process.
  *
  * @see WAP-192-WBXML-20010725-A, clause 5.8.4.6
  *
@@ -205,48 +125,30 @@ this.PduHelper = {
    *
    * @param data
    *        A wrapped object containing raw PDU data.
-   * @param decodeInfo
-   *        Information for decoding, now requires charset and string table.
+   * @param msg
+   *        Target object for decoding.
    * @param appToken
    *        Application-specific token difinition.
    *
    * @return Decoded WBXML message string.
    */
-  parseWbxml: function parseWbxml_wbxml(data, decodeInfo, appToken) {
+  parseWbxml: function parseWbxml_wbxml(data, msg, appToken) {
 
     // Parse token definition to my structure.
-    decodeInfo.tokenList = {
-      tag: appToken.tagTokenList,
-      attr: appToken.attrTokenList,
-      value: appToken.valueTokenList
-    };
-    decodeInfo.tagStack = [];   // tag decode stack
-    decodeInfo.currentTokenList = {
-      tag: decodeInfo.tokenList.tag[0],
-      attr: decodeInfo.tokenList.attr[0],
-      value: decodeInfo.tokenList.value[0]
-    };
-    decodeInfo.currentState = "tag";  // Current decoding state, "tag" or "attr"
-                                      // Used to read corresponding code page
-                                      // initial state : "tag"
+    let tagTokenList = appToken.tagToken;
+    let attrTokenList = appToken.attrToken;
+    let globalTokenOverrideList = appToken.globalTokenOverride || {};
 
-    // Merge global tag tokens into single list, so we don't have
-    // to search two lists every time.
-    let globalTagTokenList = Object.create(WBXML_GLOBAL_TOKENS);
-    if (appToken.globalTokenOverride) {
-      let globalTokenOverrideList = appToken.globalTokenOverride;
-      for (let token in globalTokenOverrideList) {
-        globalTagTokenList[token] = globalTokenOverrideList[token];
-      }
-    }
+    let decodeInfo = {
+      tagStack: [],                                                 // tag decode stack
+      charset: WSP.WSP_WELL_KNOWN_CHARSETS[msg.charset].converter,  // document character set
+      stringTable: msg.stringTable                                  // document string table
+    };
 
-    let content = "";
+    msg.content = "";
     while (data.offset < data.array.length) {
       // Decode content, might be a new tag token, an end of tag token, or an
       // inline string.
-
-      // Switch to tag domain
-      decodeInfo.currentState = "tag";
 
       let tagToken = WSP.Octet.decode(data);
       let tagTokenValue = tagToken & TAG_TOKEN_VALUE_MASK;
@@ -254,27 +156,25 @@ this.PduHelper = {
       // Try global tag first, tagToken of string table is 0x83, and will be 0x03
       // in tagTokenValue, which is collision with inline string.
       // So tagToken need to be searched before tagTokenValue.
-      let tagInfo = globalTagTokenList[tagToken] ||
-                    globalTagTokenList[tagTokenValue];
+      let tagInfo = globalTokenOverrideList[tagToken] ||
+                    globalTokenOverrideList[tagTokenValue] ||
+                    WBXML_GLOBAL_TOKENS[tagToken] ||
+                    WBXML_GLOBAL_TOKENS[tagTokenValue];
       if (tagInfo) {
-        content += tagInfo.coder.decode(data, decodeInfo);
+        msg.content += tagInfo.coder.decode(data, decodeInfo);
         continue;
       }
 
       // Check if application tag token is valid
-      tagInfo = decodeInfo.currentTokenList.tag[tagTokenValue];
-      if (!tagInfo) {
-        throw new Error("Unsupported WBXML token: " + tagTokenValue + ".");
-      }
+      tagInfo = tagTokenList[tagTokenValue];
+      if (!tagInfo)
+        continue;
 
-      content += "<" + tagInfo.name;
+      msg.content += "<" + tagInfo.name;
 
       if (tagToken & TAG_TOKEN_ATTR_MASK) {
         // Decode attributes, might be a new attribute token, a value token,
         // or an inline string
-
-        // Switch to attr/value domain
-        decodeInfo.currentState = "attr";
 
         let attrSeperator = "";
         while (data.offset < data.array.length) {
@@ -283,42 +183,37 @@ this.PduHelper = {
             break;
           }
 
-          let attrInfo = globalTagTokenList[attrToken];
+          let attrInfo = globalTokenOverrideList[attrToken] ||
+                         WBXML_GLOBAL_TOKENS[attrToken];
           if (attrInfo) {
-            content += attrInfo.coder.decode(data, decodeInfo);
+            msg.content += attrInfo.coder.decode(data, decodeInfo);
             continue;
           }
 
           // Check if attribute token is valid
-          attrInfo = decodeInfo.currentTokenList.attr[attrToken];
-          if (attrInfo) {
-            content += attrSeperator + " " + attrInfo.name + "=\"" + attrInfo.value;
+          attrInfo = attrTokenList[attrToken];
+          if (!attrInfo)
+            continue;
+
+          if (attrInfo.name !== "") {
+            msg.content += attrSeperator + " " + attrInfo.name + "=\"" + attrInfo.value;
             attrSeperator = "\"";
-            continue;
+          } else {
+            msg.content += attrInfo.value;
           }
-
-          attrInfo = decodeInfo.currentTokenList.value[attrToken];
-          if (attrInfo) {
-            content += attrInfo.value;
-            continue;
-          }
-
-          throw new Error("Unsupported WBXML token: " + attrToken + ".");
         }
 
-        content += attrSeperator;
+        msg.content += attrSeperator;
       }
 
       if (tagToken & TAG_TOKEN_CONTENT_MASK) {
-        content += ">";
+        msg.content += ">";
         decodeInfo.tagStack.push(tagInfo);
         continue;
       }
 
-      content += "/>";
+      msg.content += "/>";
     }
-
-    return content;
   },
 
   /**
@@ -353,11 +248,15 @@ this.PduHelper = {
    *                                  decode() returns decoded text, encode() returns
    *                                  encoded raw data.
    *        }
+   * @param msg [optional]
+   *        Optional target object for decoding.
    *
    * @return A WBXML message object or null in case of errors found.
    */
-  parse: function parse_wbxml(data, appToken) {
-    let msg = {};
+  parse: function parse_wbxml(data, appToken, msg) {
+    if (!msg) {
+      msg = {};
+    }
 
     /**
      * Read WBXML header.
@@ -390,19 +289,28 @@ this.PduHelper = {
                                      WSP.WSP_WELL_KNOWN_CHARSETS[msg.charset].converter);
     }
     if (msg.publicId != appToken.publicId) {
-      throw new Error("Public ID does not match.");
+      return null;
     }
 
     msg.version = ((headerRaw.version >> 4) + 1) + "." + (headerRaw.version & 0x0F);
 
-    let decodeInfo = {
-      charset: WSP.WSP_WELL_KNOWN_CHARSETS[msg.charset].converter,  // document character set
-      stringTable: msg.stringTable                                  // document string table
-    };
-    msg.content = this.parseWbxml(data, decodeInfo, appToken);
+    this.parseWbxml(data, msg, appToken);
 
     return msg;
-  }
+  },
+
+  /**
+   * @param multiStream
+   *        An exsiting nsIMultiplexInputStream.
+   * @param msg
+   *        A SI message object.
+   *
+   * @return An instance of nsIMultiplexInputStream or null in case of errors.
+   */
+  compose: function compose_wbxml(multiStream, msg) {
+    // Composing WBXML message is not supported
+    return null;
+  },
 };
 
 /**
@@ -420,11 +328,10 @@ const WBXML_GLOBAL_TOKENS = (function () {
     names[number] = entry;
   }
 
-  add(CODE_PAGE_SWITCH_TOKEN, WbxmlCodePageSwitch);
-  add(TAG_END_TOKEN,          WbxmlEnd);
-  add(INLINE_STRING_TOKEN,    WbxmlInlineString);
-  add(STRING_TABLE_TOKEN,     WbxmlStringTable);
-  add(OPAQUE_TOKEN,           WbxmlOpaque);
+  add(TAG_END_TOKEN,        WbxmlEnd);
+  add(INLINE_STRING_TOKEN,  WbxmlInlineString);
+  add(STRING_TABLE_TOKEN,   WbxmlStringTable);
+  add(OPAQUE_TOKEN,         WbxmlOpaque);
 
   return names;
 })();

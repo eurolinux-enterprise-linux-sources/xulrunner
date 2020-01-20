@@ -57,10 +57,10 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  virtual void ProcessBlock(AudioNodeStream* aStream,
-                            const AudioChunk& aInput,
-                            AudioChunk* aOutput,
-                            bool* aFinished) MOZ_OVERRIDE
+  virtual void ProduceAudioBlock(AudioNodeStream* aStream,
+                                 const AudioChunk& aInput,
+                                 AudioChunk* aOutput,
+                                 bool* aFinished) MOZ_OVERRIDE
   {
     *aOutput = aInput;
 
@@ -71,11 +71,6 @@ public:
       nsRefPtr<TransferBuffer> transfer = new TransferBuffer(aStream, aInput);
       NS_DispatchToMainThread(transfer);
     }
-  }
-
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 };
 
@@ -95,26 +90,10 @@ AnalyserNode::AnalyserNode(AudioContext* aContext)
   AllocateBuffer();
 }
 
-size_t
-AnalyserNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  size_t amount = AudioNode::SizeOfExcludingThis(aMallocSizeOf);
-  amount += mAnalysisBlock.SizeOfExcludingThis(aMallocSizeOf);
-  amount += mBuffer.SizeOfExcludingThis(aMallocSizeOf);
-  amount += mOutputBuffer.SizeOfExcludingThis(aMallocSizeOf);
-  return amount;
-}
-
-size_t
-AnalyserNode::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-}
-
 JSObject*
-AnalyserNode::WrapObject(JSContext* aCx)
+AnalyserNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return AnalyserNodeBinding::Wrap(aCx, this);
+  return AnalyserNodeBinding::Wrap(aCx, aScope, this);
 }
 
 void
@@ -164,7 +143,7 @@ AnalyserNode::SetSmoothingTimeConstant(double aValue, ErrorResult& aRv)
 }
 
 void
-AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray)
+AnalyserNode::GetFloatFrequencyData(Float32Array& aArray)
 {
   if (!FFTAnalysis()) {
     // Might fail to allocate memory
@@ -182,7 +161,7 @@ AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray)
 }
 
 void
-AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray)
+AnalyserNode::GetByteFrequencyData(Uint8Array& aArray)
 {
   if (!FFTAnalysis()) {
     // Might fail to allocate memory
@@ -206,20 +185,7 @@ AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray)
 }
 
 void
-AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray)
-{
-  aArray.ComputeLengthAndData();
-
-  float* buffer = aArray.Data();
-  uint32_t length = std::min(aArray.Length(), mBuffer.Length());
-
-  for (uint32_t i = 0; i < length; ++i) {
-    buffer[i] = mBuffer[(i + mWriteIndex) % mBuffer.Length()];;
-  }
-}
-
-void
-AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray)
+AnalyserNode::GetByteTimeDomainData(Uint8Array& aArray)
 {
   aArray.ComputeLengthAndData();
 
@@ -328,8 +294,8 @@ AnalyserNode::AppendChunk(const AudioChunk& aChunk)
                                   mBuffer.Elements() + mWriteIndex);
   }
   if (channelCount > 1) {
-    AudioBlockInPlaceScale(mBuffer.Elements() + mWriteIndex,
-                           1.0f / aChunk.mChannelData.Length());
+    AudioBufferInPlaceScale(mBuffer.Elements() + mWriteIndex, 1,
+                            1.0f / aChunk.mChannelData.Length());
   }
   mWriteIndex += chunkDuration;
   MOZ_ASSERT(mWriteIndex <= bufferSize);

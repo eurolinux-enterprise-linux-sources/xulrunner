@@ -3,17 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/AsyncEventDispatcher.h"
-#include "mozilla/ContentEvents.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/EventDispatcher.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/MouseEvents.h"
 #include "mozilla/Likely.h"
 
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 
 #include "nsTreeBodyFrame.h"
 #include "nsTreeSelection.h"
@@ -25,7 +21,9 @@
 #include "nsIContent.h"
 #include "nsStyleContext.h"
 #include "nsIBoxObject.h"
-#include "nsIDOMCustomEvent.h"
+#include "nsGUIEvent.h"
+#include "nsAsyncDOMEvent.h"
+#include "nsIDOMDataContainerEvent.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNodeList.h"
@@ -47,6 +45,7 @@
 #include "nsBoxLayoutState.h"
 #include "nsTreeContentView.h"
 #include "nsTreeUtils.h"
+#include "nsChildIterator.h"
 #include "nsITheme.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
@@ -55,6 +54,7 @@
 #include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsIScrollableFrame.h"
+#include "nsEventDispatcher.h"
 #include "nsDisplayList.h"
 #include "nsTreeBoxObject.h"
 #include "nsRenderingContext.h"
@@ -64,9 +64,10 @@
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
-#include "nsIWritablePropertyBag2.h"
 #endif
+#ifdef IBMBIDI
 #include "nsBidiUtils.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::layout;
@@ -111,7 +112,6 @@ NS_QUERYFRAME_TAIL_INHERITING(nsLeafBoxFrame)
 nsTreeBodyFrame::nsTreeBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 :nsLeafBoxFrame(aPresShell, aContext),
  mSlots(nullptr),
- mImageCache(16),
  mTopRowIndex(0),
  mPageLength(0),
  mHorzPosition(0),
@@ -128,8 +128,7 @@ nsTreeBodyFrame::nsTreeBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aCont
  mHasFixedRowCount(false),
  mVerticalOverflow(false),
  mHorizontalOverflow(false),
- mReflowCallbackPosted(false),
- mCheckingOverflow(false)
+ mReflowCallbackPosted(false)
 {
   mColumns = new nsTreeColumns(this);
 }
@@ -170,6 +169,9 @@ nsTreeBodyFrame::Init(nsIContent*     aContent,
   mIndentation = GetIndentation();
   mRowHeight = GetRowHeight();
 
+  mCreatedListeners.Init();
+
+  mImageCache.Init(16);
   EnsureBoxObject();
 
   if (LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) != 0) {
@@ -245,7 +247,9 @@ nsTreeBodyFrame::CalcMaxRowWidth()
   nsTreeColumn* col;
 
   nsRefPtr<nsRenderingContext> rc =
-    PresContext()->PresShell()->CreateReferenceRenderingContext();
+    PresContext()->PresShell()->GetReferenceRenderingContext();
+  if (!rc)
+    return 0;
 
   for (int32_t row = 0; row < mRowCount; ++row) {
     rowWidth = 0;
@@ -360,7 +364,7 @@ nsTreeBodyFrame::EnsureView()
       mTreeBoxObject->GetView(getter_AddRefs(treeView));
       if (treeView && weakFrame.IsAlive()) {
         nsXPIDLString rowStr;
-        box->GetProperty(MOZ_UTF16("topRow"),
+        box->GetProperty(NS_LITERAL_STRING("topRow").get(),
                          getter_Copies(rowStr));
         nsAutoString rowStr2(rowStr);
         nsresult error;
@@ -377,7 +381,7 @@ nsTreeBodyFrame::EnsureView()
 
         // Clear out the property info for the top row, but we always keep the
         // view current.
-        box->RemoveProperty(MOZ_UTF16("topRow"));
+        box->RemoveProperty(NS_LITERAL_STRING("topRow").get());
       }
     }
   }
@@ -915,44 +919,24 @@ nsTreeBodyFrame::CheckOverflow(const ScrollParts& aParts)
       }
     }
   }
-
-  nsWeakFrame weakFrame(this);
-
+ 
   nsRefPtr<nsPresContext> presContext = PresContext();
-  nsCOMPtr<nsIPresShell> presShell = presContext->GetPresShell();
   nsCOMPtr<nsIContent> content = mContent;
 
   if (verticalOverflowChanged) {
-    InternalScrollPortEvent event(true,
-      mVerticalOverflow ? NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW,
-      nullptr);
-    event.orient = InternalScrollPortEvent::vertical;
-    EventDispatcher::Dispatch(content, presContext, &event);
+    nsScrollPortEvent event(true, mVerticalOverflow ? NS_SCROLLPORT_OVERFLOW
+                            : NS_SCROLLPORT_UNDERFLOW, nullptr);
+    event.orient = nsScrollPortEvent::vertical;
+    nsEventDispatcher::Dispatch(content, presContext, &event);
   }
 
   if (horizontalOverflowChanged) {
-    InternalScrollPortEvent event(true,
-      mHorizontalOverflow ? NS_SCROLLPORT_OVERFLOW : NS_SCROLLPORT_UNDERFLOW,
-      nullptr);
-    event.orient = InternalScrollPortEvent::horizontal;
-    EventDispatcher::Dispatch(content, presContext, &event);
+    nsScrollPortEvent event(true,
+                            mHorizontalOverflow ? NS_SCROLLPORT_OVERFLOW
+                            : NS_SCROLLPORT_UNDERFLOW, nullptr);
+    event.orient = nsScrollPortEvent::horizontal;
+    nsEventDispatcher::Dispatch(content, presContext, &event);
   }
-
-  // The synchronous event dispatch above can trigger reflow notifications.
-  // Flush those explicitly now, so that we can guard against potential infinite
-  // recursion. See bug 905909.
-  if (!weakFrame.IsAlive()) {
-    return;
-  }
-  NS_ASSERTION(!mCheckingOverflow, "mCheckingOverflow should not already be set");
-  // Don't use AutoRestore since we want to not touch mCheckingOverflow if we fail
-  // the weakFrame.IsAlive() check below
-  mCheckingOverflow = true;
-  presShell->FlushPendingNotifications(Flush_Layout);
-  if (!weakFrame.IsAlive()) {
-    return;
-  }
-  mCheckingOverflow = false;
 }
 
 void
@@ -1173,7 +1157,9 @@ nsTreeBodyFrame::GetCoordsForCellItem(int32_t aRow, nsITreeColumn* aCol, const n
     AdjustForBorderPadding(cellContext, cellRect);
 
     nsRefPtr<nsRenderingContext> rc =
-      presContext->PresShell()->CreateReferenceRenderingContext();
+      presContext->PresShell()->GetReferenceRenderingContext();
+    if (!rc)
+      return NS_ERROR_OUT_OF_MEMORY;
 
     // Now we'll start making our way across the cell, starting at the edge of 
     // the cell and proceeding until we hit the right edge. |cellX| is the 
@@ -1394,7 +1380,7 @@ nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText,
           uint32_t length = aText.Length();
           uint32_t i;
           for (i = 0; i < length; ++i) {
-            char16_t ch = aText[i];
+            PRUnichar ch = aText[i];
             // XXX this is horrible and doesn't handle clusters
             cwidth = aRenderingContext.GetWidth(ch);
             if (twidth + cwidth > width)
@@ -1413,7 +1399,7 @@ nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText,
           int32_t length = aText.Length();
           int32_t i;
           for (i=length-1; i >= 0; --i) {
-            char16_t ch = aText[i];
+            PRUnichar ch = aText[i];
             cwidth = aRenderingContext.GetWidth(ch);
             if (twidth + cwidth > width)
               break;
@@ -1435,7 +1421,7 @@ nsTreeBodyFrame::AdjustForCellText(nsAutoString& aText,
           int32_t length = aText.Length();
           int32_t rightPos = length - 1;
           for (int32_t leftPos = 0; leftPos < rightPos; ++leftPos) {
-            char16_t ch = aText[leftPos];
+            PRUnichar ch = aText[leftPos];
             cwidth = aRenderingContext.GetWidth(ch);
             twidth += cwidth;
             if (twidth > width)
@@ -1514,7 +1500,9 @@ nsTreeBodyFrame::GetItemWithinCellAt(nscoord aX, const nsRect& aCellRect,
 
   nsPresContext* presContext = PresContext();
   nsRefPtr<nsRenderingContext> rc =
-    presContext->PresShell()->CreateReferenceRenderingContext();
+    presContext->PresShell()->GetReferenceRenderingContext();
+  if (!rc)
+    return nsCSSAnonBoxes::moztreecell;
 
   if (aColumn->IsPrimary()) {
     // If we're the primary column, we have indentation and a twisty.
@@ -1767,7 +1755,8 @@ nsTreeBodyFrame::IsCellCropped(int32_t aRow, nsITreeColumn* aCol, bool *_retval)
     return NS_ERROR_INVALID_ARG;
 
   nsRefPtr<nsRenderingContext> rc =
-    PresContext()->PresShell()->CreateReferenceRenderingContext();
+    PresContext()->PresShell()->GetReferenceRenderingContext();
+  NS_ENSURE_TRUE(rc, NS_ERROR_FAILURE);
 
   rv = GetCellWidth(aRow, col, rc, desiredSize, currentSize);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2197,7 +2186,6 @@ nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol, bool aUseContex
                                                 doc->GetDocumentURI(),
                                                 imgNotificationObserver,
                                                 nsIRequest::LOAD_NORMAL,
-                                                EmptyString(),
                                                 getter_AddRefs(imageRequest));
         NS_ENSURE_SUCCESS(rv, rv);
                                   
@@ -2515,7 +2503,7 @@ nsTreeBodyFrame::CalcHorzWidth(const ScrollParts& aParts)
   return width;
 }
 
-nsresult
+NS_IMETHODIMP
 nsTreeBodyFrame::GetCursor(const nsPoint& aPoint,
                            nsIFrame::Cursor& aCursor)
 {
@@ -2544,10 +2532,10 @@ nsTreeBodyFrame::GetCursor(const nsPoint& aPoint,
   return nsLeafBoxFrame::GetCursor(aPoint, aCursor);
 }
 
-static uint32_t GetDropEffect(WidgetGUIEvent* aEvent)
+static uint32_t GetDropEffect(nsGUIEvent* aEvent)
 {
   NS_ASSERTION(aEvent->eventStructType == NS_DRAG_EVENT, "wrong event type");
-  WidgetDragEvent* dragEvent = aEvent->AsDragEvent();
+  nsDragEvent* dragEvent = static_cast<nsDragEvent *>(aEvent);
   nsContentUtils::SetDataTransferInEvent(dragEvent);
 
   uint32_t action = 0;
@@ -2556,9 +2544,9 @@ static uint32_t GetDropEffect(WidgetGUIEvent* aEvent)
   return action;
 }
 
-nsresult
+NS_IMETHODIMP
 nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
-                             WidgetGUIEvent* aEvent,
+                             nsGUIEvent* aEvent,
                              nsEventStatus* aEventStatus)
 {
   if (aEvent->message == NS_MOUSE_ENTER_SYNTH || aEvent->message == NS_MOUSE_MOVE) {
@@ -2693,9 +2681,9 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
 
         // The dataTransfer was initialized by the call to GetDropEffect above.
         bool canDropAtNewLocation = false;
+        nsDragEvent* dragEvent = static_cast<nsDragEvent *>(aEvent);
         mView->CanDrop(mSlots->mDropRow, mSlots->mDropOrient,
-                       aEvent->AsDragEvent()->dataTransfer,
-                       &canDropAtNewLocation);
+                       dragEvent->dataTransfer, &canDropAtNewLocation);
 
         if (canDropAtNewLocation) {
           // Invalidate row at the new location.
@@ -2725,7 +2713,7 @@ nsTreeBodyFrame::HandleEvent(nsPresContext* aPresContext,
     }
 
     NS_ASSERTION(aEvent->eventStructType == NS_DRAG_EVENT, "wrong event type");
-    WidgetDragEvent* dragEvent = aEvent->AsDragEvent();
+    nsDragEvent* dragEvent = static_cast<nsDragEvent*>(aEvent);
     nsContentUtils::SetDataTransferInEvent(dragEvent);
 
     mView->Drop(mSlots->mDropRow, mSlots->mDropOrient, dragEvent->dataTransfer);
@@ -3268,9 +3256,11 @@ nsTreeBodyFrame::PaintCell(int32_t              aRowIndex,
     nsRect elementRect(currX, cellRect.y, remainingWidth, cellRect.height);
     nsRect dirtyRect;
     if (dirtyRect.IntersectRect(aDirtyRect, elementRect)) {
+      bool textRTL = cellContext->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
       switch (aColumn->GetType()) {
         case nsITreeColumn::TYPE_TEXT:
-          PaintText(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect, currX);
+          PaintText(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect, currX,
+                    textRTL);
           break;
         case nsITreeColumn::TYPE_CHECKBOX:
           PaintCheckbox(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect);
@@ -3285,7 +3275,8 @@ nsTreeBodyFrame::PaintCell(int32_t              aRowIndex,
               break;
             case nsITreeView::PROGRESS_NONE:
             default:
-              PaintText(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect, currX);
+              PaintText(aRowIndex, aColumn, elementRect, aPresContext, aRenderingContext, aDirtyRect, currX,
+                        textRTL);
               break;
           }
           break;
@@ -3382,7 +3373,7 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
           
         // Paint the image.
         nsLayoutUtils::DrawSingleUnscaledImage(&aRenderingContext, image,
-            GraphicsFilter::FILTER_NEAREST, pt, &aDirtyRect,
+            gfxPattern::FILTER_NEAREST, pt, &aDirtyRect,
             imgIContainer::FLAG_NONE, &imageSize);
       }
     }
@@ -3517,7 +3508,7 @@ nsTreeBodyFrame::PaintImage(int32_t              aRowIndex,
 
     gfxContext* ctx = aRenderingContext.ThebesContext();
     if (opacity != 1.0f) {
-      ctx->PushGroup(gfxContentType::COLOR_ALPHA);
+      ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
     }
 
     nsLayoutUtils::DrawImage(&aRenderingContext, image,
@@ -3545,7 +3536,8 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
                            nsPresContext*      aPresContext,
                            nsRenderingContext& aRenderingContext,
                            const nsRect&        aDirtyRect,
-                           nscoord&             aCurrX)
+                           nscoord&             aCurrX,
+                           bool                 aTextRTL)
 {
   NS_PRECONDITION(aColumn && aColumn->GetFrame(), "invalid column passed");
 
@@ -3628,15 +3620,16 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
     fontMet->GetStrikeout(offset, size);
     aRenderingContext.FillRect(textRect.x, textRect.y + baseline - offset, textRect.width, size);
   }
-  nsStyleContext* cellContext = GetPseudoStyleContext(nsCSSAnonBoxes::moztreecell);
+  uint8_t direction = aTextRTL ? NS_STYLE_DIRECTION_RTL :
+                                 NS_STYLE_DIRECTION_LTR;
 
   gfxContext* ctx = aRenderingContext.ThebesContext();
   if (opacity != 1.0f) {
-    ctx->PushGroup(gfxContentType::COLOR_ALPHA);
+    ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
   }
 
   nsLayoutUtils::DrawString(this, &aRenderingContext, text.get(), text.Length(),
-                            textRect.TopLeft() + nsPoint(0, baseline), cellContext);
+                            textRect.TopLeft() + nsPoint(0, baseline), direction);
 
   if (opacity != 1.0f) {
     ctx->PopGroupToSource();
@@ -3703,7 +3696,7 @@ nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
 
     // Paint the image.
     nsLayoutUtils::DrawSingleUnscaledImage(&aRenderingContext, image,
-        GraphicsFilter::FILTER_NEAREST, pt, &aDirtyRect,
+        gfxPattern::FILTER_NEAREST, pt, &aDirtyRect,
         imgIContainer::FLAG_NONE, &imageSize);
   }
 }
@@ -4322,9 +4315,7 @@ nsTreeBodyFrame::CanAutoScroll(int32_t aRowIndex)
 // For non-containers, if the mouse is in the top 50% of the row, the drop is
 // _before_ and the bottom 50% _after_
 void 
-nsTreeBodyFrame::ComputeDropPosition(WidgetGUIEvent* aEvent,
-                                     int32_t* aRow,
-                                     int16_t* aOrient,
+nsTreeBodyFrame::ComputeDropPosition(nsGUIEvent* aEvent, int32_t* aRow, int16_t* aOrient,
                                      int16_t* aScrollLines)
 {
   *aOrient = -1;
@@ -4463,10 +4454,10 @@ void
 nsTreeBodyFrame::FireScrollEvent()
 {
   mScrollEvent.Forget();
-  WidgetGUIEvent event(true, NS_SCROLL_EVENT, nullptr);
+  nsScrollbarEvent event(true, NS_SCROLL_EVENT, nullptr);
   // scroll events fired at elements don't bubble
   event.mFlags.mBubbles = false;
-  EventDispatcher::Dispatch(GetContent(), PresContext(), &event);
+  nsEventDispatcher::Dispatch(GetContent(), PresContext(), &event);
 }
 
 void
@@ -4480,22 +4471,6 @@ nsTreeBodyFrame::PostScrollEvent()
     NS_WARNING("failed to dispatch ScrollEvent");
   } else {
     mScrollEvent = ev;
-  }
-}
-
-void
-nsTreeBodyFrame::ScrollbarActivityStarted() const
-{
-  if (mScrollbarActivity) {
-    mScrollbarActivity->ActivityStarted();
-  }
-}
-
-void
-nsTreeBodyFrame::ScrollbarActivityStopped() const
-{
-  if (mScrollbarActivity) {
-    mScrollbarActivity->ActivityStopped();
   }
 }
 
@@ -4526,38 +4501,40 @@ nsTreeBodyFrame::FireRowCountChangedEvent(int32_t aIndex, int32_t aCount)
     return;
 
   nsCOMPtr<nsIDOMEvent> event;
-  domDoc->CreateEvent(NS_LITERAL_STRING("customevent"),
+  domDoc->CreateEvent(NS_LITERAL_STRING("datacontainerevents"),
                       getter_AddRefs(event));
 
-  nsCOMPtr<nsIDOMCustomEvent> treeEvent(do_QueryInterface(event));
+  nsCOMPtr<nsIDOMDataContainerEvent> treeEvent(do_QueryInterface(event));
   if (!treeEvent)
     return;
 
-  nsCOMPtr<nsIWritablePropertyBag2> propBag(
-    do_CreateInstance("@mozilla.org/hash-property-bag;1"));
-  if (!propBag)
-    return;
+  event->InitEvent(NS_LITERAL_STRING("TreeRowCountChanged"), true, false);
 
   // Set 'index' data - the row index rows are changed from.
-  propBag->SetPropertyAsInt32(NS_LITERAL_STRING("index"), aIndex);
-
-  // Set 'count' data - the number of changed rows.
-  propBag->SetPropertyAsInt32(NS_LITERAL_STRING("count"), aCount);
-
-  nsCOMPtr<nsIWritableVariant> detailVariant(
+  nsCOMPtr<nsIWritableVariant> indexVariant(
     do_CreateInstance("@mozilla.org/variant;1"));
-  if (!detailVariant)
+  if (!indexVariant)
     return;
 
-  detailVariant->SetAsISupports(propBag);
-  treeEvent->InitCustomEvent(NS_LITERAL_STRING("TreeRowCountChanged"),
-                             true, false, detailVariant);
+  indexVariant->SetAsInt32(aIndex);
+  treeEvent->SetData(NS_LITERAL_STRING("index"), indexVariant);
+
+  // Set 'count' data - the number of changed rows.
+  nsCOMPtr<nsIWritableVariant> countVariant(
+    do_CreateInstance("@mozilla.org/variant;1"));
+  if (!countVariant)
+    return;
+
+  countVariant->SetAsInt32(aCount);
+  treeEvent->SetData(NS_LITERAL_STRING("count"), countVariant);
 
   event->SetTrusted(true);
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(content, event);
-  asyncDispatcher->PostDOMEvent();
+  nsRefPtr<nsAsyncDOMEvent> plevent = new nsAsyncDOMEvent(content, event);
+  if (!plevent)
+    return;
+
+  plevent->PostDOMEvent();
 }
 
 void
@@ -4574,62 +4551,70 @@ nsTreeBodyFrame::FireInvalidateEvent(int32_t aStartRowIdx, int32_t aEndRowIdx,
     return;
 
   nsCOMPtr<nsIDOMEvent> event;
-  domDoc->CreateEvent(NS_LITERAL_STRING("customevent"),
+  domDoc->CreateEvent(NS_LITERAL_STRING("datacontainerevents"),
                       getter_AddRefs(event));
 
-  nsCOMPtr<nsIDOMCustomEvent> treeEvent(do_QueryInterface(event));
+  nsCOMPtr<nsIDOMDataContainerEvent> treeEvent(do_QueryInterface(event));
   if (!treeEvent)
     return;
 
-  nsCOMPtr<nsIWritablePropertyBag2> propBag(
-    do_CreateInstance("@mozilla.org/hash-property-bag;1"));
-  if (!propBag)
-    return;
+  event->InitEvent(NS_LITERAL_STRING("TreeInvalidated"), true, false);
 
   if (aStartRowIdx != -1 && aEndRowIdx != -1) {
     // Set 'startrow' data - the start index of invalidated rows.
-    propBag->SetPropertyAsInt32(NS_LITERAL_STRING("startrow"),
-                                aStartRowIdx);
+    nsCOMPtr<nsIWritableVariant> startRowVariant(
+      do_CreateInstance("@mozilla.org/variant;1"));
+    if (!startRowVariant)
+      return;
+
+    startRowVariant->SetAsInt32(aStartRowIdx);
+    treeEvent->SetData(NS_LITERAL_STRING("startrow"), startRowVariant);
 
     // Set 'endrow' data - the end index of invalidated rows.
-    propBag->SetPropertyAsInt32(NS_LITERAL_STRING("endrow"),
-                                aEndRowIdx);
+    nsCOMPtr<nsIWritableVariant> endRowVariant(
+      do_CreateInstance("@mozilla.org/variant;1"));
+    if (!endRowVariant)
+      return;
+
+    endRowVariant->SetAsInt32(aEndRowIdx);
+    treeEvent->SetData(NS_LITERAL_STRING("endrow"), endRowVariant);
   }
 
   if (aStartCol && aEndCol) {
     // Set 'startcolumn' data - the start index of invalidated rows.
+    nsCOMPtr<nsIWritableVariant> startColVariant(
+      do_CreateInstance("@mozilla.org/variant;1"));
+    if (!startColVariant)
+      return;
+
     int32_t startColIdx = 0;
     nsresult rv = aStartCol->GetIndex(&startColIdx);
     if (NS_FAILED(rv))
       return;
 
-    propBag->SetPropertyAsInt32(NS_LITERAL_STRING("startcolumn"),
-                                startColIdx);
+    startColVariant->SetAsInt32(startColIdx);
+    treeEvent->SetData(NS_LITERAL_STRING("startcolumn"), startColVariant);
 
     // Set 'endcolumn' data - the start index of invalidated rows.
+    nsCOMPtr<nsIWritableVariant> endColVariant(
+      do_CreateInstance("@mozilla.org/variant;1"));
+    if (!endColVariant)
+      return;
+
     int32_t endColIdx = 0;
     rv = aEndCol->GetIndex(&endColIdx);
     if (NS_FAILED(rv))
       return;
 
-    propBag->SetPropertyAsInt32(NS_LITERAL_STRING("endcolumn"),
-                                endColIdx);
+    endColVariant->SetAsInt32(endColIdx);
+    treeEvent->SetData(NS_LITERAL_STRING("endcolumn"), endColVariant);
   }
-
-  nsCOMPtr<nsIWritableVariant> detailVariant(
-    do_CreateInstance("@mozilla.org/variant;1"));
-  if (!detailVariant)
-    return;
-
-  detailVariant->SetAsISupports(propBag);
-  treeEvent->InitCustomEvent(NS_LITERAL_STRING("TreeInvalidated"),
-                             true, false, detailVariant);
 
   event->SetTrusted(true);
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(content, event);
-  asyncDispatcher->PostDOMEvent();
+  nsRefPtr<nsAsyncDOMEvent> plevent = new nsAsyncDOMEvent(content, event);
+  if (plevent)
+    plevent->PostDOMEvent();
 }
 #endif
 
@@ -4637,7 +4622,7 @@ class nsOverflowChecker : public nsRunnable
 {
 public:
   nsOverflowChecker(nsTreeBodyFrame* aFrame) : mFrame(aFrame) {}
-  NS_IMETHOD Run() MOZ_OVERRIDE
+  NS_IMETHOD Run()
   {
     if (mFrame.IsAlive()) {
       nsTreeBodyFrame* tree = static_cast<nsTreeBodyFrame*>(mFrame.GetFrame());
@@ -4663,17 +4648,7 @@ nsTreeBodyFrame::FullScrollbarsUpdate(bool aNeedsFullInvalidation)
   }
   InvalidateScrollbars(parts, weakColumnsFrame);
   NS_ENSURE_TRUE(weakFrame.IsAlive(), false);
-
-  // Overflow checking dispatches synchronous events, which can cause infinite
-  // recursion during reflow. Do the first overflow check synchronously, but
-  // force any nested checks to round-trip through the event loop. See bug
-  // 905909.
-  nsRefPtr<nsOverflowChecker> checker = new nsOverflowChecker(this);
-  if (!mCheckingOverflow) {
-    nsContentUtils::AddScriptRunner(checker);
-  } else {
-    NS_DispatchToCurrentThread(checker);
-  }
+  nsContentUtils::AddScriptRunner(new nsOverflowChecker(this));
   return weakFrame.IsAlive();
 }
 

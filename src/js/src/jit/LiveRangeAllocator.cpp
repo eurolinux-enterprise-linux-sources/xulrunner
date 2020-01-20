@@ -4,15 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/LiveRangeAllocator.h"
-
 #include "mozilla/DebugOnly.h"
 
-#include "jsprf.h"
+#include "LiveRangeAllocator.h"
 
-#include "jit/BacktrackingAllocator.h"
-#include "jit/BitSet.h"
-#include "jit/LinearScan.h"
+#include "BacktrackingAllocator.h"
+#include "LinearScan.h"
 
 using namespace js;
 using namespace js::jit;
@@ -33,14 +30,17 @@ Requirement::priority() const
         return 2;
 
       default:
-        MOZ_ASSUME_UNREACHABLE("Unknown requirement kind.");
+        JS_NOT_REACHED("Unknown requirement kind.");
+        return -1;
     }
 }
 
 bool
 LiveInterval::Range::contains(const Range *other) const
 {
-    return from <= other->from && to >= other->to;
+    Range pre, inside, post;
+    intersect(other, &pre, &inside, &post);
+    return inside.from == other->from && inside.to == other->to;
 }
 
 void
@@ -258,7 +258,7 @@ LiveInterval::splitFrom(CodePosition pos, LiveInterval *after)
     }
 
     // Split the linked list of use positions
-    UsePosition *prev = nullptr;
+    UsePosition *prev = NULL;
     for (UsePositionIterator usePos(usesBegin()); usePos != usesEnd(); usePos++) {
         if (usePos->pos > pos)
             break;
@@ -276,7 +276,7 @@ LiveInterval::addUse(UsePosition *use)
     // are visited in reverse order, so in most cases the loop terminates
     // at the first iteration and the use position will be added to the
     // front of the list.
-    UsePosition *prev = nullptr;
+    UsePosition *prev = NULL;
     for (UsePositionIterator current(usesBegin()); current != usesEnd(); current++) {
         if (current->pos >= use->pos)
             break;
@@ -287,13 +287,6 @@ LiveInterval::addUse(UsePosition *use)
         uses_.insertAfter(prev, use);
     else
         uses_.pushFront(use);
-}
-
-void
-LiveInterval::addUseAtEnd(UsePosition *use)
-{
-    JS_ASSERT(uses_.empty() || use->pos >= uses_.back()->pos);
-    uses_.pushBack(use);
 }
 
 UsePosition *
@@ -307,7 +300,7 @@ LiveInterval::nextUseAfter(CodePosition after)
                 return *usePos;
         }
     }
-    return nullptr;
+    return NULL;
 }
 
 /*
@@ -348,7 +341,7 @@ VirtualRegister::intervalFor(CodePosition pos)
         if (pos < (*i)->end())
             break;
     }
-    return nullptr;
+    return NULL;
 }
 
 LiveInterval *
@@ -359,8 +352,8 @@ VirtualRegister::getFirstInterval()
 }
 
 // Instantiate LiveRangeAllocator for each template instance.
-template bool LiveRangeAllocator<LinearScanVirtualRegister, true>::buildLivenessInfo();
-template bool LiveRangeAllocator<BacktrackingVirtualRegister, false>::buildLivenessInfo();
+template bool LiveRangeAllocator<LinearScanVirtualRegister>::buildLivenessInfo();
+template bool LiveRangeAllocator<BacktrackingVirtualRegister>::buildLivenessInfo();
 
 #ifdef DEBUG
 static inline bool
@@ -403,33 +396,33 @@ IsInputReused(LInstruction *ins, LUse *use)
  * This function pre-allocates and initializes as much global state as possible
  * to avoid littering the algorithms with memory management cruft.
  */
-template <typename VREG, bool forLSRA>
+template <typename VREG>
 bool
-LiveRangeAllocator<VREG, forLSRA>::init()
+LiveRangeAllocator<VREG>::init()
 {
     if (!RegisterAllocator::init())
         return false;
 
-    liveIn = mir->allocate<BitSet*>(graph.numBlockIds());
+    liveIn = lir->mir()->allocate<BitSet*>(graph.numBlockIds());
     if (!liveIn)
         return false;
 
     // Initialize fixed intervals.
     for (size_t i = 0; i < AnyRegister::Total; i++) {
         AnyRegister reg = AnyRegister::FromCode(i);
-        LiveInterval *interval = LiveInterval::New(alloc(), 0);
+        LiveInterval *interval = new LiveInterval(0);
         interval->setAllocation(LAllocation(reg));
         fixedIntervals[i] = interval;
     }
 
-    fixedIntervalsUnion = LiveInterval::New(alloc(), 0);
+    fixedIntervalsUnion = new LiveInterval(0);
 
-    if (!vregs.init(mir, graph.numVirtualRegisters()))
+    if (!vregs.init(lir->mir(), graph.numVirtualRegisters()))
         return false;
 
     // Build virtual register objects
     for (size_t i = 0; i < graph.numBlocks(); i++) {
-        if (mir->shouldCancel("Create data structures (main loop)"))
+        if (mir->shouldCancel("LSRA create data structures (main loop)"))
             return false;
 
         LBlock *block = graph.getBlock(i);
@@ -437,7 +430,8 @@ LiveRangeAllocator<VREG, forLSRA>::init()
             for (size_t j = 0; j < ins->numDefs(); j++) {
                 LDefinition *def = ins->getDef(j);
                 if (def->policy() != LDefinition::PASSTHROUGH) {
-                    if (!vregs[def].init(alloc(), block, *ins, def, /* isTemp */ false))
+                    uint32_t reg = def->virtualRegister();
+                    if (!vregs[reg].init(reg, block, *ins, def, /* isTemp */ false))
                         return false;
                 }
             }
@@ -446,14 +440,14 @@ LiveRangeAllocator<VREG, forLSRA>::init()
                 LDefinition *def = ins->getTemp(j);
                 if (def->isBogusTemp())
                     continue;
-                if (!vregs[def].init(alloc(), block, *ins, def, /* isTemp */ true))
+                if (!vregs[def].init(def->virtualRegister(), block, *ins, def, /* isTemp */ true))
                     return false;
             }
         }
         for (size_t j = 0; j < block->numPhis(); j++) {
             LPhi *phi = block->getPhi(j);
             LDefinition *def = phi->getDef(0);
-            if (!vregs[def].init(alloc(), block, phi, def, /* isTemp */ false))
+            if (!vregs[def].init(phi->id(), block, phi, def, /* isTemp */ false))
                 return false;
         }
     }
@@ -467,9 +461,7 @@ AddRegisterToSafepoint(LSafepoint *safepoint, AnyRegister reg, const LDefinition
     safepoint->addLiveRegister(reg);
 
     JS_ASSERT(def.type() == LDefinition::GENERAL ||
-              def.type() == LDefinition::INT32 ||
               def.type() == LDefinition::DOUBLE ||
-              def.type() == LDefinition::FLOAT32 ||
               def.type() == LDefinition::OBJECT);
 
     if (def.type() == LDefinition::OBJECT)
@@ -496,26 +488,26 @@ AddRegisterToSafepoint(LSafepoint *safepoint, AnyRegister reg, const LDefinition
  * block. To deal with loop backedges, variables live at the beginning of
  * a loop gain an interval covering the entire loop.
  */
-template <typename VREG, bool forLSRA>
+template <typename VREG>
 bool
-LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
+LiveRangeAllocator<VREG>::buildLivenessInfo()
 {
     if (!init())
         return false;
 
     Vector<MBasicBlock *, 1, SystemAllocPolicy> loopWorkList;
-    BitSet *loopDone = BitSet::New(alloc(), graph.numBlockIds());
+    BitSet *loopDone = BitSet::New(graph.numBlockIds());
     if (!loopDone)
         return false;
 
     for (size_t i = graph.numBlocks(); i > 0; i--) {
-        if (mir->shouldCancel("Build Liveness Info (main loop)"))
+        if (mir->shouldCancel("LSRA Build Liveness Info (main loop)"))
             return false;
 
         LBlock *block = graph.getBlock(i - 1);
         MBasicBlock *mblock = block->mir();
 
-        BitSet *live = BitSet::New(alloc(), graph.numVirtualRegisters());
+        BitSet *live = BitSet::New(graph.numVirtualRegisters());
         if (!live)
             return false;
         liveIn[mblock->id()] = live;
@@ -643,28 +635,9 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
                             return false;
                     }
                 } else {
-                    // Normally temps are considered to cover both the input
-                    // and output of the associated instruction. In some cases
-                    // though we want to use a fixed register as both an input
-                    // and clobbered register in the instruction, so watch for
-                    // this and shorten the temp to cover only the output.
-                    CodePosition from = inputOf(*ins);
-                    if (temp->policy() == LDefinition::PRESET) {
-                        AnyRegister reg = temp->output()->toRegister();
-                        for (LInstruction::InputIterator alloc(**ins); alloc.more(); alloc.next()) {
-                            if (alloc->isUse()) {
-                                LUse *use = alloc->toUse();
-                                if (use->isFixedRegister()) {
-                                    if (GetFixedRegister(vregs[use].def(), use) == reg)
-                                        from = outputOf(*ins);
-                                }
-                            }
-                        }
-                    }
-
                     CodePosition to =
                         ins->isCall() ? outputOf(*ins) : outputOf(*ins).next();
-                    if (!vregs[temp].getInterval(0)->addRangeAtHead(from, to))
+                    if (!vregs[temp].getInterval(0)->addRangeAtHead(inputOf(*ins), to))
                         return false;
                 }
             }
@@ -672,16 +645,16 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
             DebugOnly<bool> hasUseRegister = false;
             DebugOnly<bool> hasUseRegisterAtStart = false;
 
-            for (LInstruction::InputIterator inputAlloc(**ins); inputAlloc.more(); inputAlloc.next()) {
-                if (inputAlloc->isUse()) {
-                    LUse *use = inputAlloc->toUse();
+            for (LInstruction::InputIterator alloc(**ins); alloc.more(); alloc.next()) {
+                if (alloc->isUse()) {
+                    LUse *use = alloc->toUse();
 
                     // The first instruction, LLabel, has no uses.
-                    JS_ASSERT_IF(forLSRA, inputOf(*ins) > outputOf(block->firstId()));
+                    JS_ASSERT(inputOf(*ins) > outputOf(block->firstId()));
 
                     // Call uses should always be at-start or fixed, since the fixed intervals
                     // use all registers.
-                    JS_ASSERT_IF(ins->isCall() && !inputAlloc.isSnapshotInput(),
+                    JS_ASSERT_IF(ins->isCall() && !alloc.isSnapshotInput(),
                                  use->isFixedRegister() || use->usedAtStart());
 
 #ifdef DEBUG
@@ -689,7 +662,7 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
                     // so that we don't assign the same register.
                     if (ins->isCall() && use->usedAtStart()) {
                         for (size_t i = 0; i < ins->numTemps(); i++)
-                            JS_ASSERT(vregs[ins->getTemp(i)].isFloatReg() != vregs[use].isFloatReg());
+                            JS_ASSERT(vregs[ins->getTemp(i)].isDouble() != vregs[use].isDouble());
                     }
 
                     // If there are both useRegisterAtStart(x) and useRegister(y)
@@ -714,6 +687,7 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
                     CodePosition to;
                     if (forLSRA) {
                         if (use->isFixedRegister()) {
+                            JS_ASSERT(!use->usedAtStart());
                             AnyRegister reg = GetFixedRegister(vregs[use].def(), use);
                             if (!addFixedRangeAtHead(reg, inputOf(*ins), outputOf(*ins)))
                                 return false;
@@ -743,7 +717,7 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
                     LiveInterval *interval = vregs[use].getInterval(0);
                     if (!interval->addRangeAtHead(inputOf(block->firstId()), forLSRA ? to : to.next()))
                         return false;
-                    interval->addUse(new(alloc()) UsePosition(use, to));
+                    interval->addUse(new UsePosition(use, to));
 
                     live->insert(use->virtualRegister());
                 }
@@ -853,7 +827,7 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
 void
 LiveInterval::validateRanges()
 {
-    Range *prev = nullptr;
+    Range *prev = NULL;
 
     for (size_t i = ranges_.length() - 1; i < ranges_.length(); i--) {
         Range *range = &ranges_[i];
@@ -865,37 +839,3 @@ LiveInterval::validateRanges()
 }
 
 #endif // DEBUG
-
-const char *
-LiveInterval::rangesToString() const
-{
-#ifdef DEBUG
-    if (!numRanges())
-        return " empty";
-
-    // Not reentrant!
-    static char buf[1000];
-
-    char *cursor = buf;
-    char *end = cursor + sizeof(buf);
-
-    for (size_t i = 0; i < numRanges(); i++) {
-        const LiveInterval::Range *range = getRange(i);
-        int n = JS_snprintf(cursor, end - cursor, " [%u,%u>", range->from.pos(), range->to.pos());
-        if (n < 0)
-            return " ???";
-        cursor += n;
-    }
-
-    return buf;
-#else
-    return " ???";
-#endif
-}
-
-void
-LiveInterval::dump()
-{
-    fprintf(stderr, "v%u: index=%u allocation=%s %s\n",
-            vreg(), index(), getAllocation()->toString(), rangesToString());
-}

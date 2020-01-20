@@ -24,10 +24,6 @@
     <implementation>
       <constructor><![CDATA[
         this.preferenceChanged();
-
-        this.addEventListener("keypress", function(event) {
-          event.stopPropagation();
-        }, false);
         
         if (this.usePref)
           Services.prefs.addObserver(this.pref, this._observer, true);
@@ -230,8 +226,8 @@
         <xul:description class="preferences-description" flex="1" xbl:inherits="xbl:text=desc"/>
       </xul:vbox>
       <xul:hbox class="preferences-alignment">
-        <xul:textbox type="number" anonid="input" oninput="inputChanged();" onchange="inputChanged();"
-                     xbl:inherits="disabled,emptytext,min,max,increment,hidespinbuttons,wraparound,size"/>
+        <xul:textbox type="number" anonid="input" flex="1" oninput="inputChanged();" onchange="inputChanged();"
+                     xbl:inherits="disabled,emptytext,min,max,increment,hidespinbuttons,wraparound"/>
       </xul:hbox>
     </content>
 
@@ -463,15 +459,11 @@
               return;
           }
 
-          if ("itemCount" in this.control) {
-            for (let i = 0; i < this.control.itemCount; i++) {
-              if (this.control.getItemAtIndex(i).value == val) {
-                this.control.selectedIndex = i;
-                break;
-              }
+          for (let i = 0; i < this.control.itemCount; i++) {
+            if (this.control.getItemAtIndex(i).value == val) {
+              this.control.selectedIndex = i;
+              break;
             }
-          } else {
-            this.control.setAttribute("value", val);
           }
         ]]>
         </body>

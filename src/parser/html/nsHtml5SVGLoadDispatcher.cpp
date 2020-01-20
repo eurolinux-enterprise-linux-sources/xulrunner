@@ -4,12 +4,9 @@
 
 #include "nsHtml5SVGLoadDispatcher.h"
 #include "nsPresContext.h"
+#include "nsEventDispatcher.h"
 #include "nsIPresShell.h"
-#include "mozilla/BasicEvents.h"
-#include "mozilla/EventDispatcher.h"
-#include "nsIDocument.h"
-
-using namespace mozilla;
+#include "nsGUIEvent.h"
 
 nsHtml5SVGLoadDispatcher::nsHtml5SVGLoadDispatcher(nsIContent* aElement)
   : mElement(aElement)
@@ -21,7 +18,7 @@ nsHtml5SVGLoadDispatcher::nsHtml5SVGLoadDispatcher(nsIContent* aElement)
 NS_IMETHODIMP
 nsHtml5SVGLoadDispatcher::Run()
 {
-  WidgetEvent event(true, NS_SVG_LOAD);
+  nsEvent event(true, NS_SVG_LOAD);
   event.mFlags.mBubbles = false;
   // Do we care about forcing presshell creation if it hasn't happened yet?
   // That is, should this code flush or something?  Does it really matter?
@@ -32,7 +29,7 @@ nsHtml5SVGLoadDispatcher::Run()
   if (shell) {
     ctx = shell->GetPresContext();
   }
-  EventDispatcher::Dispatch(mElement, ctx, &event);
+  nsEventDispatcher::Dispatch(mElement, ctx, &event);
   // Unblocking onload on the same document that it was blocked even if
   // the element has moved between docs since blocking.
   mDocument->UnblockOnload(false);

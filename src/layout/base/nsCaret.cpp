@@ -10,18 +10,23 @@
 
 #include "nsITimer.h"
 
+#include "nsIComponentManager.h"
+#include "nsIServiceManager.h"
 #include "nsFrameSelection.h"
 #include "nsIFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsIDOMNode.h"
+#include "nsIDOMRange.h"
 #include "nsISelection.h"
 #include "nsISelectionPrivate.h"
+#include "nsIDOMCharacterData.h"
 #include "nsIContent.h"
 #include "nsIPresShell.h"
 #include "nsRenderingContext.h"
 #include "nsPresContext.h"
 #include "nsBlockFrame.h"
 #include "nsISelectionController.h"
+#include "nsDisplayList.h"
 #include "nsCaret.h"
 #include "nsTextFrame.h"
 #include "nsXULPopupManager.h"
@@ -29,7 +34,7 @@
 #include "nsTextFragment.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
-#include "mozilla/dom/Selection.h"
+#include "mozilla/Selection.h"
 #include <algorithm>
 
 // The bidi indicator hangs off the caret to one side, to show which
@@ -37,8 +42,10 @@
 // an insignificant dot
 static const int32_t kMinBidiIndicatorPixels = 2;
 
+#ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
 #include "nsContentUtils.h"
+#endif //IBMBIDI
 
 using namespace mozilla;
 
@@ -118,8 +125,10 @@ nsCaret::nsCaret()
 , mReadOnly(false)
 , mShowDuringSelection(false)
 , mIgnoreUserModify(true)
+#ifdef IBMBIDI
 , mKeyboardRTL(false)
 , mLastBidiLevel(0)
+#endif
 , mLastContentOffset(0)
 , mLastHint(nsFrameSelection::HINTLEFT)
 {
@@ -176,7 +185,9 @@ nsresult nsCaret::Init(nsIPresShell *inPresShell)
   {
     StartBlinking();
   }
+#ifdef IBMBIDI
   mBidiUI = Preferences::GetBool("bidi.browser.ui");
+#endif
 
   return NS_OK;
 }
@@ -190,7 +201,7 @@ DrawCJKCaret(nsIFrame* aFrame, int32_t aOffset)
     return false;
   if (aOffset < 0 || uint32_t(aOffset) >= frag->GetLength())
     return false;
-  char16_t ch = frag->CharAt(aOffset);
+  PRUnichar ch = frag->CharAt(aOffset);
   return 0x2e80 <= ch && ch <= 0xd7ff;
 }
 
@@ -236,7 +247,7 @@ void nsCaret::Terminate()
 }
 
 //-----------------------------------------------------------------------------
-NS_IMPL_ISUPPORTS(nsCaret, nsISelectionListener)
+NS_IMPL_ISUPPORTS1(nsCaret, nsISelectionListener)
 
 //-----------------------------------------------------------------------------
 nsISelection* nsCaret::GetCaretDOMSelection()
@@ -848,8 +859,7 @@ nsCaret::GetCaretFrameForNodeOffset(nsIContent*             aContentNode,
   return NS_OK;
 }
 
-void
-nsCaret::CheckCaretDrawingState()
+nsresult nsCaret::CheckCaretDrawingState()
 {
   if (mDrawn) {
     // The caret is drawn; if it shouldn't be, erase it.
@@ -862,6 +872,7 @@ nsCaret::CheckCaretDrawingState()
     if (mPendingDraw && (mVisible && MustDrawCaret(true)))
       DrawCaret(true);
   }
+  return NS_OK;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1044,6 +1055,7 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
   if (NS_STYLE_DIRECTION_RTL == vis->mDirection)
     mCaretRect.x -= mCaretRect.width;
 
+#ifdef IBMBIDI
   mHookRect.SetEmpty();
 
   // Simon -- make a hook to draw to the left or right of the caret to show keyboard language direction
@@ -1064,7 +1076,7 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
        * without drawing the caret in the old position.
        */ 
       mKeyboardRTL = isCaretRTL;
-      nsCOMPtr<nsISelectionPrivate> domSelection = do_QueryReferent(mDomSelectionWeak);
+      nsCOMPtr<nsISelection> domSelection = do_QueryReferent(mDomSelectionWeak);
       if (!domSelection ||
           NS_SUCCEEDED(domSelection->SelectionLanguageChange(mKeyboardRTL)))
         return false;
@@ -1079,6 +1091,7 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
                       bidiIndicatorSize,
                       mCaretRect.width);
   }
+#endif //IBMBIDI
   return true;
 }
 
@@ -1101,7 +1114,7 @@ nsCaret::GetFrameSelection()
   if (!sel)
     return nullptr;
 
-  return static_cast<dom::Selection*>(sel.get())->GetFrameSelection();
+  return static_cast<Selection*>(sel.get())->GetFrameSelection();
 }
 
 void

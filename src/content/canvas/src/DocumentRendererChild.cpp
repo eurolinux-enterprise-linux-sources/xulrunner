@@ -6,10 +6,8 @@
 
 #include "base/basictypes.h"
 
-#include "gfx2DGlue.h"
+#include "gfxImageSurface.h"
 #include "gfxPattern.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/RefPtr.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -22,12 +20,7 @@
 #include "gfxContext.h"
 #include "nsLayoutUtils.h"
 #include "nsContentUtils.h"
-#include "nsCSSValue.h"
-#include "nsRuleNode.h"
-#include "mozilla/gfx/Matrix.h"
 
-using namespace mozilla;
-using namespace mozilla::gfx;
 using namespace mozilla::ipc;
 
 DocumentRendererChild::DocumentRendererChild()
@@ -39,17 +32,17 @@ DocumentRendererChild::~DocumentRendererChild()
 bool
 DocumentRendererChild::RenderDocument(nsIDOMWindow *window,
                                       const nsRect& documentRect,
-                                      const mozilla::gfx::Matrix& transform,
+                                      const gfxMatrix& transform,
                                       const nsString& aBGColor,
                                       uint32_t renderFlags,
-                                      bool flushLayout,
+                                      bool flushLayout, 
                                       const nsIntSize& renderSize,
                                       nsCString& data)
 {
     if (flushLayout)
         nsContentUtils::FlushLayoutForTree(window);
 
-    nsRefPtr<nsPresContext> presContext;
+    nsCOMPtr<nsPresContext> presContext;
     nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(window);
     if (win) {
         nsIDocShell* docshell = win->GetDocShell();
@@ -74,14 +67,13 @@ DocumentRendererChild::RenderDocument(nsIDOMWindow *window,
     // Draw directly into the output array.
     data.SetLength(renderSize.width * renderSize.height * 4);
 
-    RefPtr<DrawTarget> dt =
-        Factory::CreateDrawTargetForData(BackendType::CAIRO,
-                                         reinterpret_cast<uint8_t*>(data.BeginWriting()),
-                                         IntSize(renderSize.width, renderSize.height),
-                                         4 * renderSize.width,
-                                         SurfaceFormat::B8G8R8A8);
-    nsRefPtr<gfxContext> ctx = new gfxContext(dt);
-    ctx->SetMatrix(mozilla::gfx::ThebesMatrix(transform));
+    nsRefPtr<gfxImageSurface> surf =
+        new gfxImageSurface(reinterpret_cast<uint8_t*>(data.BeginWriting()),
+                            gfxIntSize(renderSize.width, renderSize.height),
+                            4 * renderSize.width,
+                            gfxASurface::ImageFormatARGB32);
+    nsRefPtr<gfxContext> ctx = new gfxContext(surf);
+    ctx->SetMatrix(transform);
 
     nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
     shell->RenderDocument(documentRect, renderFlags, bgColor, ctx);

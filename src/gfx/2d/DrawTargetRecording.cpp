@@ -9,7 +9,6 @@
 
 #include "Logging.h"
 #include "Tools.h"
-#include "Filters.h"
 
 namespace mozilla {
 namespace gfx {
@@ -17,7 +16,6 @@ namespace gfx {
 class SourceSurfaceRecording : public SourceSurface
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceRecording)
   SourceSurfaceRecording(SourceSurface *aFinalSurface, DrawEventRecorderPrivate *aRecorder)
     : mFinalSurface(aFinalSurface), mRecorder(aRecorder)
   {
@@ -28,7 +26,7 @@ public:
     mRecorder->RecordEvent(RecordedSourceSurfaceDestruction(this));
   }
 
-  virtual SurfaceType GetType() const { return SurfaceType::RECORDING; }
+  virtual SurfaceType GetType() const { return SURFACE_RECORDING; }
   virtual IntSize GetSize() const { return mFinalSurface->GetSize(); }
   virtual SurfaceFormat GetFormat() const { return mFinalSurface->GetFormat(); }
   virtual TemporaryRef<DataSourceSurface> GetDataSurface() { return mFinalSurface->GetDataSurface(); }
@@ -40,7 +38,6 @@ public:
 class GradientStopsRecording : public GradientStops
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GradientStopsRecording)
   GradientStopsRecording(GradientStops *aFinalGradientStops, DrawEventRecorderPrivate *aRecorder)
     : mFinalGradientStops(aFinalGradientStops), mRecorder(aRecorder)
   {
@@ -51,7 +48,7 @@ public:
     mRecorder->RecordEvent(RecordedGradientStopsDestruction(this));
   }
 
-  virtual BackendType GetBackendType() const { return BackendType::RECORDING; }
+  virtual BackendType GetBackendType() const { return BACKEND_RECORDING; }
 
   RefPtr<GradientStops> mFinalGradientStops;
   RefPtr<DrawEventRecorderPrivate> mRecorder;
@@ -60,7 +57,7 @@ public:
 static SourceSurface *
 GetSourceSurface(SourceSurface *aSurface)
 {
-  if (aSurface->GetType() != SurfaceType::RECORDING) {
+  if (aSurface->GetType() != SURFACE_RECORDING) {
     return aSurface;
   }
 
@@ -70,95 +67,17 @@ GetSourceSurface(SourceSurface *aSurface)
 static GradientStops *
 GetGradientStops(GradientStops *aStops)
 {
-  if (aStops->GetBackendType() != BackendType::RECORDING) {
+  if (aStops->GetBackendType() != BACKEND_RECORDING) {
     return aStops;
   }
 
   return static_cast<GradientStopsRecording*>(aStops)->mFinalGradientStops;
 }
 
-class FilterNodeRecording : public FilterNode
-{
-public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(FilterNodeRecording)
-  using FilterNode::SetAttribute;
-
-  FilterNodeRecording(FilterNode *aFinalFilterNode, DrawEventRecorderPrivate *aRecorder)
-    : mFinalFilterNode(aFinalFilterNode), mRecorder(aRecorder)
-  {
-  }
-
-  ~FilterNodeRecording()
-  {
-    mRecorder->RecordEvent(RecordedFilterNodeDestruction(this));
-  }
-
-  virtual void SetInput(uint32_t aIndex, SourceSurface *aSurface)
-  {
-    mRecorder->RecordEvent(RecordedFilterNodeSetInput(this, aIndex, aSurface));
-    mFinalFilterNode->SetInput(aIndex, GetSourceSurface(aSurface));
-  }
-  virtual void SetInput(uint32_t aIndex, FilterNode *aFilter)
-  {
-    FilterNode *finalNode = aFilter;
-    if (aFilter->GetBackendType() != FILTER_BACKEND_RECORDING) {
-      gfxWarning() << "Non recording filter node used with recording DrawTarget!";
-    } else {
-      finalNode = static_cast<FilterNodeRecording*>(aFilter)->mFinalFilterNode;
-    }
-
-    mRecorder->RecordEvent(RecordedFilterNodeSetInput(this, aIndex, aFilter));
-    mFinalFilterNode->SetInput(aIndex, finalNode);
-  }
-
-
-#define FORWARD_SET_ATTRIBUTE(type, argtype) \
-  virtual void SetAttribute(uint32_t aIndex, type aValue) { \
-    mRecorder->RecordEvent(RecordedFilterNodeSetAttribute(this, aIndex, aValue, RecordedFilterNodeSetAttribute::ARGTYPE_##argtype)); \
-    mFinalFilterNode->SetAttribute(aIndex, aValue); \
-  }
-
-  FORWARD_SET_ATTRIBUTE(bool, BOOL);
-  FORWARD_SET_ATTRIBUTE(uint32_t, UINT32);
-  FORWARD_SET_ATTRIBUTE(Float, FLOAT);
-  FORWARD_SET_ATTRIBUTE(const Size&, SIZE);
-  FORWARD_SET_ATTRIBUTE(const IntSize&, INTSIZE);
-  FORWARD_SET_ATTRIBUTE(const IntPoint&, INTPOINT);
-  FORWARD_SET_ATTRIBUTE(const Rect&, RECT);
-  FORWARD_SET_ATTRIBUTE(const IntRect&, INTRECT);
-  FORWARD_SET_ATTRIBUTE(const Point&, POINT);
-  FORWARD_SET_ATTRIBUTE(const Matrix5x4&, MATRIX5X4);
-  FORWARD_SET_ATTRIBUTE(const Point3D&, POINT3D);
-  FORWARD_SET_ATTRIBUTE(const Color&, COLOR);
-
-#undef FORWARD_SET_ATTRIBUTE
-
-  virtual void SetAttribute(uint32_t aIndex, const Float* aFloat, uint32_t aSize) {
-    mRecorder->RecordEvent(RecordedFilterNodeSetAttribute(this, aIndex, aFloat, aSize));
-    mFinalFilterNode->SetAttribute(aIndex, aFloat, aSize);
-  }
-
-  virtual FilterBackend GetBackendType() MOZ_OVERRIDE { return FILTER_BACKEND_RECORDING; }
-
-  RefPtr<FilterNode> mFinalFilterNode;
-  RefPtr<DrawEventRecorderPrivate> mRecorder;
-};
-
-static FilterNode*
-GetFilterNode(FilterNode* aNode)
-{
-  if (aNode->GetBackendType() != FILTER_BACKEND_RECORDING) {
-    gfxWarning() << "Non recording filter node used with recording DrawTarget!";
-    return aNode;
-  }
-
-  return static_cast<FilterNodeRecording*>(aNode)->mFinalFilterNode;
-}
-
 struct AdjustedPattern
 {
   AdjustedPattern(const Pattern &aPattern)
-    : mPattern(nullptr)
+    : mPattern(NULL)
   {
     mOrigPattern = const_cast<Pattern*>(&aPattern);
   }
@@ -172,9 +91,9 @@ struct AdjustedPattern
   operator Pattern*()
   {
     switch(mOrigPattern->GetType()) {
-    case PatternType::COLOR:
+    case PATTERN_COLOR:
       return mOrigPattern;
-    case PatternType::SURFACE:
+    case PATTERN_SURFACE:
       {
         SurfacePattern *surfPat = static_cast<SurfacePattern*>(mOrigPattern);
         mPattern =
@@ -183,7 +102,7 @@ struct AdjustedPattern
                                         surfPat->mFilter);
         return mPattern;
       }
-    case PatternType::LINEAR_GRADIENT:
+    case PATTERN_LINEAR_GRADIENT:
       {
         LinearGradientPattern *linGradPat = static_cast<LinearGradientPattern*>(mOrigPattern);
         mPattern =
@@ -192,7 +111,7 @@ struct AdjustedPattern
                                                   linGradPat->mMatrix);
         return mPattern;
       }
-    case PatternType::RADIAL_GRADIENT:
+    case PATTERN_RADIAL_GRADIENT:
       {
         RadialGradientPattern *radGradPat = static_cast<RadialGradientPattern*>(mOrigPattern);
         mPattern =
@@ -220,13 +139,11 @@ struct AdjustedPattern
   Pattern *mPattern;
 };
 
-DrawTargetRecording::DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT, bool aHasData)
+DrawTargetRecording::DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT)
   : mRecorder(static_cast<DrawEventRecorderPrivate*>(aRecorder))
   , mFinalDT(aDT)
 {
-  RefPtr<SourceSurface> snapshot = aHasData ? mFinalDT->Snapshot() : nullptr;
-  mRecorder->RecordEvent(RecordedDrawTargetCreation(this, mFinalDT->GetType(), mFinalDT->GetSize(), mFinalDT->GetFormat(),
-                                                    aHasData, snapshot));
+  mRecorder->RecordEvent(RecordedDrawTargetCreation(this, mFinalDT->GetType(), mFinalDT->GetSize(), mFinalDT->GetFormat()));
   mFormat = mFinalDT->GetFormat();
 }
 
@@ -268,8 +185,8 @@ DrawTargetRecording::StrokeLine(const Point &aBegin,
 Path*
 DrawTargetRecording::GetPathForPathRecording(const Path *aPath) const
 {
-  if (aPath->GetBackendType() != BackendType::RECORDING) {
-    return nullptr;
+  if (aPath->GetBackendType() != BACKEND_RECORDING) {
+    return NULL;
   }
 
   return static_cast<const PathRecording*>(aPath)->mPath;
@@ -297,10 +214,7 @@ void RecordingFontUserDataDestroyFunc(void *aUserData)
   RecordingFontUserData *userData =
     static_cast<RecordingFontUserData*>(aUserData);
 
-  // TODO support font in b2g recordings
-#ifndef MOZ_WIDGET_GONK
   userData->recorder->RecordEvent(RecordedScaledFontDestruction(userData->refPtr));
-#endif
 
   delete userData;
 }
@@ -313,10 +227,7 @@ DrawTargetRecording::FillGlyphs(ScaledFont *aFont,
                                 const GlyphRenderingOptions *aRenderingOptions)
 {
   if (!aFont->GetUserData(reinterpret_cast<UserDataKey*>(mRecorder.get()))) {
-  // TODO support font in b2g recordings
-#ifndef MOZ_WIDGET_GONK
     mRecorder->RecordEvent(RecordedScaledFontCreation(aFont, aFont));
-#endif
     RecordingFontUserData *userData = new RecordingFontUserData;
     userData->refPtr = aFont;
     userData->recorder = mRecorder;
@@ -324,10 +235,7 @@ DrawTargetRecording::FillGlyphs(ScaledFont *aFont,
                        &RecordingFontUserDataDestroyFunc);
   }
 
-  // TODO support font in b2g recordings
-#ifndef MOZ_WIDGET_GONK
   mRecorder->RecordEvent(RecordedFillGlyphs(this, aFont, aPattern, aOptions, aBuffer.mGlyphs, aBuffer.mNumGlyphs));
-#endif
   mFinalDT->FillGlyphs(aFont, aBuffer, aPattern, aOptions, aRenderingOptions);
 }
 
@@ -395,28 +303,6 @@ DrawTargetRecording::DrawSurfaceWithShadow(SourceSurface *aSurface,
 {
   mRecorder->RecordEvent(RecordedDrawSurfaceWithShadow(this, aSurface, aDest, aColor, aOffset, aSigma, aOp));
   mFinalDT->DrawSurfaceWithShadow(GetSourceSurface(aSurface), aDest, aColor, aOffset, aSigma, aOp);
-}
-
-void
-DrawTargetRecording::DrawFilter(FilterNode *aNode,
-                                const Rect &aSourceRect,
-                                const Point &aDestPoint,
-                                const DrawOptions &aOptions)
-{
-  mRecorder->RecordEvent(RecordedDrawFilter(this, aNode, aSourceRect, aDestPoint, aOptions));
-  mFinalDT->DrawFilter(GetFilterNode(aNode), aSourceRect, aDestPoint, aOptions);
-}
-
-TemporaryRef<FilterNode>
-DrawTargetRecording::CreateFilter(FilterType aType)
-{
-  RefPtr<FilterNode> node = mFinalDT->CreateFilter(aType);
-
-  RefPtr<FilterNode> retNode = new FilterNodeRecording(node, mRecorder);
-
-  mRecorder->RecordEvent(RecordedFilterNodeCreation(retNode, aType));
-
-  return retNode;
 }
 
 void
@@ -577,7 +463,7 @@ void
 DrawTargetRecording::EnsureStored(const Path *aPath)
 {
   if (!mRecorder->HasStoredPath(aPath)) {
-    if (aPath->GetBackendType() != BackendType::RECORDING) {
+    if (aPath->GetBackendType() != BACKEND_RECORDING) {
       gfxWarning() << "Cannot record this fill path properly!";
     } else {
       PathRecording *recPath = const_cast<PathRecording*>(static_cast<const PathRecording*>(aPath));

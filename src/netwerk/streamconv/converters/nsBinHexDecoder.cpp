@@ -20,6 +20,11 @@
 #include "nsMimeTypes.h"
 #include <algorithm>
 
+
+// sadly I couldn't find char defintions for CR LF elsehwere in the code (they are defined as strings in nsCRT.h)
+#define CR  '\015'
+#define LF '\012'
+
 nsBinHexDecoder::nsBinHexDecoder() :
   mState(0), mCRC(0), mFileCRC(0), mOctetin(26),
   mDonePos(3), mInCRC(0), mCount(0), mMarker(0), mPosInbuff(0),
@@ -57,7 +62,7 @@ NS_INTERFACE_MAP_END
 
 // The binhex 4.0 decoder table....
 
-static const signed char binhex_decode[256] =
+static signed char binhex_decode[256] =
 {
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -316,7 +321,7 @@ nsresult nsBinHexDecoder::ProcessNextChunk(nsIRequest * aRequest, nsISupports * 
     while (mPosInDataBuffer < numBytesInBuffer)
     {
       c = mDataBuffer[mPosInDataBuffer++];
-      while (c == nsCRT::CR || c == nsCRT::LF)
+      while (c == CR || c == LF)
       {
         if (mPosInDataBuffer >= numBytesInBuffer)
           break;
@@ -425,10 +430,10 @@ int16_t nsBinHexDecoder::GetNextChar(uint32_t numBytesInBuffer)
   while (mPosInDataBuffer < numBytesInBuffer)
   {
     c = mDataBuffer[mPosInDataBuffer++];
-    if (c != nsCRT::LF && c != nsCRT::CR)
+    if (c != LF && c != CR)
       break;
   }
-  return (c == nsCRT::LF || c == nsCRT::CR) ? 0 : (int) c;
+  return (c == LF || c == CR) ? 0 : (int) c;
 }
 
 //////////////////////////////////////////////////////
@@ -442,8 +447,8 @@ nsBinHexDecoder::OnStartRequest(nsIRequest* request, nsISupports *aCtxt)
 
   NS_ENSURE_TRUE(mNextListener, NS_ERROR_FAILURE);
 
-  mDataBuffer = (char *) moz_malloc((sizeof(char) * nsIOService::gDefaultSegmentSize));
-  mOutgoingBuffer = (char *) moz_malloc((sizeof(char) * nsIOService::gDefaultSegmentSize));
+  mDataBuffer = (char *) nsMemory::Alloc((sizeof(char) * nsIOService::gDefaultSegmentSize));
+  mOutgoingBuffer = (char *) nsMemory::Alloc((sizeof(char) * nsIOService::gDefaultSegmentSize));
   if (!mDataBuffer || !mOutgoingBuffer) return NS_ERROR_FAILURE; // out of memory;
 
   // now we want to create a pipe which we'll use to write our converted data...

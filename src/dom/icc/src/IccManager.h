@@ -2,60 +2,48 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_IccManager_h
-#define mozilla_dom_IccManager_h
+#ifndef mozilla_dom_icc_IccManager_h
+#define mozilla_dom_icc_IccManager_h
 
-#include "mozilla/DOMEventTargetHelper.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsDOMEventTargetHelper.h"
+#include "nsIDOMIccManager.h"
 #include "nsIIccProvider.h"
-#include "nsTArrayHelpers.h"
 
 namespace mozilla {
 namespace dom {
+namespace icc {
 
-class IccListener;
-
-class IccManager MOZ_FINAL : public DOMEventTargetHelper
+class IccManager : public nsDOMEventTargetHelper
+                 , public nsIDOMMozIccManager
 {
+  /**
+   * Class IccManager doesn't actually inherit nsIIccListener. Instead, it owns
+   * an nsIIccListener derived instance mListener and passes it to
+   * nsIIccProvider. The onreceived events are first delivered to mListener and
+   * then forwarded to its owner, IccManager. See also bug 775997 comment #51.
+   */
+  class Listener;
+
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIDOMMOZICCMANAGER
+  NS_DECL_NSIICCLISTENER
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IccManager, DOMEventTargetHelper)
+  IccManager();
 
-  IccManager(nsPIDOMWindow* aWindow);
-  ~IccManager();
-
-  void
-  Shutdown();
-
-  nsresult
-  NotifyIccAdd(const nsAString& aIccId);
-
-  nsresult
-  NotifyIccRemove(const nsAString& aIccId);
-
-  IMPL_EVENT_HANDLER(iccdetected)
-  IMPL_EVENT_HANDLER(iccundetected)
-
-  void
-  GetIccIds(nsTArray<nsString>& aIccIds);
-
-  already_AddRefed<nsISupports>
-  GetIccById(const nsAString& aIccId) const;
-
-  nsPIDOMWindow*
-  GetParentObject() const { return GetOwner(); }
-
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  void Init(nsPIDOMWindow *aWindow);
+  void Shutdown();
 
 private:
-  nsTArray<nsRefPtr<IccListener>> mIccListeners;
+  nsCOMPtr<nsIIccProvider> mProvider;
+  nsRefPtr<Listener> mListener;
 };
 
+} // namespace icc
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_IccManager_h
+#endif // mozilla_dom_icc_IccManager_h

@@ -18,13 +18,22 @@ HTMLFrameSetElement::~HTMLFrameSetElement()
 }
 
 JSObject*
-HTMLFrameSetElement::WrapNode(JSContext *aCx)
+HTMLFrameSetElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLFrameSetElementBinding::Wrap(aCx, this);
+  return HTMLFrameSetElementBinding::Wrap(aCx, aScope, this);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLFrameSetElement, nsGenericHTMLElement,
-                            nsIDOMHTMLFrameSetElement)
+NS_IMPL_ADDREF_INHERITED(HTMLFrameSetElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLFrameSetElement, Element)
+
+// QueryInterface implementation for HTMLFrameSetElement
+NS_INTERFACE_TABLE_HEAD(HTMLFrameSetElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLFrameSetElement,
+                                nsIDOMHTMLFrameSetElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
+
 
 NS_IMPL_ELEMENT_CLONE(HTMLFrameSetElement)
 
@@ -121,6 +130,10 @@ HTMLFrameSetElement::GetRowSpec(int32_t *aNumValues,
 
     if (!mRowSpecs) {  // we may not have had an attr or had an empty attr
       mRowSpecs = new nsFramesetSpec[1];
+      if (!mRowSpecs) {
+        mNumRows = 0;
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
       mNumRows = 1;
       mRowSpecs[0].mUnit  = eFramesetUnit_Relative;
       mRowSpecs[0].mValue = 1;
@@ -151,6 +164,10 @@ HTMLFrameSetElement::GetColSpec(int32_t *aNumValues,
 
     if (!mColSpecs) {  // we may not have had an attr or had an empty attr
       mColSpecs = new nsFramesetSpec[1];
+      if (!mColSpecs) {
+        mNumCols = 0;
+        return NS_ERROR_OUT_OF_MEMORY;
+      }
       mNumCols = 1;
       mColSpecs[0].mUnit  = eFramesetUnit_Relative;
       mColSpecs[0].mValue = 1;
@@ -212,9 +229,9 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
     return NS_OK;
   }
 
-  static const char16_t sAster('*');
-  static const char16_t sPercent('%');
-  static const char16_t sComma(',');
+  static const PRUnichar sAster('*');
+  static const PRUnichar sPercent('%');
+  static const PRUnichar sComma(',');
 
   nsAutoString spec(aValue);
   // remove whitespace (Bug 33699) and quotation marks (bug 224598)
@@ -223,8 +240,7 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
   spec.Trim(",");
   
   // Count the commas. Don't count more than X commas (bug 576447).
-  static_assert(NS_MAX_FRAMESET_SPEC_COUNT * sizeof(nsFramesetSpec) < (1 << 30),
-                "Too many frameset specs allowed to allocate");
+  PR_STATIC_ASSERT(NS_MAX_FRAMESET_SPEC_COUNT * sizeof(nsFramesetSpec) < (1 << 30));
   int32_t commaX = spec.FindChar(sComma);
   int32_t count = 1;
   while (commaX != kNotFound && count < NS_MAX_FRAMESET_SPEC_COUNT) {
@@ -232,8 +248,7 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
     commaX = spec.FindChar(sComma, commaX + 1);
   }
 
-  static const fallible_t fallible = fallible_t();
-  nsFramesetSpec* specs = new (fallible) nsFramesetSpec[count];
+  nsFramesetSpec* specs = new nsFramesetSpec[count];
   if (!specs) {
     *aSpecs = nullptr;
     aNumSpecs = 0;
@@ -262,7 +277,7 @@ HTMLFrameSetElement::ParseRowCol(const nsAString & aValue,
     specs[i].mValue = 0;
     if (end > start) {
       int32_t numberEnd = end;
-      char16_t ch = spec.CharAt(numberEnd - 1);
+      PRUnichar ch = spec.CharAt(numberEnd - 1);
       if (sAster == ch) {
         specs[i].mUnit = eFramesetUnit_Relative;
         numberEnd--;
@@ -345,6 +360,33 @@ HTMLFrameSetElement::IsEventAttributeName(nsIAtom *aName)
 // nsGenericHTMLElement::GetOnError returns
 // already_AddRefed<EventHandlerNonNull> while other getters return
 // EventHandlerNonNull*, so allow passing in the type to use here.
+#define FORWARDED_EVENT_HELPER(name_, forwardto_, type_, getter_type_)         \
+  NS_IMETHODIMP                                                                \
+  HTMLFrameSetElement::GetOn##name_(JSContext *cx, JS::Value *vp)              \
+  {                                                                            \
+    getter_type_ h = forwardto_::GetOn##name_();                               \
+    vp->setObjectOrNull(h ? h->Callable().get() : nullptr);                    \
+    return NS_OK;                                                              \
+  }                                                                            \
+  NS_IMETHODIMP                                                                \
+  HTMLFrameSetElement::SetOn##name_(JSContext *cx, const JS::Value &v)         \
+  {                                                                            \
+    nsRefPtr<type_> handler;                                                   \
+    JSObject *callable;                                                        \
+    if (v.isObject() &&                                                        \
+        JS_ObjectIsCallable(cx, callable = &v.toObject())) {                   \
+      handler = new type_(callable);                                           \
+    }                                                                          \
+    ErrorResult rv;                                                            \
+    forwardto_::SetOn##name_(handler, rv);                                     \
+    return rv.ErrorCode();                                                     \
+  }
+#define FORWARDED_EVENT(name_, id_, type_, struct_)                            \
+  FORWARDED_EVENT_HELPER(name_, nsGenericHTMLElement, EventHandlerNonNull,     \
+                         EventHandlerNonNull*)
+#define ERROR_EVENT(name_, id_, type_, struct_)                                \
+  FORWARDED_EVENT_HELPER(name_, nsGenericHTMLElement,                          \
+                         EventHandlerNonNull, nsCOMPtr<EventHandlerNonNull>)
 #define WINDOW_EVENT_HELPER(name_, type_)                                      \
   type_*                                                                       \
   HTMLFrameSetElement::GetOn##name_()                                          \
@@ -358,7 +400,7 @@ HTMLFrameSetElement::IsEventAttributeName(nsIAtom *aName)
     return nullptr;                                                            \
   }                                                                            \
   void                                                                         \
-  HTMLFrameSetElement::SetOn##name_(type_* handler)                            \
+  HTMLFrameSetElement::SetOn##name_(type_* handler, ErrorResult& error)        \
   {                                                                            \
     nsPIDOMWindow* win = OwnerDoc()->GetInnerWindow();                         \
     if (!win) {                                                                \
@@ -367,16 +409,20 @@ HTMLFrameSetElement::IsEventAttributeName(nsIAtom *aName)
                                                                                \
     nsCOMPtr<nsISupports> supports = do_QueryInterface(win);                   \
     nsGlobalWindow* globalWin = nsGlobalWindow::FromSupports(supports);        \
-    return globalWin->SetOn##name_(handler);                                   \
-  }
+    return globalWin->SetOn##name_(handler, error);                            \
+  }                                                                            \
+  FORWARDED_EVENT_HELPER(name_, HTMLFrameSetElement, type_, type_*)
 #define WINDOW_EVENT(name_, id_, type_, struct_)                               \
   WINDOW_EVENT_HELPER(name_, EventHandlerNonNull)
 #define BEFOREUNLOAD_EVENT(name_, id_, type_, struct_)                         \
-  WINDOW_EVENT_HELPER(name_, OnBeforeUnloadEventHandlerNonNull)
-#include "mozilla/EventNameList.h" // IWYU pragma: keep
+  WINDOW_EVENT_HELPER(name_, BeforeUnloadEventHandlerNonNull)
+#include "nsEventNameList.h"
 #undef BEFOREUNLOAD_EVENT
 #undef WINDOW_EVENT
 #undef WINDOW_EVENT_HELPER
+#undef ERROR_EVENT
+#undef FORWARDED_EVENT
+#undef FORWARDED_EVENT_HELPER
 #undef EVENT
 
 } // namespace dom

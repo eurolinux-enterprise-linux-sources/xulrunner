@@ -10,11 +10,12 @@
 #include <map>
 #include <android/log.h>
 #include "nsSurfaceTexture.h"
+#include "gfxImageSurface.h"
 #include "AndroidBridge.h"
-#include "nsThreadUtils.h"
-#include "mozilla/gfx/Matrix.h"
 
 using namespace mozilla;
+
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "nsSurfaceTexture" , ## args)
 
 // UGH
 static std::map<int, nsSurfaceTexture*> sInstances;
@@ -27,12 +28,15 @@ public:
   {
   }
 
+  
   bool EnsureInitialized()
   {
     if (mInitialized)
       return true;
 
     JNIEnv* env = GetJNIForThread();
+    if (!env)
+      return false;
 
     AutoLocalJNIFrame jniFrame(env);
 
@@ -48,9 +52,11 @@ public:
   jobject CreateSurfaceTexture(GLuint aTexture)
   {
     if (!EnsureInitialized())
-      return nullptr;
+      return NULL;
 
     JNIEnv* env = GetJNIForThread();
+    if (!env)
+      return NULL;
 
     AutoLocalJNIFrame jniFrame(env);
 
@@ -60,6 +66,8 @@ public:
   void ReleaseSurfaceTexture(jobject aSurfaceTexture)
   {
     JNIEnv* env = GetJNIForThread();
+    if (!env)
+      return;
 
     env->DeleteGlobalRef(aSurfaceTexture);
   }
@@ -67,21 +75,25 @@ public:
   void UpdateTexImage(jobject aSurfaceTexture)
   {
     JNIEnv* env = GetJNIForThread();
+    if (!env)
+      return;
 
     AutoLocalJNIFrame jniFrame(env);
-    env->CallVoidMethod(aSurfaceTexture, jSurfaceTexture_updateTexImage);
+    env->CallObjectMethod(aSurfaceTexture, jSurfaceTexture_updateTexImage);
   }
 
-  bool GetTransformMatrix(jobject aSurfaceTexture, gfx::Matrix4x4& aMatrix)
+  bool GetTransformMatrix(jobject aSurfaceTexture, gfx3DMatrix& aMatrix)
   {
     JNIEnv* env = GetJNIForThread();
+    if (!env)
+      return false;
 
     AutoLocalJNIFrame jniFrame(env);
 
     jfloatArray jarray = env->NewFloatArray(16);
     env->CallVoidMethod(aSurfaceTexture, jSurfaceTexture_getTransformMatrix, jarray);
 
-    jfloat* array = env->GetFloatArrayElements(jarray, nullptr);
+    jfloat* array = env->GetFloatArrayElements(jarray, NULL);
 
     aMatrix._11 = array[0];
     aMatrix._12 = array[1];
@@ -102,7 +114,7 @@ public:
     aMatrix._42 = array[13];
     aMatrix._43 = array[14];
     aMatrix._44 = array[15];
-
+ 
     env->ReleaseFloatArrayElements(jarray, array, 0);
 
     return false;
@@ -124,13 +136,13 @@ nsSurfaceTexture::Create(GLuint aTexture)
   // Right now we only support creating this on the main thread because
   // of the JNIEnv assumptions in JNIHelper and elsewhere
   if (!NS_IsMainThread())
-    return nullptr;
+    return NULL;
 
   nsSurfaceTexture* st = new nsSurfaceTexture();
   if (!st->Init(aTexture)) {
-    printf_stderr("Failed to initialize nsSurfaceTexture");
+    LOG("Failed to initialize nsSurfaceTexture");
     delete st;
-    st = nullptr;
+    st = NULL;
   }
 
   return st;
@@ -143,7 +155,7 @@ nsSurfaceTexture::Find(int id)
 
   it = sInstances.find(id);
   if (it == sInstances.end())
-    return nullptr;
+    return NULL;
 
   return it->second;
 }
@@ -161,6 +173,8 @@ nsSurfaceTexture::Init(GLuint aTexture)
     return false;
 
   JNIEnv* env = GetJNIForThread();
+  if (!env)
+    return false;
 
   mSurfaceTexture = sJNIFunctions.CreateSurfaceTexture(aTexture);
   if (!mSurfaceTexture)
@@ -175,7 +189,7 @@ nsSurfaceTexture::Init(GLuint aTexture)
 }
 
 nsSurfaceTexture::nsSurfaceTexture()
-  : mSurfaceTexture(nullptr), mNativeWindow(nullptr)
+  : mSurfaceTexture(NULL), mNativeWindow(NULL)
 {
 }
 
@@ -183,20 +197,22 @@ nsSurfaceTexture::~nsSurfaceTexture()
 {
   sInstances.erase(mID);
 
-  mFrameAvailableCallback = nullptr;
+  mFrameAvailableCallback = NULL;
 
   if (mNativeWindow) {
     AndroidBridge::Bridge()->ReleaseNativeWindowForSurfaceTexture(mSurfaceTexture);
-    mNativeWindow = nullptr;
+    mNativeWindow = NULL;
   }
 
   JNIEnv* env = GetJNIForThread();
+  if (!env)
+    return;
 
-  if (mSurfaceTexture) {
-    mozilla::widget::android::GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
+  if (mSurfaceTexture && env) {
+    AndroidBridge::Bridge()->UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
 
     env->DeleteGlobalRef(mSurfaceTexture);
-    mSurfaceTexture = nullptr;
+    mSurfaceTexture = NULL;
   }
 }
 
@@ -213,7 +229,7 @@ nsSurfaceTexture::UpdateTexImage()
 }
 
 bool
-nsSurfaceTexture::GetTransformMatrix(gfx::Matrix4x4& aMatrix)
+nsSurfaceTexture::GetTransformMatrix(gfx3DMatrix& aMatrix)
 {
   return sJNIFunctions.GetTransformMatrix(mSurfaceTexture, aMatrix);
 }
@@ -222,9 +238,9 @@ void
 nsSurfaceTexture::SetFrameAvailableCallback(nsIRunnable* aRunnable)
 {
   if (aRunnable)
-    mozilla::widget::android::GeckoAppShell::RegisterSurfaceTextureFrameListener(mSurfaceTexture, mID);
+    AndroidBridge::Bridge()->RegisterSurfaceTextureFrameListener(mSurfaceTexture, mID);
   else
-    mozilla::widget::android::GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
+    AndroidBridge::Bridge()->UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
 
   mFrameAvailableCallback = aRunnable;
 }

@@ -68,12 +68,9 @@ function runNextTest() {
       }
     }
 
-    // If we closed a window, give it time to close
-    executeSoon(function() {
-      let currentTest = tests.shift();
-      info("prepping for " + currentTest.name);
-      waitForBrowserState(testState, currentTest);
-    });
+    let currentTest = tests.shift();
+    info("prepping for " + currentTest.name);
+    waitForBrowserState(testState, currentTest);
   }
   else {
     waitForBrowserState(stateBackup, finish);
@@ -131,8 +128,9 @@ function test_duplicateTab() {
     busyEventCount++;
   }
 
+  // duplicateTab is "synchronous" in tab creation. Since restoreHistory is called
+  // via setTimeout, newTab will be assigned before the SSWindowStateReady event
   function onSSWindowStateReady(aEvent) {
-    newTab = gBrowser.tabs[2];
     readyEventCount++;
     is(ss.getTabValue(newTab, "foo"), "bar");
     ss.setTabValue(newTab, "baz", "qux");
@@ -171,8 +169,9 @@ function test_undoCloseTab() {
     busyEventCount++;
   }
 
+  // undoCloseTab is "synchronous" in tab creation. Since restoreHistory is called
+  // via setTimeout, reopenedTab will be assigned before the SSWindowStateReady event
   function onSSWindowStateReady(aEvent) {
-    reopenedTab = gBrowser.tabs[1];
     readyEventCount++;
     is(ss.getTabValue(reopenedTab, "foo"), "bar");
     ss.setTabValue(reopenedTab, "baz", "qux");
@@ -287,8 +286,7 @@ function test_setBrowserState() {
 
   waitForBrowserState(lameMultiWindowState, function() {
     let checkedWindows = 0;
-    for (let id of Object.keys(windowEvents)) {
-      let winEvents = windowEvents[id];
+    for each (let [id, winEvents] in Iterator(windowEvents)) {
       is(winEvents.busyEventCount, 1,
          "[test_setBrowserState] window" + id + " busy event count correct");
       is(winEvents.readyEventCount, 1,
@@ -320,18 +318,15 @@ function test_undoCloseWindow() {
   waitForBrowserState(lameMultiWindowState, function() {
     // Close the window which isn't window
     newWindow.close();
-    // Now give it time to close
-    executeSoon(function() {
-      reopenedWindow = ss.undoCloseWindow(0);
-      reopenedWindow.addEventListener("SSWindowStateBusy", onSSWindowStateBusy, false);
-      reopenedWindow.addEventListener("SSWindowStateReady", onSSWindowStateReady, false);
+    reopenedWindow = ss.undoCloseWindow(0);
+    reopenedWindow.addEventListener("SSWindowStateBusy", onSSWindowStateBusy, false);
+    reopenedWindow.addEventListener("SSWindowStateReady", onSSWindowStateReady, false);
 
-      reopenedWindow.addEventListener("load", function() {
-        reopenedWindow.removeEventListener("load", arguments.callee, false);
+    reopenedWindow.addEventListener("load", function() {
+      reopenedWindow.removeEventListener("load", arguments.callee, false);
 
-        reopenedWindow.gBrowser.tabContainer.addEventListener("SSTabRestored", onSSTabRestored, false);
-      }, false);
-    });
+      reopenedWindow.gBrowser.tabContainer.addEventListener("SSTabRestored", onSSTabRestored, false);
+    }, false);
   });
 
   let busyEventCount = 0,
@@ -359,7 +354,6 @@ function test_undoCloseWindow() {
 
     reopenedWindow.close();
 
-    // Give it time to close
-    executeSoon(runNextTest);
+    runNextTest();
   }
 }

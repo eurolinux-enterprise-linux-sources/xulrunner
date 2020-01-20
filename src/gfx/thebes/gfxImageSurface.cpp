@@ -4,10 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "mozilla/MemoryReporting.h"
-#if defined(HAVE_POSIX_MEMALIGN)
 #include "gfxAlphaRecovery.h"
-#endif
 #include "gfxImageSurface.h"
 
 #include "cairo.h"
@@ -15,13 +12,12 @@
 #include "gfx2DGlue.h"
 #include <algorithm>
 
-using namespace mozilla;
 using namespace mozilla::gfx;
 
 gfxImageSurface::gfxImageSurface()
   : mSize(0, 0),
     mOwnsData(false),
-    mFormat(gfxImageFormat::Unknown),
+    mFormat(ImageFormatUnknown),
     mStride(0)
 {
 }
@@ -49,7 +45,7 @@ void
 gfxImageSurface::MakeInvalid()
 {
     mSize = gfxIntSize(-1, -1);
-    mData = nullptr;
+    mData = NULL;
     mStride = 0;
 }
 
@@ -68,7 +64,7 @@ gfxImageSurface::InitWithData(unsigned char *aData, const gfxIntSize& aSize,
 
     cairo_surface_t *surface =
         cairo_image_surface_create_for_data((unsigned char*)mData,
-                                            (cairo_format_t)(int)mFormat,
+                                            (cairo_format_t)mFormat,
                                             mSize.width,
                                             mSize.height,
                                             mStride);
@@ -137,7 +133,7 @@ gfxImageSurface::AllocateAndInit(long aStride, int32_t aMinimalAllocation,
 
     cairo_surface_t *surface =
         cairo_image_surface_create_for_data((unsigned char*)mData,
-                                            (cairo_format_t)(int)mFormat,
+                                            (cairo_format_t)mFormat,
                                             mSize.width,
                                             mSize.height,
                                             mStride);
@@ -180,15 +176,15 @@ gfxImageSurface::ComputeStride(const gfxIntSize& aSize, gfxImageFormat aFormat)
 {
     long stride;
 
-    if (aFormat == gfxImageFormat::ARGB32)
+    if (aFormat == ImageFormatARGB32)
         stride = aSize.width * 4;
-    else if (aFormat == gfxImageFormat::RGB24)
+    else if (aFormat == ImageFormatRGB24)
         stride = aSize.width * 4;
-    else if (aFormat == gfxImageFormat::RGB16_565)
+    else if (aFormat == ImageFormatRGB16_565)
         stride = aSize.width * 2;
-    else if (aFormat == gfxImageFormat::A8)
+    else if (aFormat == ImageFormatA8)
         stride = aSize.width;
-    else if (aFormat == gfxImageFormat::A1) {
+    else if (aFormat == ImageFormatA1) {
         stride = (aSize.width + 7) / 8;
     } else {
         NS_WARNING("Unknown format specified to gfxImageSurface!");
@@ -201,7 +197,7 @@ gfxImageSurface::ComputeStride(const gfxIntSize& aSize, gfxImageFormat aFormat)
 }
 
 size_t
-gfxImageSurface::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+gfxImageSurface::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
     size_t n = gfxASurface::SizeOfExcludingThis(aMallocSizeOf);
     if (mOwnsData) {
@@ -211,7 +207,7 @@ gfxImageSurface::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 }
 
 size_t
-gfxImageSurface::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+gfxImageSurface::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -241,13 +237,13 @@ CopyForStride(unsigned char* aDest, unsigned char* aSrc, const gfxIntSize& aSize
 
 // helper function for the CopyFrom methods
 static bool
-FormatsAreCompatible(gfxImageFormat a1, gfxImageFormat a2)
+FormatsAreCompatible(gfxASurface::gfxImageFormat a1, gfxASurface::gfxImageFormat a2)
 {
     if (a1 != a2 &&
-        !(a1 == gfxImageFormat::ARGB32 &&
-          a2 == gfxImageFormat::RGB24) &&
-        !(a1 == gfxImageFormat::RGB24 &&
-          a2 == gfxImageFormat::ARGB32)) {
+        !(a1 == gfxASurface::ImageFormatARGB32 &&
+          a2 == gfxASurface::ImageFormatRGB24) &&
+        !(a1 == gfxASurface::ImageFormatRGB24 &&
+          a2 == gfxASurface::ImageFormatARGB32)) {
         return false;
     }
 
@@ -295,72 +291,26 @@ gfxImageSurface::CopyFrom(gfxImageSurface *other)
     return true;
 }
 
-bool
-gfxImageSurface::CopyTo(SourceSurface *aSurface) {
-    mozilla::RefPtr<DataSourceSurface> data = aSurface->GetDataSurface();
-
-    if (!data) {
-        return false;
-    }
-
-    gfxIntSize size(data->GetSize().width, data->GetSize().height);
-    if (size != mSize) {
-        return false;
-    }
-
-    if (!FormatsAreCompatible(SurfaceFormatToImageFormat(aSurface->GetFormat()),
-                              mFormat)) {
-        return false;
-    }
-
-    CopyForStride(data->GetData(), mData, size, data->Stride(), mStride);
-
-    return true;
-}
-
-TemporaryRef<DataSourceSurface>
-gfxImageSurface::CopyToB8G8R8A8DataSourceSurface()
-{
-  RefPtr<DataSourceSurface> dataSurface =
-    Factory::CreateDataSourceSurface(IntSize(GetSize().width, GetSize().height),
-                                     SurfaceFormat::B8G8R8A8);
-  if (dataSurface) {
-    CopyTo(dataSurface);
-  }
-  return dataSurface.forget();
-}
-
 already_AddRefed<gfxSubimageSurface>
 gfxImageSurface::GetSubimage(const gfxRect& aRect)
 {
     gfxRect r(aRect);
     r.Round();
-    MOZ_ASSERT(gfxRect(0, 0, mSize.width, mSize.height).Contains(r));
-
-    gfxImageFormat format = Format();
-
     unsigned char* subData = Data() +
         (Stride() * (int)r.Y()) +
         (int)r.X() * gfxASurface::BytePerPixelFromFormat(Format());
 
-    if (format == gfxImageFormat::ARGB32 &&
-        GetOpaqueRect().Contains(aRect)) {
-        format = gfxImageFormat::RGB24;
-    }
-
     nsRefPtr<gfxSubimageSurface> image =
         new gfxSubimageSurface(this, subData,
-                               gfxIntSize((int)r.Width(), (int)r.Height()),
-                               format);
+                               gfxIntSize((int)r.Width(), (int)r.Height()));
 
     return image.forget();
 }
 
 gfxSubimageSurface::gfxSubimageSurface(gfxImageSurface* aParent,
                                        unsigned char* aData,
-                                       const gfxIntSize& aSize,
-                                       gfxImageFormat aFormat)
-  : gfxImageSurface(aData, aSize, aParent->Stride(), aFormat)
+                                       const gfxIntSize& aSize)
+  : gfxImageSurface(aData, aSize, aParent->Stride(), aParent->Format())
   , mParent(aParent)
 {
 }

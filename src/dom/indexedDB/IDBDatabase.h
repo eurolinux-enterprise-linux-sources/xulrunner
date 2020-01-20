@@ -7,27 +7,23 @@
 #ifndef mozilla_dom_indexeddb_idbdatabase_h__
 #define mozilla_dom_indexeddb_idbdatabase_h__
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
 #include "nsIDocument.h"
 #include "nsIFileStorage.h"
+#include "nsIIDBDatabase.h"
 #include "nsIOfflineStorage.h"
 
-#include "mozilla/Attributes.h"
-#include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/dom/IDBObjectStoreBinding.h"
-#include "mozilla/dom/IDBTransactionBinding.h"
-#include "mozilla/dom/quota/PersistenceType.h"
+#include "nsDOMEventTargetHelper.h"
 
 #include "mozilla/dom/indexedDB/FileManager.h"
-#include "mozilla/dom/indexedDB/IDBRequest.h"
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
 
 class nsIScriptContext;
 class nsPIDOMWindow;
 
 namespace mozilla {
-class EventChainPostVisitor;
 namespace dom {
 class ContentParent;
 namespace quota {
@@ -50,17 +46,18 @@ class IndexedDBDatabaseParent;
 struct ObjectStoreInfoGuts;
 
 class IDBDatabase : public IDBWrapperCache,
+                    public nsIIDBDatabase,
                     public nsIOfflineStorage
 {
   friend class AsyncConnectionHelper;
   friend class IndexedDatabaseManager;
-  friend class IndexedDBDatabaseParent;
   friend class IndexedDBDatabaseChild;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIIDBDATABASE
   NS_DECL_NSIFILESTORAGE
-  NS_DECL_NSIOFFLINESTORAGE
+  NS_DECL_NSIOFFLINESTORAGE_NOCLOSE
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
 
@@ -83,8 +80,7 @@ public:
   }
 
   // nsIDOMEventTarget
-  virtual nsresult PostHandleEvent(
-                     EventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   DatabaseInfo* Info() const
   {
@@ -160,84 +156,16 @@ public:
     return mContentParent;
   }
 
-  already_AddRefed<IDBObjectStore>
+  nsresult
   CreateObjectStoreInternal(IDBTransaction* aTransaction,
                             const ObjectStoreInfoGuts& aInfo,
-                            ErrorResult& aRv);
-
-  IDBFactory*
-  Factory() const
-  {
-    return mFactory;
-  }
-
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  // WebIDL
-  nsPIDOMWindow*
-  GetParentObject() const
-  {
-    return GetOwner();
-  }
-
-  void
-  GetName(nsString& aName) const
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-    aName.Assign(mName);
-  }
-
-  uint64_t
-  Version() const;
-
-  already_AddRefed<mozilla::dom::DOMStringList>
-  GetObjectStoreNames(ErrorResult& aRv) const;
-
-  already_AddRefed<IDBObjectStore>
-  CreateObjectStore(JSContext* aCx, const nsAString& aName,
-                    const IDBObjectStoreParameters& aOptionalParameters,
-                    ErrorResult& aRv);
-
-  void
-  DeleteObjectStore(const nsAString& name, ErrorResult& aRv);
-
-  already_AddRefed<indexedDB::IDBTransaction>
-  Transaction(const nsAString& aStoreName, IDBTransactionMode aMode,
-              ErrorResult& aRv)
-  {
-    Sequence<nsString> list;
-    list.AppendElement(aStoreName);
-    return Transaction(list, aMode, aRv);
-  }
-
-  already_AddRefed<indexedDB::IDBTransaction>
-  Transaction(const Sequence<nsString>& aStoreNames, IDBTransactionMode aMode,
-              ErrorResult& aRv);
-
-  IMPL_EVENT_HANDLER(abort)
-  IMPL_EVENT_HANDLER(error)
-  IMPL_EVENT_HANDLER(versionchange)
-
-  mozilla::dom::StorageType
-  Storage() const
-  {
-    return PersistenceTypeToStorage(mPersistenceType);
-  }
-
-  already_AddRefed<IDBRequest>
-  MozCreateFileHandle(const nsAString& aName, const Optional<nsAString>& aType,
-                      ErrorResult& aRv);
-
-  virtual void LastRelease() MOZ_OVERRIDE;
+                            IDBObjectStore** _retval);
 
 private:
-  IDBDatabase(IDBWrapperCache* aOwnerCache);
+  IDBDatabase();
   ~IDBDatabase();
 
   void OnUnlink();
-  void InvalidateInternal(bool aIsDead);
 
   // The factory must be kept alive when IndexedDB is used in multiple
   // processes. If it dies then the entire actor tree will be destroyed with it
@@ -249,7 +177,7 @@ private:
   // Set to a copy of the existing DatabaseInfo when starting a versionchange
   // transaction.
   nsRefPtr<DatabaseInfo> mPreviousDatabaseInfo;
-  nsCString mDatabaseId;
+  nsCOMPtr<nsIAtom> mDatabaseId;
   nsString mName;
   nsString mFilePath;
   nsCString mASCIIOrigin;

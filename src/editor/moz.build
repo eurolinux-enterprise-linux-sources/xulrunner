@@ -13,6 +13,5 @@ PARALLEL_DIRS += [
     'composer',
 ]
 
-EXTRA_JS_MODULES += [
-    'AsyncSpellCheckTestHelper.jsm',
-]
+MODULE = 'editor'
+

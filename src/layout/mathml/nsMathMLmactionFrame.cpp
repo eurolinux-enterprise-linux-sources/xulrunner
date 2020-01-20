@@ -3,18 +3,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsMathMLmactionFrame.h"
 #include "nsCOMPtr.h"
+#include "nsFrame.h"
 #include "nsPresContext.h"
-#include "nsNameSpaceManager.h"
+#include "nsStyleContext.h"
+#include "nsStyleConsts.h"
+#include "nsINameSpaceManager.h"
+
+#include "nsCSSRendering.h"
 #include "prprf.h"         // For PR_snprintf()
-#include "nsIDocShell.h"
+
+#include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIWebBrowserChrome.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsIDOMElement.h"
 #include "nsTextFragment.h"
-#include "nsIDOMEvent.h"
-#include "mozilla/gfx/2D.h"
+
+#include "nsMathMLmactionFrame.h"
+#include "nsAutoPtr.h"
+#include "nsStyleSet.h"
+#include "nsDisplayList.h"
 
 //
 // <maction> -- bind actions to a subexpression - implementation
@@ -131,7 +141,8 @@ nsMathMLmactionFrame::GetSelectedFrame()
     return mSelectedFrame;
   }
 
-  mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::selection_, value);
+  GetAttribute(mContent, mPresentationData.mstyle, nsGkAtoms::selection_,
+               value);
   if (!value.IsEmpty()) {
     nsresult errorCode;
     selection = value.ToInteger(&errorCode);
@@ -172,7 +183,7 @@ nsMathMLmactionFrame::GetSelectedFrame()
   return mSelectedFrame;
 }
 
-nsresult
+NS_IMETHODIMP
 nsMathMLmactionFrame::SetInitialChildList(ChildListID     aListID,
                                           nsFrameList&    aChildList)
 {
@@ -195,7 +206,7 @@ nsMathMLmactionFrame::SetInitialChildList(ChildListID     aListID,
   return rv;
 }
 
-nsresult
+NS_IMETHODIMP
 nsMathMLmactionFrame::AttributeChanged(int32_t  aNameSpaceID,
                                        nsIAtom* aAttribute,
                                        int32_t  aModType)
@@ -236,8 +247,8 @@ nsMathMLmactionFrame::AttributeChanged(int32_t  aNameSpaceID,
 // Event handlers 
 // ################################################################
 
-NS_IMPL_ISUPPORTS(nsMathMLmactionFrame::MouseListener,
-                  nsIDOMEventListener)
+NS_IMPL_ISUPPORTS1(nsMathMLmactionFrame::MouseListener,
+                   nsIDOMEventListener)
 
 
 // helper to show a msg on the status bar
@@ -245,14 +256,17 @@ NS_IMPL_ISUPPORTS(nsMathMLmactionFrame::MouseListener,
 void
 ShowStatus(nsPresContext* aPresContext, nsString& aStatusMsg)
 {
-  nsCOMPtr<nsIDocShellTreeItem> docShellItem(aPresContext->GetDocShell());
-  if (docShellItem) {
-    nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
-    docShellItem->GetTreeOwner(getter_AddRefs(treeOwner));
-    if (treeOwner) {
-      nsCOMPtr<nsIWebBrowserChrome> browserChrome(do_GetInterface(treeOwner));
-      if (browserChrome) {
-        browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_LINK, aStatusMsg.get());
+  nsCOMPtr<nsISupports> cont = aPresContext->GetContainer();
+  if (cont) {
+    nsCOMPtr<nsIDocShellTreeItem> docShellItem(do_QueryInterface(cont));
+    if (docShellItem) {
+      nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+      docShellItem->GetTreeOwner(getter_AddRefs(treeOwner));
+      if (treeOwner) {
+        nsCOMPtr<nsIWebBrowserChrome> browserChrome(do_GetInterface(treeOwner));
+        if (browserChrome) {
+          browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_LINK, aStatusMsg.get());
+        }
       }
     }
   }

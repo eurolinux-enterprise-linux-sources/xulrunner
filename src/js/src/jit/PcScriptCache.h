@@ -32,33 +32,18 @@ struct PcScriptCache
     uint64_t gcNumber;
 
     // List of cache entries.
-    mozilla::Array<PcScriptCacheEntry, Length> entries;
+    PcScriptCacheEntry entries[Length];
 
     void clear(uint64_t gcNumber) {
         for (uint32_t i = 0; i < Length; i++)
-            entries[i].returnAddress = nullptr;
+            entries[i].returnAddress = NULL;
         this->gcNumber = gcNumber;
     }
 
     // Get a value from the cache. May perform lazy allocation.
+    // Defined in PcScriptCache-inl.h.
     bool get(JSRuntime *rt, uint32_t hash, uint8_t *addr,
-             JSScript **scriptRes, jsbytecode **pcRes)
-    {
-        // If a GC occurred, lazily clear the cache now.
-        if (gcNumber != rt->gcNumber) {
-            clear(rt->gcNumber);
-            return false;
-        }
-
-        if (entries[hash].returnAddress != addr)
-            return false;
-
-        *scriptRes = entries[hash].script;
-        if (pcRes)
-            *pcRes = entries[hash].pc;
-
-        return true;
-    }
+             JSScript **scriptRes, jsbytecode **pcRes);
 
     void add(uint32_t hash, uint8_t *addr, jsbytecode *pc, JSScript *script) {
         entries[hash].returnAddress = addr;

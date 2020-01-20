@@ -6,7 +6,16 @@
 #ifndef nsAlgorithm_h___
 #define nsAlgorithm_h___
 
-#include "nsCharTraits.h"  // for |nsCharSourceTraits|, |nsCharSinkTraits|
+#ifndef nsCharTraits_h___
+#include "nsCharTraits.h"
+  // for |nsCharSourceTraits|, |nsCharSinkTraits|
+#endif
+
+#ifndef nsDebug_h___
+#include "nsDebug.h"
+  // for NS_ASSERTION
+#endif
+
 
 template <class T>
 inline
@@ -35,6 +44,17 @@ XPCOM_MAX( const T& a, const T& b )
   {
     return a > b ? a : b;
   }
+
+#if defined(_MSC_VER) && (_MSC_VER < 1600)
+namespace std {
+inline
+long long
+abs( const long long& a )
+{
+  return a < 0 ? -a : a;
+}
+}
+#endif
 
 namespace mozilla {
 

@@ -17,32 +17,31 @@
 #include "nsString.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIScriptSecurityManager.h"
-#include "pratom.h"
 
 NS_IMPL_CLASSINFO(nsSystemPrincipal, nullptr,
                   nsIClassInfo::SINGLETON | nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_SYSTEMPRINCIPAL_CID)
-NS_IMPL_QUERY_INTERFACE_CI(nsSystemPrincipal,
-                           nsIPrincipal,
-                           nsISerializable)
-NS_IMPL_CI_INTERFACE_GETTER(nsSystemPrincipal,
+NS_IMPL_QUERY_INTERFACE2_CI(nsSystemPrincipal,
                             nsIPrincipal,
                             nsISerializable)
+NS_IMPL_CI_INTERFACE_GETTER2(nsSystemPrincipal,
+                             nsIPrincipal,
+                             nsISerializable)
 
-NS_IMETHODIMP_(MozExternalRefCountType)
+NS_IMETHODIMP_(nsrefcnt) 
 nsSystemPrincipal::AddRef()
 {
   NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
-  nsrefcnt count = ++refcount;
+  nsrefcnt count = PR_ATOMIC_INCREMENT(&refcount);
   NS_LOG_ADDREF(this, count, "nsSystemPrincipal", sizeof(*this));
   return count;
 }
 
-NS_IMETHODIMP_(MozExternalRefCountType)
+NS_IMETHODIMP_(nsrefcnt)
 nsSystemPrincipal::Release()
 {
   NS_PRECONDITION(0 != refcount, "dup release");
-  nsrefcnt count = --refcount;
+  nsrefcnt count = PR_ATOMIC_DECREMENT(&refcount);
   NS_LOG_RELEASE(this, count, "nsSystemPrincipal");
   if (count == 0) {
     delete this;
@@ -79,7 +78,7 @@ nsSystemPrincipal::Equals(nsIPrincipal *other, bool *result)
 }
 
 NS_IMETHODIMP
-nsSystemPrincipal::EqualsConsideringDomain(nsIPrincipal *other, bool *result)
+nsSystemPrincipal::EqualsIgnoringDomain(nsIPrincipal *other, bool *result)
 {
     return Equals(other, result);
 }
@@ -92,7 +91,7 @@ nsSystemPrincipal::Subsumes(nsIPrincipal *other, bool *result)
 }
 
 NS_IMETHODIMP
-nsSystemPrincipal::SubsumesConsideringDomain(nsIPrincipal *other, bool *result)
+nsSystemPrincipal::SubsumesIgnoringDomain(nsIPrincipal *other, bool *result)
 {
     *result = true;
     return NS_OK;
@@ -153,10 +152,22 @@ nsSystemPrincipal::SetDomain(nsIURI* aDomain)
 }
 
 NS_IMETHODIMP
-nsSystemPrincipal::GetJarPrefix(nsACString& aJarPrefix)
+nsSystemPrincipal::GetSecurityPolicy(void** aSecurityPolicy)
 {
-  aJarPrefix.Truncate();
-  return NS_OK;
+    *aSecurityPolicy = nullptr;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSystemPrincipal::SetSecurityPolicy(void* aSecurityPolicy)
+{
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSystemPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
+{
+  return GetOrigin(getter_Copies(aExtendedOrigin));
 }
 
 NS_IMETHODIMP

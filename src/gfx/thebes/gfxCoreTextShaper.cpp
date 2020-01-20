@@ -3,19 +3,37 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
+
+#include "nsAlgorithm.h"
+#include "nsString.h"
+#include "nsBidiUtils.h"
+
+#include "gfxTypes.h"
+
+#include "nsPromiseFlatString.h"
+
+#include "gfxContext.h"
+#include "gfxPlatform.h"
+#include "gfxPlatformMac.h"
 #include "gfxCoreTextShaper.h"
 #include "gfxMacFont.h"
-#include "gfxFontUtils.h"
-#include "mozilla/gfx/2D.h"
 
+#include "gfxFontTest.h"
+#include "gfxFontUtils.h"
+
+#include "gfxQuartzSurface.h"
+#include "gfxMacPlatformFontList.h"
+#include "gfxUserFontSet.h"
+
+#include "nsUnicodeRange.h"
 #include <algorithm>
 
 using namespace mozilla;
 
 // standard font descriptors that we construct the first time they're needed
-CTFontDescriptorRef gfxCoreTextShaper::sDefaultFeaturesDescriptor = nullptr;
-CTFontDescriptorRef gfxCoreTextShaper::sDisableLigaturesDescriptor = nullptr;
+CTFontDescriptorRef gfxCoreTextShaper::sDefaultFeaturesDescriptor = NULL;
+CTFontDescriptorRef gfxCoreTextShaper::sDisableLigaturesDescriptor = NULL;
 
 gfxCoreTextShaper::gfxCoreTextShaper(gfxMacFont *aFont)
     : gfxFontShaper(aFont)
@@ -23,7 +41,7 @@ gfxCoreTextShaper::gfxCoreTextShaper(gfxMacFont *aFont)
     // Create our CTFontRef
     mCTFont = ::CTFontCreateWithGraphicsFont(aFont->GetCGFontRef(),
                                              aFont->GetAdjustedSize(),
-                                             nullptr,
+                                             NULL,
                                              GetDefaultFeaturesDescriptor());
 
     // Set up the default attribute dictionary that we will need each time we create a CFAttributedString
@@ -47,7 +65,7 @@ gfxCoreTextShaper::~gfxCoreTextShaper()
 
 bool
 gfxCoreTextShaper::ShapeText(gfxContext      *aContext,
-                             const char16_t *aText,
+                             const PRUnichar *aText,
                              uint32_t         aOffset,
                              uint32_t         aLength,
                              int32_t          aScript,
@@ -88,15 +106,15 @@ gfxCoreTextShaper::ShapeText(gfxContext      *aContext,
         ::CFStringAppendCharacters(mutableString,
                                    isRightToLeft ? beginRTL : beginLTR,
                                    startOffset);
-        ::CFStringAppendCharacters(mutableString, reinterpret_cast<const UniChar*>(aText), length);
+        ::CFStringAppendCharacters(mutableString, aText, length);
         ::CFStringAppendCharacters(mutableString,
                                    endBidiWrap, mozilla::ArrayLength(endBidiWrap));
         stringObj = mutableString;
     } else {
         startOffset = 0;
         stringObj = ::CFStringCreateWithCharactersNoCopy(kCFAllocatorDefault,
-                                                         reinterpret_cast<const UniChar*>(aText),
-                                                         length, kCFAllocatorNull);
+                                                         aText, length,
+                                                         kCFAllocatorNull);
     }
 
     CFDictionaryRef attrObj;
@@ -196,9 +214,9 @@ gfxCoreTextShaper::SetGlyphsFromRun(gfxShapedText *aShapedText,
     nsAutoArrayPtr<CGGlyph> glyphsArray;
     nsAutoArrayPtr<CGPoint> positionsArray;
     nsAutoArrayPtr<CFIndex> glyphToCharArray;
-    const CGGlyph* glyphs = nullptr;
-    const CGPoint* positions = nullptr;
-    const CFIndex* glyphToChar = nullptr;
+    const CGGlyph* glyphs = NULL;
+    const CGPoint* positions = NULL;
+    const CFIndex* glyphToChar = NULL;
 
     // Testing indicates that CTRunGetGlyphsPtr (almost?) always succeeds,
     // and so allocating a new array and copying data with CTRunGetGlyphs
@@ -242,7 +260,7 @@ gfxCoreTextShaper::SetGlyphsFromRun(gfxShapedText *aShapedText,
     }
 
     double runWidth = ::CTRunGetTypographicBounds(aCTRun, ::CFRangeMake(0, 0),
-                                                  nullptr, nullptr, nullptr);
+                                                  NULL, NULL, NULL);
 
     nsAutoTArray<gfxShapedText::DetailedGlyph,1> detailedGlyphs;
     gfxShapedText::CompressedGlyph g;
@@ -260,7 +278,7 @@ gfxCoreTextShaper::SetGlyphsFromRun(gfxShapedText *aShapedText,
     // The charToGlyph array is indexed by char position within the stringRange of the glyph run.
 
     static const int32_t NO_GLYPH = -1;
-    AutoFallibleTArray<int32_t,SMALL_GLYPH_RUN> charToGlyphArray;
+    nsAutoTArray<int32_t,SMALL_GLYPH_RUN> charToGlyphArray;
     if (!charToGlyphArray.SetLength(stringRange.length)) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -489,15 +507,13 @@ gfxCoreTextShaper::SetGlyphsFromRun(gfxShapedText *aShapedText,
     return NS_OK;
 }
 
-#undef SMALL_GLYPH_RUN
-
 // Construct the font attribute descriptor that we'll apply by default when creating a CTFontRef.
 // This will turn off line-edge swashes by default, because we don't know the actual line breaks
 // when doing glyph shaping.
 void
 gfxCoreTextShaper::CreateDefaultFeaturesDescriptor()
 {
-    if (sDefaultFeaturesDescriptor != nullptr) {
+    if (sDefaultFeaturesDescriptor != NULL) {
         return;
     }
 
@@ -570,7 +586,7 @@ gfxCoreTextShaper::CreateDefaultFeaturesDescriptor()
 CTFontRef
 gfxCoreTextShaper::CreateCTFontWithDisabledLigatures(CGFloat aSize)
 {
-    if (sDisableLigaturesDescriptor == nullptr) {
+    if (sDisableLigaturesDescriptor == NULL) {
         // initialize cached descriptor to turn off the Common Ligatures feature
         SInt16 val = kLigaturesType;
         CFNumberRef ligaturesType =
@@ -620,19 +636,19 @@ gfxCoreTextShaper::CreateCTFontWithDisabledLigatures(CGFloat aSize)
     }
 
     gfxMacFont *f = static_cast<gfxMacFont*>(mFont);
-    return ::CTFontCreateWithGraphicsFont(f->GetCGFontRef(), aSize, nullptr,
+    return ::CTFontCreateWithGraphicsFont(f->GetCGFontRef(), aSize, NULL,
                                           sDisableLigaturesDescriptor);
 }
 
 void
 gfxCoreTextShaper::Shutdown() // [static]
 {
-    if (sDisableLigaturesDescriptor != nullptr) {
+    if (sDisableLigaturesDescriptor != NULL) {
         ::CFRelease(sDisableLigaturesDescriptor);
-        sDisableLigaturesDescriptor = nullptr;
+        sDisableLigaturesDescriptor = NULL;
     }        
-    if (sDefaultFeaturesDescriptor != nullptr) {
+    if (sDefaultFeaturesDescriptor != NULL) {
         ::CFRelease(sDefaultFeaturesDescriptor);
-        sDefaultFeaturesDescriptor = nullptr;
+        sDefaultFeaturesDescriptor = NULL;
     }
 }

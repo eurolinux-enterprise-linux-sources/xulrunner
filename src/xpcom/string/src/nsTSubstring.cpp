@@ -3,10 +3,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "mozilla/MemoryReporting.h"
-#include "double-conversion.h"
-
-using double_conversion::DoubleToStringConverter;
+#include "prdtoa.h"
 
 #ifdef XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
 nsTSubstring_CharT::nsTSubstring_CharT( char_type *data, size_type length,
@@ -130,8 +127,7 @@ nsTSubstring_CharT::MutatePrep( size_type capacity, char_type** oldData, uint32_
         // make use of our F_OWNED or F_FIXED buffers because they are not
         // large enough.
 
-        nsStringBuffer* newHdr =
-          nsStringBuffer::Alloc(storageSize).take();
+        nsStringBuffer* newHdr = nsStringBuffer::Alloc(storageSize).get();
         if (!newHdr)
           return false; // we are still in a consistent state
 
@@ -273,7 +269,7 @@ void
 nsTSubstring_CharT::Assign( char_type c )
   {
     if (!ReplacePrep(0, mLength, 1))
-      NS_ABORT_OOM(mLength);
+      NS_RUNTIMEABORT("OOM");
 
     *mData = c;
   }
@@ -289,23 +285,16 @@ nsTSubstring_CharT::Assign( char_type c, const fallible_t& )
   }
 
 void
-nsTSubstring_CharT::Assign( const char_type* data )
-  {
-    if (!Assign(data, size_type(-1), fallible_t()))
-      NS_ABORT_OOM(char_traits::length(data));
-  }
-
-void
 nsTSubstring_CharT::Assign( const char_type* data, size_type length )
   {
     if (!Assign(data, length, fallible_t()))
-      NS_ABORT_OOM(length);
+      NS_RUNTIMEABORT("OOM");
   }
 
 bool
 nsTSubstring_CharT::Assign( const char_type* data, size_type length, const fallible_t& )
   {
-    if (!data || length == 0)
+    if (!data)
       {
         Truncate();
         return true;
@@ -330,7 +319,7 @@ void
 nsTSubstring_CharT::AssignASCII( const char* data, size_type length )
   {
     if (!AssignASCII(data, length, fallible_t()))
-      NS_ABORT_OOM(length);
+      NS_RUNTIMEABORT("OOM");
   }
 
 bool
@@ -353,19 +342,10 @@ nsTSubstring_CharT::AssignASCII( const char* data, size_type length, const falli
   }
 
 void
-nsTSubstring_CharT::AssignLiteral( const char_type* data, size_type length )
-  {
-    ::ReleaseData(mData, mFlags);
-    mData = const_cast<char_type*>(data);
-    mLength = length;
-    SetDataFlags(F_TERMINATED | F_LITERAL);
-  }
-
-void
 nsTSubstring_CharT::Assign( const self_type& str )
 {
   if (!Assign(str, fallible_t()))
-    NS_ABORT_OOM(str.Length());
+    NS_RUNTIMEABORT("OOM");
 }
 
 bool
@@ -401,13 +381,6 @@ nsTSubstring_CharT::Assign( const self_type& str, const fallible_t& )
         nsStringBuffer::FromData(mData)->AddRef();
         return true;
       }
-    else if (str.mFlags & F_LITERAL)
-      {
-        NS_ABORT_IF_FALSE(str.mFlags & F_TERMINATED, "Unterminated literal");
-
-        AssignLiteral(str.mData, str.mLength);
-        return true;
-      }
 
     // else, treat this like an ordinary assignment.
     return Assign(str.Data(), str.Length(), fallible_t());
@@ -417,7 +390,7 @@ void
 nsTSubstring_CharT::Assign( const substring_tuple_type& tuple )
   {
     if (!Assign(tuple, fallible_t()))
-      NS_ABORT_OOM(tuple.Length());
+      NS_RUNTIMEABORT("OOM");
   }
 
 bool
@@ -484,30 +457,9 @@ nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, char_type
       mData[cutStart] = c;
   }
 
-bool
-nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, char_type c, const mozilla::fallible_t& )
-  {
-    cutStart = XPCOM_MIN(cutStart, Length());
-
-    if (!ReplacePrep(cutStart, cutLength, 1))
-      return false;
-
-    mData[cutStart] = c;
-
-    return true;
-  }
 
 void
 nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const char_type* data, size_type length )
-  {
-    if (!Replace(cutStart, cutLength, data, length, mozilla::fallible_t()))
-      {
-        NS_ABORT_OOM(Length() - cutLength + 1);
-      }
-  }
-
-bool
-nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const char_type* data, size_type length, const mozilla::fallible_t& )
   {
       // unfortunately, some callers pass null :-(
     if (!data)
@@ -522,20 +474,15 @@ nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const cha
         if (IsDependentOn(data, data + length))
           {
             nsTAutoString_CharT temp(data, length);
-            return Replace(cutStart, cutLength, temp, mozilla::fallible_t());
+            Replace(cutStart, cutLength, temp);
+            return;
           }
       }
 
     cutStart = XPCOM_MIN(cutStart, Length());
 
-    bool ok = ReplacePrep(cutStart, cutLength, length);
-    if (!ok)
-      return false;
-
-    if (length > 0)
+    if (ReplacePrep(cutStart, cutLength, length) && length > 0)
       char_traits::copy(mData + cutStart, data, length);
-
-    return true;
   }
 
 void
@@ -543,7 +490,7 @@ nsTSubstring_CharT::ReplaceASCII( index_type cutStart, size_type cutLength, cons
   {
     if (length == size_type(-1))
       length = strlen(data);
-
+    
     // A Unicode string can't depend on an ASCII string buffer,
     // so this dependence check only applies to CStrings.
 #ifdef CharT_is_char
@@ -580,21 +527,10 @@ nsTSubstring_CharT::Replace( index_type cutStart, size_type cutLength, const sub
   }
 
 void
-nsTSubstring_CharT::ReplaceLiteral( index_type cutStart, size_type cutLength, const char_type* data, size_type length )
-  {
-    cutStart = XPCOM_MIN(cutStart, Length());
-
-    if (!cutStart && cutLength == Length())
-      AssignLiteral(data, length);
-    else if (ReplacePrep(cutStart, cutLength, length) && length > 0)
-      char_traits::copy(mData + cutStart, data, length);
-  }
-
-void
 nsTSubstring_CharT::SetCapacity( size_type capacity )
   {
     if (!SetCapacity(capacity, fallible_t()))
-      NS_ABORT_OOM(capacity);
+      NS_RUNTIMEABORT("OOM");
   }
 
 bool
@@ -765,7 +701,7 @@ nsTSubstring_CharT::StripChar( char_type aChar, int32_t aOffset )
       return;
 
     if (!EnsureMutable()) // XXX do this lazily?
-      NS_ABORT_OOM(mLength);
+      NS_RUNTIMEABORT("OOM");
 
     // XXX(darin): this code should defer writing until necessary.
 
@@ -790,7 +726,7 @@ nsTSubstring_CharT::StripChars( const char_type* aChars, uint32_t aOffset )
       return;
 
     if (!EnsureMutable()) // XXX do this lazily?
-      NS_ABORT_OOM(mLength);
+      NS_RUNTIMEABORT("OOM");
 
     // XXX(darin): this code should defer writing until necessary.
 
@@ -846,99 +782,108 @@ void nsTSubstring_CharT::AppendPrintf( const char* format, va_list ap )
       NS_RUNTIMEABORT("Allocation or other failure in PR_vsxprintf");
   }
 
-/* hack to make sure we define FormatWithoutTrailingZeros only once */
+/* hack to make sure we define Modified_cnvtf only once */
 #ifdef CharT_is_PRUnichar
-// Returns the length of the formatted aDouble in buf.
-static int
-FormatWithoutTrailingZeros(char (& buf)[40], double aDouble,
-                           int precision)
+/**
+ * This is a copy of |PR_cnvtf| with a bug fixed.  (The second argument
+ * of PR_dtoa is 2 rather than 1.)
+ *
+ * XXX(darin): if this is the right thing, then why wasn't it fixed in NSPR?!?
+ */
+static void 
+Modified_cnvtf(char (& buf)[40], int prcsn, double fval)
 {
-  static const DoubleToStringConverter converter(DoubleToStringConverter::UNIQUE_ZERO |
-                                                 DoubleToStringConverter::EMIT_POSITIVE_EXPONENT_SIGN,
-                                                 "Infinity",
-                                                 "NaN",
-                                                 'e',
-                                                 -6, 21,
-                                                 6, 1);
-  double_conversion::StringBuilder builder(buf, sizeof(buf));
-  bool exponential_notation = false;
-  converter.ToPrecision(aDouble, precision, &exponential_notation, &builder);
-  int length = builder.position();
-  char* formattedDouble = builder.Finalize();
+  int decpt, sign, numdigits;
+  char num[40];
+  char *nump;
+  char *bufp = buf;
+  char *endnum;
 
-  // If we have a shorter string than precision, it means we have a special
-  // value (NaN or Infinity).  All other numbers will be formatted with at
-  // least precision digits.
-  if (length <= precision) {
-    return length;
+  if (PR_dtoa(fval, 2, prcsn, &decpt, &sign, &endnum, num, sizeof(num))
+      == PR_FAILURE) {
+    buf[0] = '\0';
+    return;
   }
-    
-  char* end = formattedDouble + length;
-  char* decimalPoint = strchr(buf, '.');
-  // No trailing zeros to remove.
-  if (decimalPoint == nullptr) {
-    return length;
+  numdigits = endnum - num;
+  nump = num;
+
+  /*
+   * The NSPR code had a fancy way of checking that we weren't dealing
+   * with -0.0 or -NaN, but I'll just use < instead.
+   * XXX Should we check !isnan(fval) as well?  Is it portable?  We
+   * probably don't need to bother since NAN isn't portable.
+   */
+  if (sign && fval < 0.0f) {
+    *bufp++ = '-';
   }
 
-  if (MOZ_UNLIKELY(exponential_notation)) {
-    // We need to check for cases like 1.00000e-10 (yes, this is
-    // disgusting).
-    char* exponent = end - 1;
-    for ( ; ; --exponent) {
-      if (*exponent == 'e') {
-        break;
-      }
-    }
-    char* zerosBeforeExponent = exponent - 1;
-    for ( ; zerosBeforeExponent != decimalPoint; --zerosBeforeExponent) {
-      if (*zerosBeforeExponent != '0') {
-        break;
-      }
-    }
-    if (zerosBeforeExponent == decimalPoint) {
-      --zerosBeforeExponent;
-    }
-    // Slide the exponent to the left over the trailing zeros.  Don't
-    // worry about copying the trailing NUL character.
-    size_t exponentSize = end - exponent;
-    memmove(zerosBeforeExponent + 1, exponent, exponentSize);
-    length -= exponent - (zerosBeforeExponent + 1);
-  } else {
-    char* trailingZeros = end - 1;
-    for ( ; trailingZeros != decimalPoint; --trailingZeros) {
-      if (*trailingZeros != '0') {
-        break;
-      }
-    }
-    if (trailingZeros == decimalPoint) {
-      --trailingZeros;
-    }
-    length -= end - (trailingZeros + 1);
+  if (decpt == 9999) {
+    while ((*bufp++ = *nump++) != 0) {} /* nothing to execute */
+    return;
   }
 
-  return length;
+  if (decpt > (prcsn+1) || decpt < -(prcsn-1) || decpt < -5) {
+    *bufp++ = *nump++;
+    if (numdigits != 1) {
+      *bufp++ = '.';
+    }
+
+    while (*nump != '\0') {
+      *bufp++ = *nump++;
+    }
+    *bufp++ = 'e';
+    PR_snprintf(bufp, sizeof(num) - (bufp - buf), "%+d", decpt-1);
+  }
+  else if (decpt >= 0) {
+    if (decpt == 0) {
+      *bufp++ = '0';
+    }
+    else {
+      while (decpt--) {
+        if (*nump != '\0') {
+          *bufp++ = *nump++;
+        }
+        else {
+          *bufp++ = '0';
+        }
+      }
+    }
+    if (*nump != '\0') {
+      *bufp++ = '.';
+      while (*nump != '\0') {
+        *bufp++ = *nump++;
+      }
+    }
+    *bufp++ = '\0';
+  }
+  else if (decpt < 0) {
+    *bufp++ = '0';
+    *bufp++ = '.';
+    while (decpt++) {
+      *bufp++ = '0';
+    }
+
+    while (*nump != '\0') {
+      *bufp++ = *nump++;
+    }
+    *bufp++ = '\0';
+  }
 }
 #endif /* CharT_is_PRUnichar */
 
 void
-nsTSubstring_CharT::AppendFloat( float aFloat )
+nsTSubstring_CharT::DoAppendFloat( double aFloat, int digits )
 {
   char buf[40];
-  int length = FormatWithoutTrailingZeros(buf, aFloat, 6);
-  AppendASCII(buf, length);
-}
-
-void
-nsTSubstring_CharT::AppendFloat( double aFloat )
-{
-  char buf[40];
-  int length = FormatWithoutTrailingZeros(buf, aFloat, 15);
-  AppendASCII(buf, length);
+  // Use Modified_cnvtf, which is locale-insensitive, instead of the
+  // locale-sensitive PR_snprintf or sprintf(3)
+  Modified_cnvtf(buf, digits, aFloat);
+  AppendASCII(buf);
 }
 
 size_t
 nsTSubstring_CharT::SizeOfExcludingThisMustBeUnshared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   if (mFlags & F_SHARED) {
     return nsStringBuffer::FromData(mData)->
@@ -961,7 +906,7 @@ nsTSubstring_CharT::SizeOfExcludingThisMustBeUnshared(
 
 size_t
 nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   // This is identical to SizeOfExcludingThisMustBeUnshared except for the
   // F_SHARED case.
@@ -977,7 +922,7 @@ nsTSubstring_CharT::SizeOfExcludingThisIfUnshared(
 
 size_t
 nsTSubstring_CharT::SizeOfExcludingThisEvenIfShared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   // This is identical to SizeOfExcludingThisMustBeUnshared except for the
   // F_SHARED case.
@@ -993,21 +938,21 @@ nsTSubstring_CharT::SizeOfExcludingThisEvenIfShared(
 
 size_t
 nsTSubstring_CharT::SizeOfIncludingThisMustBeUnshared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   return mallocSizeOf(this) + SizeOfExcludingThisMustBeUnshared(mallocSizeOf);
 }
 
 size_t
 nsTSubstring_CharT::SizeOfIncludingThisIfUnshared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   return mallocSizeOf(this) + SizeOfExcludingThisIfUnshared(mallocSizeOf);
 }
 
 size_t
 nsTSubstring_CharT::SizeOfIncludingThisEvenIfShared(
-    mozilla::MallocSizeOf mallocSizeOf) const
+    nsMallocSizeOfFun mallocSizeOf) const
 {
   return mallocSizeOf(this) + SizeOfExcludingThisEvenIfShared(mallocSizeOf);
 }

@@ -12,8 +12,6 @@
 #include "nsError.h"
 #include "nsDisplayList.h"
 #include "FrameLayerBuilder.h"
-#include "nsSVGEffects.h"
-#include "imgIContainer.h"
 
 namespace mozilla {
 namespace css {
@@ -73,6 +71,10 @@ void
 ImageLoader::AssociateRequestToFrame(imgIRequest* aRequest,
                                      nsIFrame* aFrame)
 {
+  MOZ_ASSERT(mRequestToFrameMap.IsInitialized() &&
+             mFrameToRequestMap.IsInitialized() &&
+             mImages.IsInitialized());
+
   nsCOMPtr<imgINotificationObserver> observer;
   aRequest->GetNotificationObserver(getter_AddRefs(observer));
   if (!observer) {
@@ -169,6 +171,10 @@ ImageLoader::DisassociateRequestFromFrame(imgIRequest* aRequest,
   FrameSet* frameSet = nullptr;
   RequestSet* requestSet = nullptr;
 
+  MOZ_ASSERT(mRequestToFrameMap.IsInitialized() &&
+             mFrameToRequestMap.IsInitialized() &&
+             mImages.IsInitialized());
+
 #ifdef DEBUG
   {
     nsCOMPtr<imgINotificationObserver> observer;
@@ -259,7 +265,6 @@ ImageLoader::LoadImage(nsIURI* aURI, nsIPrincipal* aOriginPrincipal,
   nsRefPtr<imgRequestProxy> request;
   nsContentUtils::LoadImage(aURI, mDocument, aOriginPrincipal, aReferrer,
                             nullptr, nsIRequest::LOAD_NORMAL,
-                            NS_LITERAL_STRING("css"),
                             getter_AddRefs(request));
 
   if (!request) {
@@ -323,13 +328,7 @@ void InvalidateImagesCallback(nsIFrame* aFrame,
   }
 
   aItem->Invalidate();
-
-  // Update ancestor rendering observers (-moz-element etc)
-  nsIFrame *f = aFrame;
-  while (f && !f->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
-    nsSVGEffects::InvalidateDirectRenderingObservers(f);
-    f = nsLayoutUtils::GetCrossDocParentFrame(f);
-  }
+  aFrame->SchedulePaint();
 }
 
 void
@@ -350,7 +349,6 @@ ImageLoader::DoRedraw(FrameSet* aFrameSet)
         frame->InvalidateFrame();
       } else {
         FrameLayerBuilder::IterateRetainedDataFor(frame, InvalidateImagesCallback);
-        frame->SchedulePaint();
       }
     }
   }

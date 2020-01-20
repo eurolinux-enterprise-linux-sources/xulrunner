@@ -14,7 +14,7 @@ function test() {
   function doTestWhenReady(aIsZoomedWindow, aWindow, aCallback) {
     // Need to wait on two things, the ordering of which is not guaranteed:
     // (1) the page load, and (2) FullZoom's update to the new page's zoom
-    // level.  FullZoom broadcasts "browser-fullZoom:location-change" when its
+    // level.  FullZoom broadcasts "browser-fullZoom:locationChange" when its
     // update is done.  (See bug 856366 for details.)
 
     let n = 0;
@@ -26,11 +26,12 @@ function test() {
         doTest(aIsZoomedWindow, aWindow, aCallback);
     }, true);
 
-    Services.obs.addObserver(function onLocationChange(subj, topic, data) {
+    let topic = "browser-fullZoom:locationChange";
+    Services.obs.addObserver(function onLocationChange() {
       Services.obs.removeObserver(onLocationChange, topic);
       if (++n == 2)
         doTest(aIsZoomedWindow, aWindow, aCallback);
-    }, "browser-fullZoom:location-change", false);
+    }, topic, false);
 
     browser.loadURI("about:blank");
   }
@@ -55,20 +56,24 @@ function test() {
     windowsToReset.forEach(function(win) {
       win.FullZoom.reset();
     });
-    windowsToClose.forEach(function(win) {
-      win.close();
-    });
     finish();
   }
 
   function testOnWindow(options, callback) {
-    let win = whenNewWindowLoaded(options,
-      function(win) {
-        windowsToClose.push(win);
-        windowsToReset.push(win);
-        executeSoon(function() { callback(win); });
-      });
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      windowsToReset.push(win);
+      executeSoon(function() callback(win));
+    }, false);
   };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
+      win.close();
+    });
+  });
 
   testOnWindow({}, function(win) {
     doTestWhenReady(true, win, function() {

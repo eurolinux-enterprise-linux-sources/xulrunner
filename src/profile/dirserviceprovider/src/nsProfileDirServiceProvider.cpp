@@ -16,7 +16,6 @@
 // File Name Defines
 
 #define PREFS_FILE_50_NAME           NS_LITERAL_CSTRING("prefs.js")
-#define PREFS_FILE_METRO_50_NAME     NS_LITERAL_CSTRING("metro-prefs.js")
 #define USER_CHROME_DIR_50_NAME      NS_LITERAL_CSTRING("chrome")
 #define LOCAL_STORE_FILE_50_NAME     NS_LITERAL_CSTRING("localstore.rdf")
 #define PANELS_FILE_50_NAME          NS_LITERAL_CSTRING("panels.rdf")
@@ -24,6 +23,7 @@
 #define BOOKMARKS_FILE_50_NAME       NS_LITERAL_CSTRING("bookmarks.html")
 #define DOWNLOADS_FILE_50_NAME       NS_LITERAL_CSTRING("downloads.rdf")
 #define SEARCH_FILE_50_NAME          NS_LITERAL_CSTRING("search.rdf" )
+#define STORAGE_FILE_50_NAME         NS_LITERAL_CSTRING("storage.sdb")
 
 //*****************************************************************************
 // nsProfileDirServiceProvider::nsProfileDirServiceProvider
@@ -138,8 +138,8 @@ nsProfileDirServiceProvider::Shutdown()
 // nsProfileDirServiceProvider::nsISupports
 //*****************************************************************************
 
-NS_IMPL_ISUPPORTS(nsProfileDirServiceProvider,
-                  nsIDirectoryServiceProvider)
+NS_IMPL_ISUPPORTS1(nsProfileDirServiceProvider,
+                   nsIDirectoryServiceProvider)
 
 //*****************************************************************************
 // nsProfileDirServiceProvider::nsIDirectoryServiceProvider
@@ -169,11 +169,6 @@ nsProfileDirServiceProvider::GetFile(const char *prop, bool *persistant, nsIFile
     rv = domainDir->Clone(getter_AddRefs(localFile));
     if (NS_SUCCEEDED(rv))
       rv = localFile->AppendNative(PREFS_FILE_50_NAME);
-  }
-  else if (strcmp(prop, NS_METRO_APP_PREFS_50_FILE) == 0) {
-    rv = domainDir->Clone(getter_AddRefs(localFile));
-    if (NS_SUCCEEDED(rv))
-      rv = localFile->AppendNative(PREFS_FILE_METRO_50_NAME);
   }
   else if (strcmp(prop, NS_APP_USER_PROFILE_50_DIR) == 0) {
     rv = domainDir->Clone(getter_AddRefs(localFile));
@@ -231,13 +226,17 @@ nsProfileDirServiceProvider::GetFile(const char *prop, bool *persistant, nsIFile
         rv = EnsureProfileFileExists(localFile, domainDir);
     }
   }
-
-  if (NS_FAILED(rv)) {
-    return rv;
+  else if (strcmp(prop, NS_APP_STORAGE_50_FILE) == 0) {
+    rv = domainDir->Clone(getter_AddRefs(localFile));
+    if (NS_SUCCEEDED(rv))
+      rv = localFile->AppendNative(STORAGE_FILE_50_NAME);
   }
 
-  localFile.forget(_retval);
-  return NS_OK;
+  
+  if (localFile && NS_SUCCEEDED(rv))
+    return CallQueryInterface(localFile, _retval);
+
+  return rv;
 }
 
 //*****************************************************************************

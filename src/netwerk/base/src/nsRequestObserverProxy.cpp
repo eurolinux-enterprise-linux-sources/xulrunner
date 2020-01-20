@@ -8,7 +8,9 @@
 #include "nscore.h"
 #include "nsRequestObserverProxy.h"
 #include "nsIRequest.h"
+#include "nsIServiceManager.h"
 #include "nsAutoPtr.h"
+#include "nsString.h"
 #include "prlog.h"
 
 using namespace mozilla;
@@ -17,7 +19,6 @@ using namespace mozilla;
 static PRLogModuleInfo *gRequestObserverProxyLog;
 #endif
 
-#undef LOG
 #define LOG(args) PR_LOG(gRequestObserverProxyLog, PR_LOG_DEBUG, args)
 
 //-----------------------------------------------------------------------------
@@ -114,9 +115,9 @@ public:
 // nsRequestObserverProxy::nsISupports implementation...
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS(nsRequestObserverProxy,
-                  nsIRequestObserver,
-                  nsIRequestObserverProxy)
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsRequestObserverProxy,
+                              nsIRequestObserver,
+                              nsIRequestObserverProxy)
 
 //-----------------------------------------------------------------------------
 // nsRequestObserverProxy::nsIRequestObserver implementation...

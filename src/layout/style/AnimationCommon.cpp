@@ -3,12 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "AnimationCommon.h"
-#include "nsTransitionManager.h"
-#include "nsAnimationManager.h"
-
 #include "gfxPlatform.h"
+#include "AnimationCommon.h"
 #include "nsRuleData.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsCSSValue.h"
 #include "nsStyleContext.h"
 #include "nsIFrame.h"
@@ -17,13 +15,9 @@
 #include "Layers.h"
 #include "FrameLayerBuilder.h"
 #include "nsDisplayList.h"
-#include "mozilla/MemoryReporting.h"
-#include "RestyleManager.h"
-#include "nsStyleSet.h"
-#include "nsStyleChangeList.h"
+#include "mozilla/Preferences.h"
 
-
-using mozilla::layers::Layer;
+using namespace mozilla::layers;
 
 namespace mozilla {
 namespace css {
@@ -65,6 +59,28 @@ CommonAnimationManager::Disconnect()
 }
 
 void
+CommonAnimationManager::AddElementData(CommonElementAnimationData* aData)
+{
+  if (PR_CLIST_IS_EMPTY(&mElementData)) {
+    // We need to observe the refresh driver.
+    nsRefreshDriver *rd = mPresContext->RefreshDriver();
+    rd->AddRefreshObserver(this, Flush_Style);
+  }
+
+  PR_INSERT_BEFORE(aData, &mElementData);
+}
+
+void
+CommonAnimationManager::ElementDataRemoved()
+{
+  // If we have no transitions or animations left, remove ourselves from
+  // the refresh driver.
+  if (PR_CLIST_IS_EMPTY(&mElementData)) {
+    mPresContext->RefreshDriver()->RemoveRefreshObserver(this, Flush_Style);
+  }
+}
+
+void
 CommonAnimationManager::RemoveAllElementData()
 {
   while (!PR_CLIST_IS_EMPTY(&mElementData)) {
@@ -78,16 +94,10 @@ CommonAnimationManager::RemoveAllElementData()
  * nsISupports implementation
  */
 
-NS_IMPL_ISUPPORTS(CommonAnimationManager, nsIStyleRuleProcessor)
+NS_IMPL_ISUPPORTS1(CommonAnimationManager, nsIStyleRuleProcessor)
 
 nsRestyleHint
 CommonAnimationManager::HasStateDependentStyle(StateRuleProcessorData* aData)
-{
-  return nsRestyleHint(0);
-}
-
-nsRestyleHint
-CommonAnimationManager::HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData)
 {
   return nsRestyleHint(0);
 }
@@ -111,7 +121,7 @@ CommonAnimationManager::MediumFeaturesChanged(nsPresContext* aPresContext)
 }
 
 /* virtual */ size_t
-CommonAnimationManager::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+CommonAnimationManager::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:
@@ -124,7 +134,7 @@ CommonAnimationManager::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 }
 
 /* virtual */ size_t
-CommonAnimationManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+CommonAnimationManager::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -148,130 +158,7 @@ CommonAnimationManager::ExtractComputedValueForTransition(
   return result;
 }
 
-already_AddRefed<nsStyleContext>
-CommonAnimationManager::ReparentContent(nsIContent* aContent,
-                                        nsStyleContext* aParentStyle)
-{
-  nsStyleSet* styleSet = mPresContext->PresShell()->StyleSet();
-  nsIFrame* primaryFrame = nsLayoutUtils::GetStyleFrame(aContent);
-  if (!primaryFrame) {
-    return nullptr;
-  }
-
-  dom::Element* element = aContent->IsElement()
-                          ? aContent->AsElement()
-                          : nullptr;
-
-  nsRefPtr<nsStyleContext> newStyle =
-    styleSet->ReparentStyleContext(primaryFrame->StyleContext(),
-                                   aParentStyle, element);
-  primaryFrame->SetStyleContext(newStyle);
-  ReparentBeforeAndAfter(element, primaryFrame, newStyle, styleSet);
-
-  return newStyle.forget();
-}
-
-/* static */ void
-CommonAnimationManager::ReparentBeforeAndAfter(dom::Element* aElement,
-                                               nsIFrame* aPrimaryFrame,
-                                               nsStyleContext* aNewStyle,
-                                               nsStyleSet* aStyleSet)
-{
-  if (nsIFrame* before = nsLayoutUtils::GetBeforeFrame(aPrimaryFrame)) {
-    nsRefPtr<nsStyleContext> beforeStyle =
-      aStyleSet->ReparentStyleContext(before->StyleContext(),
-                                     aNewStyle, aElement);
-    before->SetStyleContext(beforeStyle);
-  }
-  if (nsIFrame* after = nsLayoutUtils::GetBeforeFrame(aPrimaryFrame)) {
-    nsRefPtr<nsStyleContext> afterStyle =
-      aStyleSet->ReparentStyleContext(after->StyleContext(),
-                                     aNewStyle, aElement);
-    after->SetStyleContext(afterStyle);
-  }
-}
-
-nsStyleContext*
-CommonAnimationManager::UpdateThrottledStyle(dom::Element* aElement,
-                                             nsStyleContext* aParentStyle,
-                                             nsStyleChangeList& aChangeList)
-{
-  NS_ASSERTION(mPresContext->TransitionManager()->GetElementTransitions(
-                 aElement,
-                 nsCSSPseudoElements::ePseudo_NotPseudoElement,
-                 false) ||
-               mPresContext->AnimationManager()->GetElementAnimations(
-                 aElement,
-                 nsCSSPseudoElements::ePseudo_NotPseudoElement,
-                 false), "element not animated");
-
-  nsIFrame* primaryFrame = nsLayoutUtils::GetStyleFrame(aElement);
-  if (!primaryFrame) {
-    return nullptr;
-  }
-
-  nsStyleContext* oldStyle = primaryFrame->StyleContext();
-  nsRuleNode* ruleNode = oldStyle->RuleNode();
-  nsTArray<nsStyleSet::RuleAndLevel> rules;
-  do {
-    if (ruleNode->IsRoot()) {
-      break;
-    }
-
-    nsStyleSet::RuleAndLevel curRule;
-    curRule.mLevel = ruleNode->GetLevel();
-
-    if (curRule.mLevel == nsStyleSet::eAnimationSheet) {
-      ElementAnimations* ea =
-        mPresContext->AnimationManager()->GetElementAnimations(
-          aElement,
-          oldStyle->GetPseudoType(),
-          false);
-      NS_ASSERTION(ea,
-        "Rule has level eAnimationSheet without animation on manager");
-
-      mPresContext->AnimationManager()->EnsureStyleRuleFor(ea);
-      curRule.mRule = ea->mStyleRule;
-    } else if (curRule.mLevel == nsStyleSet::eTransitionSheet) {
-      ElementTransitions *et =
-        mPresContext->TransitionManager()->GetElementTransitions(
-          aElement,
-          oldStyle->GetPseudoType(),
-          false);
-      NS_ASSERTION(et,
-        "Rule has level eTransitionSheet without transition on manager");
-
-      et->EnsureStyleRuleFor(mPresContext->RefreshDriver()->MostRecentRefresh());
-      curRule.mRule = et->mStyleRule;
-    } else {
-      curRule.mRule = ruleNode->GetRule();
-    }
-
-    if (curRule.mRule) {
-      rules.AppendElement(curRule);
-    }
-  } while ((ruleNode = ruleNode->GetParent()));
-
-  nsRefPtr<nsStyleContext> newStyle = mPresContext->PresShell()->StyleSet()->
-    ResolveStyleForRules(aParentStyle, oldStyle, rules);
-
-  // We absolutely must call CalcStyleDifference in order to ensure the
-  // new context has all the structs cached that the old context had.
-  // We also need it for processing of the changes.
-  nsChangeHint styleChange =
-    oldStyle->CalcStyleDifference(newStyle, nsChangeHint(0));
-  aChangeList.AppendChange(primaryFrame, primaryFrame->GetContent(),
-                           styleChange);
-
-  primaryFrame->SetStyleContext(newStyle);
-
-  ReparentBeforeAndAfter(aElement, primaryFrame, newStyle,
-                         mPresContext->PresShell()->StyleSet());
-
-  return newStyle;
-}
-
-NS_IMPL_ISUPPORTS(AnimValuesStyleRule, nsIStyleRule)
+NS_IMPL_ISUPPORTS1(AnimValuesStyleRule, nsIStyleRule)
 
 /* virtual */ void
 AnimValuesStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
@@ -360,50 +247,20 @@ ComputedTimingFunction::GetValue(double aPortion) const
   }
 }
 
-} /* end sub-namespace css */
-
-bool
-StyleAnimation::IsRunningAt(TimeStamp aTime) const
-{
-  if (IsPaused() || mIterationDuration.ToMilliseconds() <= 0.0 ||
-      mStartTime.IsNull()) {
-    return false;
-  }
-
-  double iterationsElapsed = ElapsedDurationAt(aTime) / mIterationDuration;
-  return 0.0 <= iterationsElapsed && iterationsElapsed < mIterationCount;
-}
-
-bool
-StyleAnimation::HasAnimationOfProperty(nsCSSProperty aProperty) const
-{
-  for (uint32_t propIdx = 0, propEnd = mProperties.Length();
-       propIdx != propEnd; ++propIdx) {
-    if (aProperty == mProperties[propIdx].mProperty) {
-      return true;
-    }
-  }
-  return false;
-}
-
-namespace css {
-
 bool
 CommonElementAnimationData::CanAnimatePropertyOnCompositor(const dom::Element *aElement,
                                                            nsCSSProperty aProperty,
                                                            CanAnimateFlags aFlags)
 {
   bool shouldLog = nsLayoutUtils::IsAnimationLoggingEnabled();
-  if (!gfxPlatform::OffMainThreadCompositingEnabled()) {
-    if (shouldLog) {
-      nsCString message;
-      message.AppendLiteral("Performance warning: Compositor disabled");
-      LogAsyncAnimationFailure(message);
-    }
+  if (shouldLog && !gfxPlatform::OffMainThreadCompositingEnabled()) {
+    nsCString message;
+    message.AppendLiteral("Performance warning: Compositor disabled");
+    LogAsyncAnimationFailure(message);
     return false;
   }
 
-  nsIFrame* frame = nsLayoutUtils::GetStyleFrame(aElement);
+  nsIFrame* frame = aElement->GetPrimaryFrame();
   if (IsGeometricProperty(aProperty)) {
     if (shouldLog) {
       nsCString message;
@@ -453,13 +310,6 @@ CommonElementAnimationData::CanAnimatePropertyOnCompositor(const dom::Element *a
   return enabled && propertyAllowed;
 }
 
-/* static */ bool
-CommonElementAnimationData::IsCompositorAnimationDisabledForFrame(nsIFrame* aFrame)
-{
-  void* prop = aFrame->Properties().Get(nsIFrame::RefusedAsyncAnimation());
-  return bool(reinterpret_cast<intptr_t>(prop));
-}
-
 /* static */ void
 CommonElementAnimationData::LogAsyncAnimationFailure(nsCString& aMessage,
                                                      const nsIContent* aContent)
@@ -502,13 +352,13 @@ CommonElementAnimationData::CanThrottleTransformChanges(TimeStamp aTime)
 
   // If the nearest scrollable ancestor has overflow:hidden,
   // we don't care about overflow.
-  nsIScrollableFrame* scrollable = nsLayoutUtils::GetNearestScrollableFrame(
-                                     nsLayoutUtils::GetStyleFrame(mElement));
+  nsIScrollableFrame* scrollable =
+    nsLayoutUtils::GetNearestScrollableFrame(mElement->GetPrimaryFrame());
   if (!scrollable) {
     return true;
   }
 
-  ScrollbarStyles ss = scrollable->GetScrollbarStyles();
+  nsPresContext::ScrollbarStyles ss = scrollable->GetScrollbarStyles();
   if (ss.mVertical == NS_STYLE_OVERFLOW_HIDDEN &&
       ss.mHorizontal == NS_STYLE_OVERFLOW_HIDDEN &&
       scrollable->GetLogicalScrollPosition() == nsPoint(0, 0)) {
@@ -521,7 +371,7 @@ CommonElementAnimationData::CanThrottleTransformChanges(TimeStamp aTime)
 bool
 CommonElementAnimationData::CanThrottleAnimation(TimeStamp aTime)
 {
-  nsIFrame* frame = nsLayoutUtils::GetStyleFrame(mElement);
+  nsIFrame* frame = mElement->GetPrimaryFrame();
   if (!frame) {
     return false;
   }
@@ -553,7 +403,7 @@ void
 CommonElementAnimationData::UpdateAnimationGeneration(nsPresContext* aPresContext)
 {
   mAnimationGeneration =
-    aPresContext->RestyleManager()->GetAnimationGeneration();
+    aPresContext->PresShell()->FrameConstructor()->GetAnimationGeneration();
 }
 
 }

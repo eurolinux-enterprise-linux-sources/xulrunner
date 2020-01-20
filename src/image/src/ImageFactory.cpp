@@ -12,18 +12,19 @@
 #include "nsIHttpChannel.h"
 #include "nsIFileChannel.h"
 #include "nsIFile.h"
+#include "nsSimpleURI.h"
 #include "nsMimeTypes.h"
+#include "nsIURI.h"
 #include "nsIRequest.h"
 
+#include "imgIContainer.h"
+#include "imgStatusTracker.h"
 #include "RasterImage.h"
 #include "VectorImage.h"
 #include "Image.h"
 #include "nsMediaFragmentURIParser.h"
-#include "nsContentUtils.h"
-#include "nsIScriptSecurityManager.h"
 
 #include "ImageFactory.h"
-#include "gfxPrefs.h"
 
 namespace mozilla {
 namespace image {
@@ -32,24 +33,17 @@ namespace image {
 static bool gInitializedPrefCaches = false;
 static bool gDecodeOnDraw = false;
 static bool gDiscardable = false;
-static bool gEnableMozSampleSize = false;
 
-/*static*/ void
-ImageFactory::Initialize()
+static void
+InitPrefCaches()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!gInitializedPrefCaches) {
-    // Initialize the graphics preferences
-    gfxPrefs::GetSingleton();
-    Preferences::AddBoolVarCache(&gDiscardable, "image.mem.discardable");
-    Preferences::AddBoolVarCache(&gDecodeOnDraw, "image.mem.decodeondraw");
-    Preferences::AddBoolVarCache(&gEnableMozSampleSize, "image.mozsamplesize.enabled");
-    gInitializedPrefCaches = true;
-  }
+  Preferences::AddBoolVarCache(&gDiscardable, "image.mem.discardable");
+  Preferences::AddBoolVarCache(&gDecodeOnDraw, "image.mem.decodeondraw");
+  gInitializedPrefCaches = true;
 }
 
 static uint32_t
-ComputeImageFlags(ImageURL* uri, bool isMultiPart)
+ComputeImageFlags(nsIURI* uri, bool isMultiPart)
 {
   nsresult rv;
 
@@ -88,38 +82,17 @@ ComputeImageFlags(ImageURL* uri, bool isMultiPart)
   return imageFlags;
 }
 
-/* static */ bool
-ImageFactory::CanRetargetOnDataAvailable(ImageURL* aURI, bool aIsMultiPart)
-{
-  // We can't retarget OnDataAvailable safely in cases where we aren't storing
-  // source data (and thus need to sync decode in ODA) because allocating frames
-  // off-main-thread is currently not possible and we don't have a workaround in
-  // place yet. (See bug 967985.) For now, we detect those cases and refuse to
-  // retarget. When the problem is fixed, this function can be removed.
-
-  if (aIsMultiPart) {
-    return false;
-  }
-
-  uint32_t imageFlags = ComputeImageFlags(aURI, aIsMultiPart);
-  if (!(imageFlags & Image::INIT_FLAG_DISCARDABLE) &&
-      !(imageFlags & Image::INIT_FLAG_DECODE_ON_DRAW)) {
-    return false;
-  }
-
-  return true;
-}
-
 /* static */ already_AddRefed<Image>
 ImageFactory::CreateImage(nsIRequest* aRequest,
                           imgStatusTracker* aStatusTracker,
                           const nsCString& aMimeType,
-                          ImageURL* aURI,
+                          nsIURI* aURI,
                           bool aIsMultiPart,
                           uint32_t aInnerWindowId)
 {
-  MOZ_ASSERT(gInitializedPrefCaches,
-             "Pref observers should have been initialized already");
+  // Register our pref observers if we haven't yet.
+  if (MOZ_UNLIKELY(!gInitializedPrefCaches))
+    InitPrefCaches();
 
   // Compute the image's initialization flags.
   uint32_t imageFlags = ComputeImageFlags(aURI, aIsMultiPart);
@@ -172,12 +145,14 @@ SaturateToInt32(int64_t val)
 uint32_t
 GetContentSize(nsIRequest* aRequest)
 {
-  nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
-  if (channel) {
-    int64_t size;
-    nsresult rv = channel->GetContentLength(&size);
+  // Use content-length as a size hint for http channels.
+  nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(aRequest));
+  if (httpChannel) {
+    nsAutoCString contentLength;
+    nsresult rv = httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("content-length"),
+                                                 contentLength);
     if (NS_SUCCEEDED(rv)) {
-      return std::max(SaturateToInt32(size), 0);
+      return std::max(contentLength.ToInteger(&rv), 0);
     }
   }
 
@@ -203,7 +178,7 @@ GetContentSize(nsIRequest* aRequest)
 ImageFactory::CreateRasterImage(nsIRequest* aRequest,
                                 imgStatusTracker* aStatusTracker,
                                 const nsCString& aMimeType,
-                                ImageURL* aURI,
+                                nsIURI* aURI,
                                 uint32_t aImageFlags,
                                 uint32_t aInnerWindowId)
 {
@@ -234,27 +209,9 @@ ImageFactory::CreateRasterImage(nsIRequest* aRequest,
     }
   }
 
-  nsAutoCString ref;
-  aURI->GetRef(ref);
-  mozilla::net::nsMediaFragmentURIParser parser(ref);
+  mozilla::net::nsMediaFragmentURIParser parser(aURI);
   if (parser.HasResolution()) {
     newImage->SetRequestedResolution(parser.GetResolution());
-  }
-
-  if (parser.HasSampleSize()) {
-      /* Get our principal */
-      nsCOMPtr<nsIChannel> chan(do_QueryInterface(aRequest));
-      nsCOMPtr<nsIPrincipal> principal;
-      if (chan) {
-        nsContentUtils::GetSecurityManager()->GetChannelPrincipal(chan,
-                                                                  getter_AddRefs(principal));
-      }
-
-      if ((principal &&
-           principal->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED) ||
-          gEnableMozSampleSize) {
-        newImage->SetRequestedSampleSize(parser.GetSampleSize());
-      }
   }
 
   return newImage.forget();
@@ -264,7 +221,7 @@ ImageFactory::CreateRasterImage(nsIRequest* aRequest,
 ImageFactory::CreateVectorImage(nsIRequest* aRequest,
                                 imgStatusTracker* aStatusTracker,
                                 const nsCString& aMimeType,
-                                ImageURL* aURI,
+                                nsIURI* aURI,
                                 uint32_t aImageFlags,
                                 uint32_t aInnerWindowId)
 {

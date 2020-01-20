@@ -6,29 +6,14 @@
 #ifndef MOZILLA_GFX_CANVASCLIENT_H
 #define MOZILLA_GFX_CANVASCLIENT_H
 
-#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
-#include "mozilla/RefPtr.h"             // for RefPtr, TemporaryRef
-#include "mozilla/layers/CompositableClient.h"  // for CompositableClient
-#include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
-#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
-#include "mozilla/layers/TextureClient.h"  // for TextureClient, etc
-#include "mozilla/mozalloc.h"           // for operator delete
-
-#include "mozilla/gfx/Point.h"          // for IntSize
-#include "mozilla/gfx/Types.h"          // for SurfaceFormat
+#include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/CompositableClient.h"
 
 namespace mozilla {
-namespace gfx {
-class SharedSurface;
-}
-}
 
-namespace mozilla {
 namespace layers {
 
 class ClientCanvasLayer;
-class CompositableForwarder;
 
 /**
  * Compositable client for 2d and webgl canvas.
@@ -41,29 +26,29 @@ public:
    * message will be sent to the compositor to create a corresponding image
    * host.
    */
-  enum CanvasClientType {
-    CanvasClientSurface,
-    CanvasClientGLContext,
-  };
-  static TemporaryRef<CanvasClient> CreateCanvasClient(CanvasClientType aType,
+  static TemporaryRef<CanvasClient> CreateCanvasClient(CompositableType aImageHostType,
                                                        CompositableForwarder* aFwd,
                                                        TextureFlags aFlags);
 
   CanvasClient(CompositableForwarder* aFwd, TextureFlags aFlags)
-    : CompositableClient(aFwd, aFlags)
+    : CompositableClient(aFwd)
   {
     mTextureInfo.mTextureFlags = aFlags;
   }
 
   virtual ~CanvasClient() {}
 
-  virtual void Clear() {};
-
   virtual void Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer) = 0;
 
-  virtual void Updated() { }
+  virtual void Updated();
 
+  virtual void SetDescriptorFromReply(TextureIdentifier aTextureId,
+                                      const SurfaceDescriptor& aDescriptor) MOZ_OVERRIDE
+  {
+    mTextureClient->SetDescriptorFromReply(aDescriptor);
+  }
 protected:
+  RefPtr<TextureClient> mTextureClient;
   TextureInfo mTextureInfo;
 };
 
@@ -72,64 +57,31 @@ class CanvasClient2D : public CanvasClient
 {
 public:
   CanvasClient2D(CompositableForwarder* aLayerForwarder,
-                 TextureFlags aFlags)
-    : CanvasClient(aLayerForwarder, aFlags)
+                 TextureFlags aFlags);
+
+  TextureInfo GetTextureInfo() const MOZ_OVERRIDE
   {
+    return mTextureInfo;
   }
 
-  TextureInfo GetTextureInfo() const
-  {
-    return TextureInfo(COMPOSITABLE_IMAGE);
-  }
-
-  virtual void Clear() MOZ_OVERRIDE
-  {
-    mBuffer = nullptr;
-  }
-
-  virtual void Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer) MOZ_OVERRIDE;
-
-  virtual bool AddTextureClient(TextureClient* aTexture) MOZ_OVERRIDE
-  {
-    MOZ_ASSERT((mTextureInfo.mTextureFlags & aTexture->GetFlags()) == mTextureInfo.mTextureFlags);
-    return CompositableClient::AddTextureClient(aTexture);
-  }
-
-  virtual void OnDetach() MOZ_OVERRIDE
-  {
-    mBuffer = nullptr;
-  }
-
-private:
-  RefPtr<TextureClient> mBuffer;
+  virtual void Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer);
 };
 
 // Used for GL canvases where we don't need to do any readback, i.e., with a
 // GL backend.
-class CanvasClientSurfaceStream : public CanvasClient
+class CanvasClientWebGL : public CanvasClient
 {
 public:
-  CanvasClientSurfaceStream(CompositableForwarder* aLayerForwarder, TextureFlags aFlags);
+  CanvasClientWebGL(CompositableForwarder* aFwd,
+                    TextureFlags aFlags);
 
-  TextureInfo GetTextureInfo() const
+  TextureInfo GetTextureInfo() const MOZ_OVERRIDE
   {
-    return TextureInfo(COMPOSITABLE_IMAGE);
+    return mTextureInfo;
   }
 
-  virtual void Clear() MOZ_OVERRIDE
-  {
-    mBuffer = nullptr;
-  }
-
-  virtual void Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer) MOZ_OVERRIDE;
-
-  virtual void OnDetach() MOZ_OVERRIDE
-  {
-    mBuffer = nullptr;
-  }
-
-private:
-  RefPtr<TextureClient> mBuffer;
+  virtual void Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer);
+  virtual void Updated() MOZ_OVERRIDE;
 };
 
 }

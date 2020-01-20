@@ -41,18 +41,19 @@ SpeechSynthesisChild::RecvSetDefaultVoice(const nsString& aUri,
 }
 
 PSpeechSynthesisRequestChild*
-SpeechSynthesisChild::AllocPSpeechSynthesisRequestChild(const nsString& aText,
-                                                        const nsString& aLang,
-                                                        const nsString& aUri,
-                                                        const float& aVolume,
-                                                        const float& aRate,
-                                                        const float& aPitch)
+SpeechSynthesisChild::AllocPSpeechSynthesisRequest(const nsString& aText,
+                                                   const nsString& aLang,
+                                                   const nsString& aUri,
+                                                   const float& aVolume,
+                                                   const float& aRate,
+                                                   const float& aPitch)
 {
-  MOZ_CRASH("Caller is supposed to manually construct a request!");
+  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
+  return nullptr;
 }
 
 bool
-SpeechSynthesisChild::DeallocPSpeechSynthesisRequestChild(PSpeechSynthesisRequestChild* aActor)
+SpeechSynthesisChild::DeallocPSpeechSynthesisRequest(PSpeechSynthesisRequestChild* aActor)
 {
   delete aActor;
   return true;
@@ -112,6 +113,14 @@ SpeechSynthesisRequestChild::RecvOnResume(const float& aElapsedTime,
 }
 
 bool
+SpeechSynthesisRequestChild::RecvOnError(const float& aElapsedTime,
+                                         const uint32_t& aCharIndex)
+{
+  mTask->DispatchErrorImpl(aElapsedTime, aCharIndex);
+  return true;
+}
+
+bool
 SpeechSynthesisRequestChild::RecvOnBoundary(const nsString& aName,
                                             const float& aElapsedTime,
                                             const uint32_t& aCharIndex)
@@ -140,20 +149,16 @@ NS_IMETHODIMP
 SpeechTaskChild::Setup(nsISpeechTaskCallback* aCallback,
                        uint32_t aChannels, uint32_t aRate, uint8_t argc)
 {
-  MOZ_CRASH("Should never be called from child");
+  MOZ_NOT_REACHED("Should never be called from child");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-SpeechTaskChild::SendAudio(JS::Handle<JS::Value> aData, JS::Handle<JS::Value> aLandmarks,
+SpeechTaskChild::SendAudio(const JS::Value& aData, const JS::Value& aLandmarks,
                            JSContext* aCx)
 {
-  MOZ_CRASH("Should never be called from child");
-}
-
-NS_IMETHODIMP
-SpeechTaskChild::SendAudioNative(int16_t* aData, uint32_t aDataLen)
-{
-  MOZ_CRASH("Should never be called from child");
+  MOZ_NOT_REACHED("Should never be called from child");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 void

@@ -2,16 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let Ci = Components.interfaces;
-let Cc = Components.classes;
-
 dump("### SelectionHandler.js loaded\n");
 
 var SelectionHandler = {
   init: function init() {
     this.type = kContentSelector;
     this.snap = true;
-    this.lastYPos = this.lastXPos = null;
     addMessageListener("Browser:SelectionStart", this);
     addMessageListener("Browser:SelectionAttach", this);
     addMessageListener("Browser:SelectionEnd", this);
@@ -28,7 +24,6 @@ var SelectionHandler = {
     addMessageListener("Browser:SelectionSwitchMode", this);
     addMessageListener("Browser:RepositionInfoRequest", this);
     addMessageListener("Browser:SelectionHandlerPing", this);
-    addMessageListener("Browser:ResetLastPos", this);
   },
 
   shutdown: function shutdown() {
@@ -48,7 +43,6 @@ var SelectionHandler = {
     removeMessageListener("Browser:SelectionSwitchMode", this);
     removeMessageListener("Browser:RepositionInfoRequest", this);
     removeMessageListener("Browser:SelectionHandlerPing", this);
-    removeMessageListener("Browser:ResetLastPos", this);
   },
 
   sendAsync: function sendAsync(aMsg, aJson) {
@@ -62,17 +56,11 @@ var SelectionHandler = {
   /*
    * Selection start event handler
    */
-  _onSelectionStart: function _onSelectionStart(aJson) {
+  _onSelectionStart: function _onSelectionStart(aX, aY) {
     // Init content window information
-    if (!this._initTargetInfo(aJson.xPos, aJson.yPos)) {
+    if (!this._initTargetInfo(aX, aY)) {
       this._onFail("failed to get target information");
       return;
-    }
-
-    // for context menu select command, which doesn't trigger
-    // form input focus changes.
-    if (aJson.setFocus && this._targetIsEditable) {
-      this._targetElement.focus();
     }
 
     // Clear any existing selection from the document
@@ -80,7 +68,7 @@ var SelectionHandler = {
     selection.removeAllRanges();
 
     // Set our initial selection, aX and aY should be in client coordinates.
-    let framePoint = this._clientPointToFramePoint({ xPos: aJson.xPos, yPos: aJson.yPos });
+    let framePoint = this._clientPointToFramePoint({ xPos: aX, yPos: aY });
     if (!this._domWinUtils.selectAtPoint(framePoint.xPos, framePoint.yPos,
                                          Ci.nsIDOMWindowUtils.SELECT_WORDNOSPACE)) {
       this._onFail("failed to set selection at point");
@@ -118,24 +106,13 @@ var SelectionHandler = {
       return;
     }
 
-    // Only use selectAtPoint for editable content and avoid that for inputs,
-    // as we can expand caret to selection manually more precisely. We can use
-    // selectAtPoint for inputs too though, but only once bug 881938 is fully
-    // resolved.
-    if(Util.isEditableContent(this._targetElement)) {
-      // Similar to _onSelectionStart - we need to create initial selection
-      // but without the initialization bits.
-      let framePoint = this._clientPointToFramePoint({ xPos: aX, yPos: aY });
-      if (!this._domWinUtils.selectAtPoint(framePoint.xPos, framePoint.yPos,
-                                           Ci.nsIDOMWindowUtils.SELECT_CHARACTER)) {
-        this._onFail("failed to set selection at point");
-        return;
-      }
-    } else if (this._targetElement.selectionStart == 0 || aMarker == "end") {
-      // Expand caret forward or backward depending on direction
-      this._targetElement.selectionEnd++;
-    } else {
-      this._targetElement.selectionStart--;
+    // Similar to _onSelectionStart - we need to create initial selection
+    // but without the initialization bits.
+    let framePoint = this._clientPointToFramePoint({ xPos: aX, yPos: aY });
+    if (!this._domWinUtils.selectAtPoint(framePoint.xPos, framePoint.yPos,
+                                         Ci.nsIDOMWindowUtils.SELECT_CHARACTER)) {
+      this._onFail("failed to set selection at point");
+      return;
     }
 
     // We bail if things get out of sync here implying we missed a message.
@@ -189,7 +166,14 @@ var SelectionHandler = {
       return;
     }
 
-    this._handleSelectionPoint(aMsg, false);
+    // Update selection in the doc
+    let pos = null;
+    if (aMsg.change == "start") {
+      pos = aMsg.start;
+    } else {
+      pos = aMsg.end;
+    }
+    this._handleSelectionPoint(aMsg.change, pos, false);
   },
 
   /*
@@ -206,7 +190,15 @@ var SelectionHandler = {
       return;
     }
 
-    this._handleSelectionPoint(aMsg, true);
+    // Update selection in the doc
+    let pos = null;
+    if (aMsg.change == "start") {
+      pos = aMsg.start;
+    } else {
+      pos = aMsg.end;
+    }
+
+    this._handleSelectionPoint(aMsg.change, pos, true);
     this._selectionMoveActive = false;
     
     // _handleSelectionPoint may set a scroll timer, so this must
@@ -232,15 +224,15 @@ var SelectionHandler = {
     }
 
     // This should never happen, but we check to make sure
-    if (!this._targetIsEditable) {
-      this._onFail("Coordiates didn't find a text input element.");
+    if (!this._targetIsEditable || !Util.isTextInput(this._targetElement)) {
+      this._onFail("Unexpected, coordiates didn't find a text input element.");
       return;
     }
 
     // Locate and sanity check the caret position
     let selection = this._getSelection();
     if (!selection || !selection.isCollapsed) {
-      this._onFail("No selection or selection is not collapsed.");
+      this._onFail("Unexpected, No selection or selection is not collapsed.");
       return;
     }
 
@@ -289,23 +281,17 @@ var SelectionHandler = {
     if (aClearSelection) {
       this._clearSelection();
     }
-    this.closeSelection();
+    this._closeSelection();
   },
 
   /*
    * Called any time SelectionHelperUI would like us to
    * recalculate the selection bounds.
    */
-  _onSelectionUpdate: function _onSelectionUpdate(aMsg) {
+  _onSelectionUpdate: function _onSelectionUpdate() {
     if (!this._contentWindow) {
       this._onFail("_onSelectionUpdate was called without proper view set up");
       return;
-    }
-
-    if (aMsg && aMsg.isInitiatedByAPZC) {
-      let {offset: offset} = Content.getCurrentWindowAndOffset(
-        this._targetCoordinates.x, this._targetCoordinates.y);
-      this._contentOffset = offset;
     }
 
     // Update the position of our selection monocles
@@ -321,7 +307,7 @@ var SelectionHandler = {
       Util.dumpLn(aDbgMessage);
     this.sendAsync("Content:SelectionFail");
     this._clearSelection();
-    this.closeSelection();
+    this._closeSelection();
   },
 
   /*
@@ -330,6 +316,17 @@ var SelectionHandler = {
    * whether the browser deck needs repositioning.
    */
   _repositionInfoRequest: function _repositionInfoRequest(aJsonMsg) {
+    if (!this.isActive) {
+      Util.dumpLn("unexpected: repositionInfoRequest but selection isn't active.");
+      this.sendAsync("Content:RepositionInfoResponse", { reposition: false });
+      return;
+    }
+    
+    if (!this.targetIsEditable) {
+      Util.dumpLn("unexpected: repositionInfoRequest but targetIsEditable is false.");
+      this.sendAsync("Content:RepositionInfoResponse", { reposition: false });
+    }
+    
     let result = this._calcNewContentPosition(aJsonMsg.viewHeight);
 
     // no repositioning needed
@@ -346,11 +343,6 @@ var SelectionHandler = {
 
   _onPing: function _onPing(aId) {
     this.sendAsync("Content:SelectionHandlerPong", { id: aId });
-  },
-
-  onClickCoords: function (xPos, yPos) {
-    this.lastXPos = xPos;
-    this.lastYPos = yPos;
   },
 
   /*************************************************
@@ -376,11 +368,11 @@ var SelectionHandler = {
   },
 
   /*
-   * closeSelection
+   * _closeSelection
    *
    * Shuts SelectionHandler down.
    */
-  closeSelection: function closeSelection() {
+  _closeSelection: function _closeSelection() {
     this._clearTimers();
     this._cache = null;
     this._contentWindow = null;
@@ -389,7 +381,6 @@ var SelectionHandler = {
     this._contentOffset = null;
     this._domWinUtils = null;
     this._targetIsEditable = false;
-    this._targetCoordinates = null;
     sendSyncMessage("Content:HandlerShutdown", {});
   },
 
@@ -403,7 +394,7 @@ var SelectionHandler = {
           contentWindow: contentWindow,
           offset: offset,
           utils: utils } =
-      Content.getCurrentWindowAndOffset(aX, aY);
+      this.getCurrentWindowAndOffset(aX, aY);
     if (!contentWindow) {
       return false;
     }
@@ -411,12 +402,7 @@ var SelectionHandler = {
     this._contentWindow = contentWindow;
     this._contentOffset = offset;
     this._domWinUtils = utils;
-    this._targetIsEditable = Util.isEditable(this._targetElement);
-    this._targetCoordinates = {
-      x: aX,
-      y: aY
-    };
-
+    this._targetIsEditable = this._isTextInput(this._targetElement);
     return true;
   },
 
@@ -430,28 +416,45 @@ var SelectionHandler = {
    * distance content should be raised to center the target element.
    */
   _calcNewContentPosition: function _calcNewContentPosition(aNewViewHeight) {
-    // We have no target element but the keyboard is up
-    // so lets not cover content that is below the keyboard
-    if (!this._cache || !this._cache.element) {
-      if (this.lastYPos != null && this.lastYPos > aNewViewHeight) {
-        return Services.metro.keyboardHeight;
-      }
+    // We don't support this on non-editable elements
+    if (!this._targetIsEditable) {
       return 0;
     }
 
-    let position = Util.centerElementInView(aNewViewHeight, this._cache.element);
-    if (position !== undefined) {
-      return position;
+    // If the bottom of the target bounds is higher than the new height,
+    // there's no need to adjust. It will be above the keyboard.
+    if (this._cache.element.bottom <= aNewViewHeight) {
+      return 0;
+    }
+    
+    // height of the target element
+    let targetHeight = this._cache.element.bottom - this._cache.element.top;
+    // height of the browser view.
+    let viewBottom = content.innerHeight;
+
+    // If the target is shorter than the new content height, we can go ahead
+    // and center it.
+    if (targetHeight <= aNewViewHeight) {
+      // Try to center the element vertically in the new content area, but
+      // don't position such that the bottom of the browser view moves above
+      // the top of the chrome. We purposely do not resize the browser window
+      // by making it taller when trying to center elements that are near the
+      // lower bounds. This would trigger reflow which can cause content to
+      // shift around. 
+      let splitMargin = Math.round((aNewViewHeight - targetHeight) * .5);
+      let distanceToPageBounds = viewBottom - this._cache.element.bottom;
+      let distanceFromChromeTop = this._cache.element.bottom - aNewViewHeight;
+      let distanceToCenter =
+        distanceFromChromeTop + Math.min(distanceToPageBounds, splitMargin);
+      return distanceToCenter;
     }
 
     // Special case: we are dealing with an input that is taller than the
     // desired height of content. We need to center on the caret location.
     let rect =
-      this._domWinUtils.sendQueryContentEvent(
-        this._domWinUtils.QUERY_CARET_RECT,
-        this._targetElement.selectionEnd,
-        0, 0, 0,
-        this._domWinUtils.QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK);
+      this._domWinUtils.sendQueryContentEvent(this._domWinUtils.QUERY_CARET_RECT,
+                                              this._targetElement.selectionEnd,
+                                              0, 0, 0);
     if (!rect || !rect.succeeded) {
       Util.dumpLn("no caret was present, unexpected.");
       return 0;
@@ -495,7 +498,7 @@ var SelectionHandler = {
     let json = aMessage.json;
     switch (aMessage.name) {
       case "Browser:SelectionStart":
-        this._onSelectionStart(json);
+        this._onSelectionStart(json.xPos, json.yPos);
         break;
 
       case "Browser:SelectionAttach":
@@ -543,24 +546,15 @@ var SelectionHandler = {
         break;
 
       case "Browser:SelectionUpdate":
-        this._onSelectionUpdate(json);
+        this._onSelectionUpdate();
         break;
 
       case "Browser:RepositionInfoRequest":
-        // This message is sent simultaneously with a tap event.
-        // Wait a bit to make sure we have the most up-to-date tap co-ordinates
-        // before a call to _calcNewContentPosition() which accesses them.
-        content.setTimeout (function () {
-          SelectionHandler._repositionInfoRequest(json);
-        }, 50);
+        this._repositionInfoRequest(json);
         break;
 
       case "Browser:SelectionHandlerPing":
         this._onPing(json.id);
-        break;
-
-      case "Browser:ResetLastPos":
-        this.onClickCoords(json.xPos, json.yPos);
         break;
     }
   },
@@ -568,6 +562,67 @@ var SelectionHandler = {
   /*************************************************
    * Utilities
    */
+
+  /*
+   * Retrieve the total offset from the window's origin to the sub frame
+   * element including frame and scroll offsets. The resulting offset is
+   * such that:
+   * sub frame coords + offset = root frame position
+   */
+  getCurrentWindowAndOffset: function(x, y) {
+    // If the element at the given point belongs to another document (such
+    // as an iframe's subdocument), the element in the calling document's
+    // DOM (e.g. the iframe) is returned.
+    let utils = Util.getWindowUtils(content);
+    let element = utils.elementFromPoint(x, y, true, false);
+    let offset = { x:0, y:0 };
+
+    while (element && (element instanceof HTMLIFrameElement ||
+                       element instanceof HTMLFrameElement)) {
+      // get the child frame position in client coordinates
+      let rect = element.getBoundingClientRect();
+
+      // calculate offsets for digging down into sub frames
+      // using elementFromPoint:
+
+      // Get the content scroll offset in the child frame
+      scrollOffset = ContentScroll.getScrollOffset(element.contentDocument.defaultView);
+      // subtract frame and scroll offset from our elementFromPoint coordinates
+      x -= rect.left + scrollOffset.x;
+      y -= rect.top + scrollOffset.y;
+
+      // calculate offsets we'll use to translate to client coords:
+
+      // add frame client offset to our total offset result
+      offset.x += rect.left;
+      offset.y += rect.top;
+
+      // get the frame's nsIDOMWindowUtils
+      utils = element.contentDocument
+                     .defaultView
+                     .QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindowUtils);
+
+      // retrieve the target element in the sub frame at x, y
+      element = utils.elementFromPoint(x, y, true, false);
+    }
+
+    if (!element)
+      return {};
+
+    return {
+      element: element,
+      contentWindow: element.ownerDocument.defaultView,
+      offset: offset,
+      utils: utils
+    };
+  },
+
+  _isTextInput: function _isTextInput(aElement) {
+    return ((aElement instanceof Ci.nsIDOMHTMLInputElement &&
+             aElement.mozIsTextField(false)) ||
+            aElement instanceof Ci.nsIDOMHTMLTextAreaElement);
+  },
 
   _getDocShell: function _getDocShell(aWindow) {
     if (aWindow == null)
@@ -609,7 +664,6 @@ var SelectionHandler = {
     }
   },
 };
-this.SelectionHandler = SelectionHandler;
 
 SelectionHandler.__proto__ = new SelectionPrototype();
 SelectionHandler.init();

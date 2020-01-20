@@ -4,10 +4,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GLContextProvider.h"
-#include "GLContextWGL.h"
+#include "GLContext.h"
 #include "GLLibraryLoader.h"
 #include "nsDebug.h"
 #include "nsIWidget.h"
+#include "WGLLibrary.h"
+#include "gfxASurface.h"
+#include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "gfxWindowsSurface.h"
 
@@ -22,40 +25,51 @@ using namespace mozilla::gfx;
 namespace mozilla {
 namespace gl {
 
-WGLLibrary sWGLLib;
+typedef WGLLibrary::LibraryType LibType;
+
+WGLLibrary sWGLLib[WGLLibrary::LIBS_MAX];
+
+LibType
+WGLLibrary::SelectLibrary(const GLContext::ContextFlags& aFlags)
+{
+  return (aFlags & GLContext::ContextFlagsMesaLLVMPipe) 
+          ? WGLLibrary::MESA_LLVMPIPE_LIB
+          : WGLLibrary::OPENGL_LIB;
+}
 
 HWND
 WGLLibrary::CreateDummyWindow(HDC *aWindowDC)
 {
     WNDCLASSW wc;
-    if (!GetClassInfoW(GetModuleHandle(nullptr), L"GLContextWGLClass", &wc)) {
+    if (!GetClassInfoW(GetModuleHandle(NULL), L"GLContextWGLClass", &wc)) {
         ZeroMemory(&wc, sizeof(WNDCLASSW));
         wc.style = CS_OWNDC;
-        wc.hInstance = GetModuleHandle(nullptr);
+        wc.hInstance = GetModuleHandle(NULL);
         wc.lpfnWndProc = DefWindowProc;
         wc.lpszClassName = L"GLContextWGLClass";
         if (!RegisterClassW(&wc)) {
             NS_WARNING("Failed to register GLContextWGLClass?!");
             // er. failed to register our class?
-            return nullptr;
+            return NULL;
         }
     }
 
     HWND win = CreateWindowW(L"GLContextWGLClass", L"GLContextWGL", 0,
                              0, 0, 16, 16,
-                             nullptr, nullptr, GetModuleHandle(nullptr),
-                             nullptr);
-    NS_ENSURE_TRUE(win, nullptr);
+                             NULL, NULL, GetModuleHandle(NULL), NULL);
+    NS_ENSURE_TRUE(win, NULL);
 
     HDC dc = GetDC(win);
-    NS_ENSURE_TRUE(dc, nullptr);
+    NS_ENSURE_TRUE(dc, NULL);
 
     if (mWindowPixelFormat == 0) {
         PIXELFORMATDESCRIPTOR pfd;
         ZeroMemory(&pfd, sizeof(PIXELFORMATDESCRIPTOR));
         pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
         pfd.nVersion = 1;
-        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+        if (mUseDoubleBufferedWindows)
+            pfd.dwFlags |= PFD_DOUBLEBUFFER;
         pfd.iPixelType = PFD_TYPE_RGBA;
         pfd.cColorBits = 24;
         pfd.cRedBits = 8;
@@ -69,11 +83,11 @@ WGLLibrary::CreateDummyWindow(HDC *aWindowDC)
     }
 
     if (!mWindowPixelFormat ||
-        !SetPixelFormat(dc, mWindowPixelFormat, nullptr))
+        !SetPixelFormat(dc, mWindowPixelFormat, NULL))
     {
         NS_WARNING("SetPixelFormat failed!");
         DestroyWindow(win);
-        return nullptr;
+        return NULL;
     }
 
     if (aWindowDC) {
@@ -91,36 +105,35 @@ HasExtension(const char* aExtensions, const char* aRequiredExtension)
 }
 
 bool
-WGLLibrary::EnsureInitialized()
+WGLLibrary::EnsureInitialized(bool aUseMesaLlvmPipe)
 {
     if (mInitialized)
         return true;
+    
+    mozilla::ScopedGfxFeatureReporter reporter("WGL", aUseMesaLlvmPipe);
 
-    mozilla::ScopedGfxFeatureReporter reporter("WGL");
-
-    std::string libGLFilename = "Opengl32.dll";
-    // SU_SPIES_DIRECTORY is for AMD CodeXL/gDEBugger
-    if (PR_GetEnv("SU_SPIES_DIRECTORY")) {
-        libGLFilename = std::string(PR_GetEnv("SU_SPIES_DIRECTORY")) + "\\opengl32.dll";
-    }
-
+    const char* libGLFilename = aUseMesaLlvmPipe 
+                                ? "mesallvmpipe.dll" 
+                                : "Opengl32.dll";
     if (!mOGLLibrary) {
-        mOGLLibrary = PR_LoadLibrary(&libGLFilename[0]);
+        mOGLLibrary = PR_LoadLibrary(libGLFilename);
         if (!mOGLLibrary) {
             NS_WARNING("Couldn't load OpenGL library.");
             return false;
         }
     }
 
+    mUseDoubleBufferedWindows = PR_GetEnv("MOZ_WGL_DB") != nullptr;
+
     GLLibraryLoader::SymLoadStruct earlySymbols[] = {
-        { (PRFuncPtr*) &fCreateContext, { "wglCreateContext", nullptr } },
-        { (PRFuncPtr*) &fMakeCurrent, { "wglMakeCurrent", nullptr } },
-        { (PRFuncPtr*) &fGetProcAddress, { "wglGetProcAddress", nullptr } },
-        { (PRFuncPtr*) &fDeleteContext, { "wglDeleteContext", nullptr } },
-        { (PRFuncPtr*) &fGetCurrentContext, { "wglGetCurrentContext", nullptr } },
-        { (PRFuncPtr*) &fGetCurrentDC, { "wglGetCurrentDC", nullptr } },
-        { (PRFuncPtr*) &fShareLists, { "wglShareLists", nullptr } },
-        { nullptr, { nullptr } }
+        { (PRFuncPtr*) &fCreateContext, { "wglCreateContext", NULL } },
+        { (PRFuncPtr*) &fMakeCurrent, { "wglMakeCurrent", NULL } },
+        { (PRFuncPtr*) &fGetProcAddress, { "wglGetProcAddress", NULL } },
+        { (PRFuncPtr*) &fDeleteContext, { "wglDeleteContext", NULL } },
+        { (PRFuncPtr*) &fGetCurrentContext, { "wglGetCurrentContext", NULL } },
+        { (PRFuncPtr*) &fGetCurrentDC, { "wglGetCurrentDC", NULL } },
+        { (PRFuncPtr*) &fShareLists, { "wglShareLists", NULL } },
+        { NULL, { NULL } }
     };
 
     if (!GLLibraryLoader::LoadSymbols(mOGLLibrary, &earlySymbols[0])) {
@@ -149,18 +162,18 @@ WGLLibrary::EnsureInitialized()
     // a context current.
 
     GLLibraryLoader::SymLoadStruct pbufferSymbols[] = {
-        { (PRFuncPtr*) &fCreatePbuffer, { "wglCreatePbufferARB", "wglCreatePbufferEXT", nullptr } },
-        { (PRFuncPtr*) &fDestroyPbuffer, { "wglDestroyPbufferARB", "wglDestroyPbufferEXT", nullptr } },
-        { (PRFuncPtr*) &fGetPbufferDC, { "wglGetPbufferDCARB", "wglGetPbufferDCEXT", nullptr } },
-        { (PRFuncPtr*) &fBindTexImage, { "wglBindTexImageARB", "wglBindTexImageEXT", nullptr } },
-        { (PRFuncPtr*) &fReleaseTexImage, { "wglReleaseTexImageARB", "wglReleaseTexImageEXT", nullptr } },
-        { nullptr, { nullptr } }
+        { (PRFuncPtr*) &fCreatePbuffer, { "wglCreatePbufferARB", "wglCreatePbufferEXT", NULL } },
+        { (PRFuncPtr*) &fDestroyPbuffer, { "wglDestroyPbufferARB", "wglDestroyPbufferEXT", NULL } },
+        { (PRFuncPtr*) &fGetPbufferDC, { "wglGetPbufferDCARB", "wglGetPbufferDCEXT", NULL } },
+        { (PRFuncPtr*) &fBindTexImage, { "wglBindTexImageARB", "wglBindTexImageEXT", NULL } },
+        { (PRFuncPtr*) &fReleaseTexImage, { "wglReleaseTexImageARB", "wglReleaseTexImageEXT", NULL } },
+        { NULL, { NULL } }
     };
 
     GLLibraryLoader::SymLoadStruct pixFmtSymbols[] = {
-        { (PRFuncPtr*) &fChoosePixelFormat, { "wglChoosePixelFormatARB", "wglChoosePixelFormatEXT", nullptr } },
-        { (PRFuncPtr*) &fGetPixelFormatAttribiv, { "wglGetPixelFormatAttribivARB", "wglGetPixelFormatAttribivEXT", nullptr } },
-        { nullptr, { nullptr } }
+        { (PRFuncPtr*) &fChoosePixelFormat, { "wglChoosePixelFormatARB", "wglChoosePixelFormatEXT", NULL } },
+        { (PRFuncPtr*) &fGetPixelFormatAttribiv, { "wglGetPixelFormatAttribivARB", "wglGetPixelFormatAttribivEXT", NULL } },
+        { NULL, { NULL } }
     };
 
     if (!GLLibraryLoader::LoadSymbols(mOGLLibrary, &pbufferSymbols[0],
@@ -178,13 +191,13 @@ WGLLibrary::EnsureInitialized()
     }
 
     GLLibraryLoader::SymLoadStruct extensionsSymbols[] = {
-        { (PRFuncPtr *) &fGetExtensionsString, { "wglGetExtensionsStringARB", nullptr} },
-        { nullptr, { nullptr } }
+        { (PRFuncPtr *) &fGetExtensionsString, { "wglGetExtensionsStringARB", NULL} },
+        { NULL, { NULL } }
     };
 
     GLLibraryLoader::SymLoadStruct robustnessSymbols[] = {
-        { (PRFuncPtr *) &fCreateContextAttribs, { "wglCreateContextAttribsARB", nullptr} },
-        { nullptr, { nullptr } }
+        { (PRFuncPtr *) &fCreateContextAttribs, { "wglCreateContextAttribsARB", NULL} },
+        { NULL, { NULL } }
     };
 
     if (GLLibraryLoader::LoadSymbols(mOGLLibrary, &extensionsSymbols[0],
@@ -211,7 +224,7 @@ WGLLibrary::EnsureInitialized()
             0
         };
 
-        mWindowGLContext = fCreateContextAttribs(mWindowDC, nullptr, attribs);
+        mWindowGLContext = fCreateContextAttribs(mWindowDC, NULL, attribs);
         if (!mWindowGLContext) {
             mHasRobustness = false;
             mWindowGLContext = fCreateContext(mWindowDC);
@@ -220,10 +233,16 @@ WGLLibrary::EnsureInitialized()
 
     mInitialized = true;
 
+    GLContext::ContextFlags flag = GLContext::ContextFlagsNone;
+    if (aUseMesaLlvmPipe) {
+      mLibType = WGLLibrary::MESA_LLVMPIPE_LIB;
+      flag = GLContext::ContextFlagsMesaLLVMPipe;
+    }
+
     // Call this to create the global GLContext instance,
     // and to check for errors.  Note that this must happen /after/
     // setting mInitialized to TRUE, or an infinite loop results.
-    if (GLContextProviderWGL::GetGlobalContext() == nullptr) {
+    if (GLContextProviderWGL::GetGlobalContext(flag) == nullptr) {
         mInitialized = false;
         return false;
     }
@@ -232,143 +251,158 @@ WGLLibrary::EnsureInitialized()
     return true;
 }
 
-GLContextWGL::GLContextWGL(
-                  const SurfaceCaps& caps,
-                  GLContext* sharedContext,
-                  bool isOffscreen,
-                  HDC aDC,
-                  HGLRC aContext,
-                  HWND aWindow)
-    : GLContext(caps, sharedContext, isOffscreen),
-      mDC(aDC),
-      mContext(aContext),
-      mWnd(aWindow),
-      mPBuffer(nullptr),
-      mPixelFormat(0),
-      mIsDoubleBuffered(false)
+class GLContextWGL : public GLContext
 {
-    // See 899855
-    SetProfileVersion(ContextProfile::OpenGLCompatibility, 200);
-}
-
-GLContextWGL::GLContextWGL(
-                  const SurfaceCaps& caps,
-                  GLContext* sharedContext,
-                  bool isOffscreen,
-                  HANDLE aPbuffer,
-                  HDC aDC,
-                  HGLRC aContext,
-                  int aPixelFormat)
-    : GLContext(caps, sharedContext, isOffscreen),
-      mDC(aDC),
-      mContext(aContext),
-      mWnd(nullptr),
-      mPBuffer(aPbuffer),
-      mPixelFormat(aPixelFormat),
-      mIsDoubleBuffered(false)
-{
-    // See 899855
-    SetProfileVersion(ContextProfile::OpenGLCompatibility, 200);
-}
-
-GLContextWGL::~GLContextWGL()
-{
-    MarkDestroyed();
-
-    sWGLLib.fDeleteContext(mContext);
-
-    if (mPBuffer)
-        sWGLLib.fDestroyPbuffer(mPBuffer);
-    if (mWnd)
-        DestroyWindow(mWnd);
-}
-
-bool
-GLContextWGL::Init()
-{
-    if (!mDC || !mContext)
-        return false;
-
-    // see bug 929506 comment 29. wglGetProcAddress requires a current context.
-    if (!sWGLLib.fMakeCurrent(mDC, mContext))
-        return false;
-
-    SetupLookupFunction();
-    if (!InitWithPrefix("gl", true))
-        return false;
-
-    return true;
-}
-
-bool
-GLContextWGL::MakeCurrentImpl(bool aForce)
-{
-    BOOL succeeded = true;
-
-    // wglGetCurrentContext seems to just pull the HGLRC out
-    // of its TLS slot, so no need to do our own tls slot.
-    // You would think that wglMakeCurrent would avoid doing
-    // work if mContext was already current, but not so much..
-    if (aForce || sWGLLib.fGetCurrentContext() != mContext) {
-        succeeded = sWGLLib.fMakeCurrent(mDC, mContext);
-        NS_ASSERTION(succeeded, "Failed to make GL context current!");
+public:
+    // From Window: (possibly for offscreen!)
+    GLContextWGL(const SurfaceCaps& caps,
+                 GLContext* sharedContext,
+                 bool isOffscreen,
+                 HDC aDC,
+                 HGLRC aContext,
+                 LibType aLibUsed,
+                 HWND aWindow = nullptr)
+        : GLContext(caps, sharedContext, isOffscreen),
+          mDC(aDC),
+          mContext(aContext),
+          mWnd(aWindow),
+          mPBuffer(NULL),
+          mPixelFormat(0),
+          mLibType(aLibUsed),
+          mIsDoubleBuffered(false)
+    {
     }
 
-    return succeeded;
-}
+    // From PBuffer
+    GLContextWGL(const SurfaceCaps& caps,
+                 GLContext* sharedContext,
+                 bool isOffscreen,
+                 HANDLE aPbuffer,
+                 HDC aDC,
+                 HGLRC aContext,
+                 int aPixelFormat,
+                 LibType aLibUsed)
+        : GLContext(caps, sharedContext, isOffscreen),
+          mDC(aDC),
+          mContext(aContext),
+          mWnd(NULL),
+          mPBuffer(aPbuffer),
+          mPixelFormat(aPixelFormat),
+          mLibType(aLibUsed),
+          mIsDoubleBuffered(false)
+    {
+    }
 
-bool
-GLContextWGL::IsCurrent()
-{
-    return sWGLLib.fGetCurrentContext() == mContext;
-}
+    ~GLContextWGL()
+    {
+        MarkDestroyed();
 
-void
-GLContextWGL::SetIsDoubleBuffered(bool aIsDB)
-{
-    mIsDoubleBuffered = aIsDB;
-}
+        sWGLLib[mLibType].fDeleteContext(mContext);
 
-bool
-GLContextWGL::IsDoubleBuffered() const
-{
-    return mIsDoubleBuffered;
-}
+        if (mPBuffer)
+            sWGLLib[mLibType].fDestroyPbuffer(mPBuffer);
+        if (mWnd)
+            DestroyWindow(mWnd);
+    }
 
-bool
-GLContextWGL::SupportsRobustness() const
-{
-    return sWGLLib.HasRobustness();
-}
+    GLContextType GetContextType() {
+        return ContextTypeWGL;
+    }
 
-bool
-GLContextWGL::SwapBuffers() {
-    if (!mIsDoubleBuffered)
-        return false;
-    return ::SwapBuffers(mDC);
-}
+    bool Init()
+    {
+        if (!mDC || !mContext)
+            return false;
 
-bool
-GLContextWGL::SetupLookupFunction()
-{
-    // Make sure that we have a ref to the OGL library;
-    // when run under CodeXL, wglGetProcAddress won't return
-    // the right thing for some core functions.
-    MOZ_ASSERT(mLibrary == nullptr);
+        MakeCurrent();
+        SetupLookupFunction();
+        if (!InitWithPrefix("gl", true))
+            return false;
 
-    mLibrary = sWGLLib.GetOGLLibrary();
-    mLookupFunc = (PlatformLookupFunction)sWGLLib.fGetProcAddress;
-    return true;
-}
+        return true;
+    }
+
+    bool MakeCurrentImpl(bool aForce = false)
+    {
+        BOOL succeeded = true;
+
+        // wglGetCurrentContext seems to just pull the HGLRC out
+        // of its TLS slot, so no need to do our own tls slot.
+        // You would think that wglMakeCurrent would avoid doing
+        // work if mContext was already current, but not so much..
+        if (aForce || sWGLLib[mLibType].fGetCurrentContext() != mContext) {
+            succeeded = sWGLLib[mLibType].fMakeCurrent(mDC, mContext);
+            NS_ASSERTION(succeeded, "Failed to make GL context current!");
+        }
+
+        return succeeded;
+    }
+
+    virtual bool IsCurrent() {
+        return sWGLLib[mLibType].fGetCurrentContext() == mContext;
+    }
+
+    void SetIsDoubleBuffered(bool aIsDB) {
+        mIsDoubleBuffered = aIsDB;
+    }
+
+    virtual bool IsDoubleBuffered() {
+        return mIsDoubleBuffered;
+    }
+
+    bool SupportsRobustness()
+    {
+        return sWGLLib[mLibType].HasRobustness();
+    }
+
+    virtual bool SwapBuffers() {
+        if (!mIsDoubleBuffered)
+            return false;
+        return ::SwapBuffers(mDC);
+    }
+
+    bool SetupLookupFunction()
+    {
+        mLookupFunc = (PlatformLookupFunction)sWGLLib[mLibType].fGetProcAddress;
+        return true;
+    }
+
+    void *GetNativeData(NativeDataType aType)
+    {
+        switch (aType) {
+        case NativeGLContext:
+            return mContext;
+
+        default:
+            return nullptr;
+        }
+    }
+
+    bool ResizeOffscreen(const gfxIntSize& aNewSize);
+
+    HGLRC Context() { return mContext; }
+
+protected:
+    friend class GLContextProviderWGL;
+
+    HDC mDC;
+    HGLRC mContext;
+    HWND mWnd;
+    HANDLE mPBuffer;
+    int mPixelFormat;
+    LibType mLibType;
+    bool mIsDoubleBuffered;
+};
+
 
 static bool
-GetMaxSize(HDC hDC, int format, gfxIntSize& size)
+GetMaxSize(HDC hDC, int format, gfxIntSize& size, LibType aLibToUse)
 {
     int query[] = {LOCAL_WGL_MAX_PBUFFER_WIDTH_ARB, LOCAL_WGL_MAX_PBUFFER_HEIGHT_ARB};
     int result[2];
 
     // (HDC hdc, int iPixelFormat, int iLayerPlane, UINT nAttributes, int* piAttributes, int *piValues)
-    if (!sWGLLib.fGetPixelFormatAttribiv(hDC, format, 0, 2, query, result))
+    if (!sWGLLib[aLibToUse].fGetPixelFormatAttribiv(hDC, format, 0, 2, query, result))
         return false;
 
     size.width = result[0];
@@ -377,11 +411,12 @@ GetMaxSize(HDC hDC, int format, gfxIntSize& size)
 }
 
 static bool
-IsValidSizeForFormat(HDC hDC, int format,
-                     const gfxIntSize& requested)
+IsValidSizeForFormat(HDC hDC, int format, 
+                     const gfxIntSize& requested,
+                     LibType aLibUsed)
 {
     gfxIntSize max;
-    if (!GetMaxSize(hDC, format, max))
+    if (!GetMaxSize(hDC, format, max, aLibUsed))
         return true;
 
     if (requested.width > max.width)
@@ -392,57 +427,68 @@ IsValidSizeForFormat(HDC hDC, int format,
     return true;
 }
 
-static GLContextWGL *
-GetGlobalContextWGL()
+bool
+GLContextWGL::ResizeOffscreen(const gfxIntSize& aNewSize)
 {
-    return static_cast<GLContextWGL*>(GLContextProviderWGL::GetGlobalContext());
+    return ResizeScreenBuffer(aNewSize);
 }
 
-already_AddRefed<GLContext>
-GLContextProviderWGL::CreateWrappingExisting(void*, void*)
+static GLContextWGL *
+GetGlobalContextWGL(const GLContext::ContextFlags aFlags = GLContext::ContextFlagsNone)
 {
-    return nullptr;
+    return static_cast<GLContextWGL*>(GLContextProviderWGL::GetGlobalContext(aFlags));
 }
 
 already_AddRefed<GLContext>
 GLContextProviderWGL::CreateForWindow(nsIWidget *aWidget)
 {
-    if (!sWGLLib.EnsureInitialized()) {
+    LibType libToUse = WGLLibrary::OPENGL_LIB;
+    
+    if (!sWGLLib[libToUse].EnsureInitialized(false)) {
         return nullptr;
     }
 
     /**
-       * We need to make sure we call SetPixelFormat -after- calling
-       * EnsureInitialized, otherwise it can load/unload the dll and
+       * We need to make sure we call SetPixelFormat -after- calling 
+       * EnsureInitialized, otherwise it can load/unload the dll and 
        * wglCreateContext will fail.
        */
 
     HDC dc = (HDC)aWidget->GetNativeData(NS_NATIVE_GRAPHIC);
 
-    SetPixelFormat(dc, sWGLLib.GetWindowPixelFormat(), nullptr);
+    SetPixelFormat(dc, sWGLLib[libToUse].GetWindowPixelFormat(), NULL);
     HGLRC context;
 
     GLContextWGL *shareContext = GetGlobalContextWGL();
 
-    if (sWGLLib.HasRobustness()) {
+    if (sWGLLib[libToUse].HasRobustness()) {
         int attribs[] = {
             LOCAL_WGL_CONTEXT_FLAGS_ARB, LOCAL_WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB,
             LOCAL_WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB, LOCAL_WGL_LOSE_CONTEXT_ON_RESET_ARB,
             0
         };
 
-        context = sWGLLib.fCreateContextAttribs(dc,
-                                                          shareContext ? shareContext->Context() : nullptr,
-                                                          attribs);
+        context = sWGLLib[libToUse].fCreateContextAttribs(dc,
+                                                    shareContext ? shareContext->Context() : nullptr,
+                                                    attribs);
+        if (!context && shareContext) {
+            context = sWGLLib[libToUse].fCreateContextAttribs(dc, nullptr, attribs);
+            if (context) {
+                shareContext = nullptr;
+            }
+        } else {
+            context = sWGLLib[libToUse].fCreateContext(dc);
+            if (context && shareContext && !sWGLLib[libToUse].fShareLists(shareContext->Context(), context)) {
+                shareContext = nullptr;
+            }
+        }
     } else {
-        context = sWGLLib.fCreateContext(dc);
+        context = sWGLLib[libToUse].fCreateContext(dc);
         if (context &&
             shareContext &&
-            !sWGLLib.fShareLists(shareContext->Context(), context))
+            !sWGLLib[libToUse].fShareLists(shareContext->Context(), context))
         {
-            printf_stderr("WGL context creation failed for window: wglShareLists returned false!");
-            sWGLLib.fDeleteContext(context);
-            context = nullptr;
+            shareContext = nullptr;
         }
     }
 
@@ -455,21 +501,22 @@ GLContextProviderWGL::CreateForWindow(nsIWidget *aWidget)
                                                         shareContext,
                                                         false,
                                                         dc,
-                                                        context);
+                                                        context,
+                                                        libToUse);
     if (!glContext->Init()) {
         return nullptr;
     }
 
-    glContext->SetIsDoubleBuffered(true);
+    glContext->SetIsDoubleBuffered(sWGLLib[libToUse].UseDoubleBufferedWindows());
 
     return glContext.forget();
 }
 
 static already_AddRefed<GLContextWGL>
 CreatePBufferOffscreenContext(const gfxIntSize& aSize,
-                              GLContextWGL *aShareContext)
+                              LibType aLibToUse)
 {
-    WGLLibrary& wgl = sWGLLib;
+    WGLLibrary& wgl = sWGLLib[aLibToUse];
 
 #define A1(_a,_x)  do { _a.AppendElement(_x); } while(0)
 #define A2(_a,_x,_y)  do { _a.AppendElement(_x); _a.AppendElement(_y); } while(0)
@@ -498,7 +545,7 @@ CreatePBufferOffscreenContext(const gfxIntSize& aSize,
     int formats[1];
     HDC windowDC = wgl.GetWindowDC();
     if (!wgl.fChoosePixelFormat(windowDC,
-                                attrs.Elements(), nullptr,
+                                attrs.Elements(), NULL,
                                 numFormats, formats, &numFormats)
         || numFormats == 0)
     {
@@ -507,7 +554,7 @@ CreatePBufferOffscreenContext(const gfxIntSize& aSize,
 
     // We don't care; just pick the first one.
     int chosenFormat = formats[0];
-    if (!IsValidSizeForFormat(windowDC, chosenFormat, aSize))
+    if (!IsValidSizeForFormat(windowDC, chosenFormat, aSize, aLibToUse))
         return nullptr;
 
     HANDLE pbuffer = wgl.fCreatePbuffer(windowDC, chosenFormat,
@@ -528,16 +575,9 @@ CreatePBufferOffscreenContext(const gfxIntSize& aSize,
             0
         };
 
-        context = wgl.fCreateContextAttribs(pbdc, aShareContext->Context(), attribs);
+        context = wgl.fCreateContextAttribs(pbdc, nullptr, attribs);
     } else {
         context = wgl.fCreateContext(pbdc);
-        if (context && aShareContext) {
-            if (!wgl.fShareLists(aShareContext->Context(), context)) {
-                wgl.fDeleteContext(context);
-                context = nullptr;
-                printf_stderr("ERROR - creating pbuffer context failed because wglShareLists returned FALSE");
-            }
-        }
     }
 
     if (!context) {
@@ -545,50 +585,51 @@ CreatePBufferOffscreenContext(const gfxIntSize& aSize,
         return nullptr;
     }
 
-    SurfaceCaps dummyCaps = SurfaceCaps::Any();
+	SurfaceCaps dummyCaps = SurfaceCaps::Any();
     nsRefPtr<GLContextWGL> glContext = new GLContextWGL(dummyCaps,
-                                                        aShareContext,
-                                                        true,
+                                                        nullptr, true,
                                                         pbuffer,
                                                         pbdc,
                                                         context,
-                                                        chosenFormat);
+                                                        chosenFormat,
+                                                        aLibToUse);
 
     return glContext.forget();
 }
 
 static already_AddRefed<GLContextWGL>
-CreateWindowOffscreenContext()
+CreateWindowOffscreenContext(GLContext::ContextFlags aFlags)
 {
     // CreateWindowOffscreenContext must return a global-shared context
-    GLContextWGL *shareContext = GetGlobalContextWGL();
+    GLContextWGL *shareContext = GetGlobalContextWGL(aFlags);
     if (!shareContext) {
         return nullptr;
     }
-
+    
+    LibType libToUse = WGLLibrary::SelectLibrary(aFlags);
     HDC dc;
-    HWND win = sWGLLib.CreateDummyWindow(&dc);
+    HWND win = sWGLLib[libToUse].CreateDummyWindow(&dc);
     if (!win) {
         return nullptr;
     }
-
-    HGLRC context = sWGLLib.fCreateContext(dc);
-    if (sWGLLib.HasRobustness()) {
+    
+    HGLRC context = sWGLLib[libToUse].fCreateContext(dc);
+    if (sWGLLib[libToUse].HasRobustness()) {
         int attribs[] = {
             LOCAL_WGL_CONTEXT_FLAGS_ARB, LOCAL_WGL_CONTEXT_ROBUST_ACCESS_BIT_ARB,
             LOCAL_WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB, LOCAL_WGL_LOSE_CONTEXT_ON_RESET_ARB,
             0
         };
 
-        context = sWGLLib.fCreateContextAttribs(dc, shareContext->Context(), attribs);
+        context = sWGLLib[libToUse].fCreateContextAttribs(dc, shareContext->Context(), attribs);
     } else {
-        context = sWGLLib.fCreateContext(dc);
+        context = sWGLLib[libToUse].fCreateContext(dc);
         if (context && shareContext &&
-            !sWGLLib.fShareLists(shareContext->Context(), context))
+            !sWGLLib[libToUse].fShareLists(shareContext->Context(), context))
         {
             NS_WARNING("wglShareLists failed!");
 
-            sWGLLib.fDeleteContext(context);
+            sWGLLib[libToUse].fDeleteContext(context);
             DestroyWindow(win);
             return nullptr;
         }
@@ -601,16 +642,20 @@ CreateWindowOffscreenContext()
     SurfaceCaps caps = SurfaceCaps::ForRGBA();
     nsRefPtr<GLContextWGL> glContext = new GLContextWGL(caps,
                                                         shareContext, true,
-                                                        dc, context, win);
+                                                        dc, context,
+                                                        libToUse, win);
 
     return glContext.forget();
 }
 
 already_AddRefed<GLContext>
 GLContextProviderWGL::CreateOffscreen(const gfxIntSize& size,
-                                      const SurfaceCaps& caps)
+                                      const SurfaceCaps& caps,
+                                      ContextFlags flags)
 {
-    if (!sWGLLib.EnsureInitialized()) {
+    LibType libToUse = WGLLibrary::SelectLibrary(flags);
+    
+    if (!sWGLLib[libToUse].EnsureInitialized(libToUse == WGLLibrary::MESA_LLVMPIPE_LIB)) {
         return nullptr;
     }
 
@@ -618,16 +663,16 @@ GLContextProviderWGL::CreateOffscreen(const gfxIntSize& size,
 
     // Always try to create a pbuffer context first, because we
     // want the context isolation.
-    if (sWGLLib.fCreatePbuffer &&
-        sWGLLib.fChoosePixelFormat)
+    if (sWGLLib[libToUse].fCreatePbuffer &&
+        sWGLLib[libToUse].fChoosePixelFormat)
     {
         gfxIntSize dummySize = gfxIntSize(16, 16);
-        glContext = CreatePBufferOffscreenContext(dummySize, GetGlobalContextWGL());
+        glContext = CreatePBufferOffscreenContext(dummySize, libToUse);
     }
 
     // If it failed, then create a window context and use a FBO.
     if (!glContext) {
-        glContext = CreateWindowOffscreenContext();
+        glContext = CreateWindowOffscreenContext(flags);
     }
 
     if (!glContext ||
@@ -636,46 +681,67 @@ GLContextProviderWGL::CreateOffscreen(const gfxIntSize& size,
         return nullptr;
     }
 
-    if (!glContext->InitOffscreen(ToIntSize(size), caps))
+    if (!glContext->InitOffscreen(size, caps))
         return nullptr;
 
     return glContext.forget();
 }
 
-static nsRefPtr<GLContextWGL> gGlobalContext;
+SharedTextureHandle
+GLContextProviderWGL::CreateSharedHandle(GLContext::SharedTextureShareType shareType,
+                                         void* buffer,
+                                         GLContext::SharedTextureBufferType bufferType)
+{
+  return 0;
+}
+
+already_AddRefed<gfxASurface>
+GLContextProviderWGL::GetSharedHandleAsSurface(GLContext::SharedTextureShareType shareType,
+                                               SharedTextureHandle sharedHandle)
+{
+  return nullptr;
+}
+
+static nsRefPtr<GLContextWGL> gGlobalContext[WGLLibrary::LIBS_MAX];
 
 GLContext *
-GLContextProviderWGL::GetGlobalContext()
+GLContextProviderWGL::GetGlobalContext(const ContextFlags flags)
 {
-    if (!sWGLLib.EnsureInitialized()) {
+    LibType libToUse = WGLLibrary::SelectLibrary(flags);
+    
+    if (!sWGLLib[libToUse].EnsureInitialized(libToUse == WGLLibrary::MESA_LLVMPIPE_LIB)) {
         return nullptr;
     }
 
-    static bool triedToCreateContext = false;
+    static bool triedToCreateContext[WGLLibrary::LIBS_MAX] = {false, false};
 
-    if (!triedToCreateContext && !gGlobalContext) {
-        triedToCreateContext = true;
+    if (!triedToCreateContext[libToUse] && !gGlobalContext[libToUse]) {
+        triedToCreateContext[libToUse] = true;
 
         // conveniently, we already have what we need...
         SurfaceCaps dummyCaps = SurfaceCaps::Any();
-        gGlobalContext = new GLContextWGL(dummyCaps,
-                                          nullptr, true,
-                                          sWGLLib.GetWindowDC(),
-                                          sWGLLib.GetWindowGLContext());
-        if (!gGlobalContext->Init()) {
+        gGlobalContext[libToUse] = new GLContextWGL(dummyCaps,
+                                                    nullptr, true,
+                                                    sWGLLib[libToUse].GetWindowDC(),
+                                                    sWGLLib[libToUse].GetWindowGLContext(),
+                                                    libToUse);
+        if (!gGlobalContext[libToUse]->Init()) {
             NS_WARNING("Global context GLContext initialization failed?");
-            gGlobalContext = nullptr;
+            gGlobalContext[libToUse] = nullptr;
             return nullptr;
         }
+
+        gGlobalContext[libToUse]->SetIsGlobalSharedContext(true);
     }
 
-    return static_cast<GLContext*>(gGlobalContext);
+    return static_cast<GLContext*>(gGlobalContext[libToUse]);
 }
 
 void
 GLContextProviderWGL::Shutdown()
 {
-    gGlobalContext = nullptr;
+    for (int i = 0; i < WGLLibrary::LIBS_MAX; ++i)
+      gGlobalContext[i] = nullptr;
 }
 
 } /* namespace gl */

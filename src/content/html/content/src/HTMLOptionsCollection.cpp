@@ -7,28 +7,33 @@
 
 #include "HTMLOptGroupElement.h"
 #include "mozAutoDocUpdate.h"
-#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLOptionElement.h"
 #include "mozilla/dom/HTMLOptionsCollectionBinding.h"
 #include "mozilla/dom/HTMLSelectElement.h"
+#include "mozilla/Util.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsError.h"
+#include "nsEventDispatcher.h"
+#include "nsEventStates.h"
 #include "nsFormSubmission.h"
 #include "nsGkAtoms.h"
+#include "nsGUIEvent.h"
 #include "nsIComboboxControlFrame.h"
 #include "nsIDocument.h"
 #include "nsIDOMHTMLOptGroupElement.h"
 #include "nsIFormControlFrame.h"
 #include "nsIForm.h"
 #include "nsIFormProcessor.h"
+#include "nsIFrame.h"
 #include "nsIListControlFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsMappedAttributes.h"
 #include "nsRuleData.h"
 #include "nsServiceManagerUtils.h"
 #include "nsStyleConsts.h"
-#include "jsfriendapi.h"
+
+DOMCI_DATA(HTMLOptionsCollection, mozilla::dom::HTMLOptionsCollection)
 
 namespace mozilla {
 namespace dom {
@@ -96,10 +101,10 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(HTMLOptionsCollection, mElements)
 // QueryInterface implementation for HTMLOptionsCollection
 NS_INTERFACE_TABLE_HEAD(HTMLOptionsCollection)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_TABLE(HTMLOptionsCollection,
-                     nsIHTMLCollection,
-                     nsIDOMHTMLOptionsCollection,
-                     nsIDOMHTMLCollection)
+  NS_INTERFACE_TABLE3(HTMLOptionsCollection,
+                      nsIHTMLCollection,
+                      nsIDOMHTMLOptionsCollection,
+                      nsIDOMHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(HTMLOptionsCollection)
 NS_INTERFACE_MAP_END
 
@@ -109,9 +114,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(HTMLOptionsCollection)
 
 
 JSObject*
-HTMLOptionsCollection::WrapObject(JSContext* aCx)
+HTMLOptionsCollection::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLOptionsCollectionBinding::Wrap(aCx, this);
+  return HTMLOptionsCollectionBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMETHODIMP
@@ -165,20 +170,17 @@ HTMLOptionsCollection::SetOption(uint32_t aIndex,
   
   nsCOMPtr<nsIDOMNode> ret;
   if (index == mElements.Length()) {
-    nsCOMPtr<nsIDOMNode> node = do_QueryInterface(aOption);
-    rv = mSelect->AppendChild(node, getter_AddRefs(ret));
+    rv = mSelect->AppendChild(aOption, getter_AddRefs(ret));
   } else {
     // Find the option they're talking about and replace it
     // hold a strong reference to follow COM rules.
-    nsRefPtr<HTMLOptionElement> refChild = ItemAsOption(index);
+    nsCOMPtr<nsIDOMHTMLOptionElement> refChild = ItemAsOption(index);
     NS_ENSURE_TRUE(refChild, NS_ERROR_UNEXPECTED);
 
-    nsCOMPtr<nsINode> parent = refChild->GetParent();
+    nsCOMPtr<nsIDOMNode> parent;
+    refChild->GetParentNode(getter_AddRefs(parent));
     if (parent) {
-      nsCOMPtr<nsINode> node = do_QueryInterface(aOption);
-      ErrorResult res;
-      parent->ReplaceChild(*node, *refChild, res);
-      rv = res.ErrorCode();
+      rv = parent->ReplaceChild(aOption, refChild, getter_AddRefs(ret));
     }
   }
 
@@ -246,7 +248,7 @@ HTMLOptionsCollection::GetElementAt(uint32_t aIndex)
 }
 
 HTMLOptionElement*
-HTMLOptionsCollection::NamedGetter(const nsAString& aName, bool& aFound)
+HTMLOptionsCollection::GetNamedItem(const nsAString& aName) const
 {
   uint32_t count = mElements.Length();
   for (uint32_t i = 0; i < count; i++) {
@@ -256,12 +258,10 @@ HTMLOptionsCollection::NamedGetter(const nsAString& aName, bool& aFound)
                               eCaseMatters) ||
          content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::id, aName,
                               eCaseMatters))) {
-      aFound = true;
       return content;
     }
   }
 
-  aFound = false;
   return nullptr;
 }
 
@@ -280,14 +280,27 @@ HTMLOptionsCollection::NamedItem(const nsAString& aName,
   return NS_OK;
 }
 
-void
-HTMLOptionsCollection::GetSupportedNames(unsigned aFlags,
-                                         nsTArray<nsString>& aNames)
+JSObject*
+HTMLOptionsCollection::NamedItem(JSContext* cx, const nsAString& name,
+                                 ErrorResult& error)
 {
-  if (!(aFlags & JSITER_HIDDEN)) {
-    return;
+  nsINode* item = GetNamedItem(name);
+  if (!item) {
+    return nullptr;
   }
+  JS::Rooted<JSObject*> wrapper(cx, nsWrapperCache::GetWrapper());
+  JSAutoCompartment ac(cx, wrapper);
+  JS::Rooted<JS::Value> v(cx);
+  if (!mozilla::dom::WrapObject(cx, wrapper, item, item, nullptr, &v)) {
+    error.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+  return &v.toObject();
+}
 
+void
+HTMLOptionsCollection::GetSupportedNames(nsTArray<nsString>& aNames)
+{
   nsAutoTArray<nsIAtom*, 8> atoms;
   for (uint32_t i = 0; i < mElements.Length(); ++i) {
     HTMLOptionElement* content = mElements.ElementAt(i);
@@ -335,8 +348,7 @@ HTMLOptionsCollection::Add(nsIDOMHTMLOptionElement* aOption,
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  nsCOMPtr<nsIDOMHTMLElement> elem = do_QueryInterface(aOption);
-  return mSelect->Add(elem, aBefore);
+  return mSelect->Add(aOption, aBefore);
 }
 
 void
@@ -344,11 +356,6 @@ HTMLOptionsCollection::Add(const HTMLOptionOrOptGroupElement& aElement,
                            const Nullable<HTMLElementOrLong>& aBefore,
                            ErrorResult& aError)
 {
-  if (!mSelect) {
-    aError.Throw(NS_ERROR_NOT_INITIALIZED);
-    return;
-  }
-
   mSelect->Add(aElement, aBefore, aError);
 }
 

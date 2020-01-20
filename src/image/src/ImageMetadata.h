@@ -4,13 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ImageMetadata_h___
-#define ImageMetadata_h___
-
-#include <stdint.h>
-#include "mozilla/Maybe.h"
+#include "mozilla/StandardInteger.h"
+#include "mozilla/Util.h"
 #include "nsSize.h"
-#include "Orientation.h"
 
 namespace mozilla {
 namespace image {
@@ -46,18 +42,15 @@ public:
     mIsNonPremultiplied = nonPremult;
   }
 
-  void SetSize(int32_t width, int32_t height, Orientation orientation)
+  void SetSize(int32_t width, int32_t height)
   {
     mSize.construct(nsIntSize(width, height));
-    mOrientation.construct(orientation);
   }
 
   bool HasSize() const { return !mSize.empty(); }
-  bool HasOrientation() const { return !mOrientation.empty(); }
 
   int32_t GetWidth() const { return mSize.ref().width; }
   int32_t GetHeight() const { return mSize.ref().height; }
-  Orientation GetOrientation() const { return mOrientation.ref(); }
 
 private:
   // The hotspot found on cursors, or -1 if none was found.
@@ -68,12 +61,9 @@ private:
   int32_t mLoopCount;
 
   Maybe<nsIntSize> mSize;
-  Maybe<Orientation>  mOrientation;
 
   bool mIsNonPremultiplied;
 };
 
 } // namespace image
 } // namespace mozilla
-
-#endif // ImageMetadata_h___

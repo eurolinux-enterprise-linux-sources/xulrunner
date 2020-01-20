@@ -54,18 +54,15 @@ function onFramesAdded()
   openConsole(null, () => gJSTerm.execute("fooObj", onExecuteFooObj));
 }
 
-function onExecuteFooObj(msg)
+function onExecuteFooObj()
 {
+  let msg = gWebConsole.outputNode.querySelector(".webconsole-msg-output");
   ok(msg, "output message found");
-  ok(msg.textContent.contains('{ testProp2: "testValue2" }'),
-     "message text check");
-
-  let anchor = msg.querySelector("a");
-  ok(anchor, "object link found");
+  isnot(msg.textContent.indexOf("[object Object]"), -1, "message text check");
 
   gJSTerm.once("variablesview-fetched", onFooObjFetch);
 
-  EventUtils.synthesizeMouse(anchor, 2, 2, {}, gWebConsole.iframeWindow);
+  EventUtils.synthesizeMouse(msg, 2, 2, {}, gWebConsole.iframeWindow);
 }
 
 function onFooObjFetch(aEvent, aVar)

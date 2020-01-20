@@ -173,7 +173,7 @@ public:
   HeaderVisitor() { }
   virtual ~HeaderVisitor() {}
 };
-NS_IMPL_ISUPPORTS(HeaderVisitor, nsIHttpHeaderVisitor)
+NS_IMPL_ISUPPORTS1(HeaderVisitor, nsIHttpHeaderVisitor)
 
 NS_IMETHODIMP
 HeaderVisitor::VisitHeader(const nsACString &header, const nsACString &value)
@@ -196,7 +196,7 @@ public:
   virtual ~URLLoadInfo();
 
   // ISupports interface...
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
 
   const char* Name() { return mURLString.get(); }
   int64_t   mBytesRead;
@@ -216,7 +216,7 @@ URLLoadInfo::~URLLoadInfo()
 }
 
 
-NS_IMPL_ISUPPORTS0(URLLoadInfo)
+NS_IMPL_THREADSAFE_ISUPPORTS0(URLLoadInfo)
 
 //-----------------------------------------------------------------------------
 // TestChannelEventSink
@@ -241,7 +241,7 @@ TestChannelEventSink::~TestChannelEventSink()
 }
 
 
-NS_IMPL_ISUPPORTS(TestChannelEventSink, nsIChannelEventSink)
+NS_IMPL_ISUPPORTS1(TestChannelEventSink, nsIChannelEventSink)
 
 NS_IMETHODIMP
 TestChannelEventSink::AsyncOnChannelRedirect(nsIChannel *channel,
@@ -269,7 +269,7 @@ public:
   virtual ~TestAuthPrompt();
 };
 
-NS_IMPL_ISUPPORTS(TestAuthPrompt, nsIAuthPrompt)
+NS_IMPL_ISUPPORTS1(TestAuthPrompt, nsIAuthPrompt)
 
 TestAuthPrompt::TestAuthPrompt()
 {
@@ -280,12 +280,12 @@ TestAuthPrompt::~TestAuthPrompt()
 }
 
 NS_IMETHODIMP
-TestAuthPrompt::Prompt(const char16_t *dialogTitle,
-                       const char16_t *text,
-                       const char16_t *passwordRealm,
+TestAuthPrompt::Prompt(const PRUnichar *dialogTitle,
+                       const PRUnichar *text,
+                       const PRUnichar *passwordRealm,
                        uint32_t savePassword,
-                       const char16_t *defaultText,
-                       char16_t **result,
+                       const PRUnichar *defaultText,
+                       PRUnichar **result,
                        bool *_retval)
 {
     *_retval = false;
@@ -293,12 +293,12 @@ TestAuthPrompt::Prompt(const char16_t *dialogTitle,
 }
 
 NS_IMETHODIMP
-TestAuthPrompt::PromptUsernameAndPassword(const char16_t *dialogTitle,
-                                          const char16_t *dialogText,
-                                          const char16_t *passwordRealm,
+TestAuthPrompt::PromptUsernameAndPassword(const PRUnichar *dialogTitle,
+                                          const PRUnichar *dialogText,
+                                          const PRUnichar *passwordRealm,
                                           uint32_t savePassword,
-                                          char16_t **user,
-                                          char16_t **pwd,
+                                          PRUnichar **user,
+                                          PRUnichar **pwd,
                                           bool *_retval)
 {
     NS_ConvertUTF16toUTF8 text(passwordRealm);
@@ -335,11 +335,11 @@ TestAuthPrompt::PromptUsernameAndPassword(const char16_t *dialogTitle,
 }
 
 NS_IMETHODIMP
-TestAuthPrompt::PromptPassword(const char16_t *dialogTitle,
-                               const char16_t *text,
-                               const char16_t *passwordRealm,
+TestAuthPrompt::PromptPassword(const PRUnichar *dialogTitle,
+                               const PRUnichar *text,
+                               const PRUnichar *passwordRealm,
                                uint32_t savePassword,
-                               char16_t **pwd,
+                               PRUnichar **pwd,
                                bool *_retval)
 {
     *_retval = false;
@@ -370,7 +370,7 @@ InputTestConsumer::~InputTestConsumer()
 {
 }
 
-NS_IMPL_ISUPPORTS(InputTestConsumer, nsIStreamListener, nsIRequestObserver)
+NS_IMPL_ISUPPORTS2(InputTestConsumer, nsIStreamListener, nsIRequestObserver)
 
 NS_IMETHODIMP
 InputTestConsumer::OnStartRequest(nsIRequest *request, nsISupports* context)
@@ -595,7 +595,7 @@ public:
     }
 };
 
-NS_IMPL_ISUPPORTS(NotificationCallbacks, nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS1(NotificationCallbacks, nsIInterfaceRequestor)
 
 //-----------------------------------------------------------------------------
 // helpers...

@@ -1,4 +1,5 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* vim:st=2:sts=2:sw=2:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
@@ -9,14 +10,15 @@ module.metadata = {
 
 const { CC } = require('chrome');
 const { id, name, prefixURI, rootURI, metadata,
-        version, loadReason, preferencesBranch } = require('@loader/options');
+        version, loadReason } = require('@loader/options');
 
 const { readURISync } = require('./net/url');
 
 const addonDataURI = prefixURI + name + '/data/';
 
-const uri = (path="") =>
-  path.contains(":") ? path : addonDataURI + path;
+function uri(path) {
+  return addonDataURI + (path || '');
+}
 
 
 // Some XPCOM APIs require valid URIs as an argument for certain operations
@@ -24,16 +26,16 @@ const uri = (path="") =>
 // associated unique URI string that can be used for that.
 exports.uri = 'addon:' + id;
 exports.id = id;
-exports.preferencesBranch = preferencesBranch || id;
 exports.name = name;
 exports.loadReason = loadReason;
 exports.version = version;
 // If `rootURI` is jar:file://...!/ than add-on is packed.
-exports.packed = (rootURI || '').indexOf('jar:') === 0;
+exports.packed = rootURI.indexOf('jar:') === 0
 exports.data = Object.freeze({
   url: uri,
   load: function read(path) {
     return readURISync(uri(path));
   }
 });
-exports.isPrivateBrowsingSupported = ((metadata || {}).permissions || {})['private-browsing'] === true;
+exports.isPrivateBrowsingSupported = ((metadata.permissions || {})['private-browsing'] === true) ?
+                                     true : false;

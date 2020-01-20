@@ -6,7 +6,6 @@
 #ifndef nsTObserverArray_h___
 #define nsTObserverArray_h___
 
-#include "mozilla/MemoryReporting.h"
 #include "nsTArray.h"
 #include "nsCycleCollectionNoteChild.h"
 
@@ -244,7 +243,7 @@ class nsAutoTObserverArray : protected nsTObserverArray_base {
 
     // Returns the number of bytes on the heap taken up by this object, not
     // including sizeof(*this).
-    size_t SizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
+    size_t SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf) const {
       return mArray.SizeOfExcludingThis(mallocSizeOf);
     }
 
@@ -386,8 +385,8 @@ ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
                             uint32_t aFlags = 0)
 {
   aFlags |= CycleCollectionEdgeNameArrayFlag;
-  uint32_t length = aField.Length();
-  for (uint32_t i = 0; i < length; ++i) {
+  size_t length = aField.Length();
+  for (size_t i = 0; i < length; ++i) {
     ImplCycleCollectionTraverse(aCallback, aField.ElementAt(i), aName, aFlags);
   }
 }

@@ -7,24 +7,41 @@
 #define mozilla_dom_HTMLLegendElement_h
 
 #include "mozilla/Attributes.h"
+#include "nsIDOMHTMLLegendElement.h"
 #include "nsGenericHTMLElement.h"
 #include "mozilla/dom/HTMLFormElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLLegendElement MOZ_FINAL : public nsGenericHTMLElement
+class HTMLLegendElement : public nsGenericHTMLElement,
+                          public nsIDOMHTMLLegendElement
 {
 public:
-  HTMLLegendElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  HTMLLegendElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
+    SetIsDOMBinding();
   }
   virtual ~HTMLLegendElement();
 
   NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLLegendElement, legend)
 
-  using nsGenericHTMLElement::Focus;
+  // nsISupports
+  NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLLegendElement
+  NS_DECL_NSIDOMHTMLLEGENDELEMENT
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
   virtual void Focus(ErrorResult& aError) MOZ_OVERRIDE;
 
   virtual void PerformAccesskey(bool aKeyCausesActivation,
@@ -62,30 +79,29 @@ public:
     return fieldsetControl ? fieldsetControl->GetFormElement() : nullptr;
   }
 
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+
   /**
    * WebIDL Interface
    */
 
   already_AddRefed<HTMLFormElement> GetForm();
 
-  void GetAlign(nsAString& aAlign)
-  {
-    GetHTMLAttr(nsGkAtoms::align, aAlign);
-  }
-
+  // The XPCOM GetAlign is OK for us
   void SetAlign(const nsAString& aAlign, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::align, aAlign, aError);
   }
 
-  ParentObject GetParentObject() {
+  nsINode* GetParentObject() {
     Element* form = GetFormElement();
-    return form ? GetParentObjectInternal(form)
+    return form ? static_cast<nsINode*>(form)
                 : nsGenericHTMLElement::GetParentObject();
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   /**
    * Get the fieldset content element that contains this legend.

@@ -4,26 +4,22 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+MODULE = 'content'
+
 EXPORTS += [
-    'DXVA2Manager.h',
     'WMF.h',
     'WMFDecoder.h',
     'WMFReader.h',
-    'WMFUtils.h',
 ]
 
-UNIFIED_SOURCES += [
+CPP_SOURCES += [
     'DXVA2Manager.cpp',
     'WMFByteStream.cpp',
     'WMFDecoder.cpp',
     'WMFReader.cpp',
     'WMFSourceReaderCallback.cpp',
-]
-
-SOURCES += [
     'WMFUtils.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'gkconwmf_s'
 
-FINAL_LIBRARY = 'gklayout'

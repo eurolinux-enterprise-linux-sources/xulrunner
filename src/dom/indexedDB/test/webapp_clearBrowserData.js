@@ -37,7 +37,7 @@ function testSteps()
   request.onerror = errorHandler;
   request.onupgradeneeded = grabEventAndContinueHandler;
   request.onsuccess = unexpectedSuccessHandler;
-  let event = yield undefined;
+  let event = yield;
 
   let db = event.target.result;
   db.onerror = errorHandler;
@@ -49,7 +49,7 @@ function testSteps()
   objectStore.add(testValue, testKey);
 
   request.onsuccess = grabEventAndContinueHandler;
-  event = yield undefined;
+  event = yield;
 
   // We need to send both remote_browser and remote_app in the querystring
   // because webapp_clearBrowserData_appFrame uses the path + querystring to
@@ -86,13 +86,13 @@ function testSteps()
   info("loading app frame");
 
   document.body.appendChild(iframe);
-  yield undefined;
+  yield;
 
   request = indexedDB.open(window.location.pathname, 1);
   request.onerror = errorHandler;
   request.onupgradeneeded = unexpectedSuccessHandler;
   request.onsuccess = grabEventAndContinueHandler;
-  event = yield undefined;
+  event = yield;
 
   db = event.target.result;
   db.onerror = errorHandler;
@@ -100,12 +100,12 @@ function testSteps()
   objectStore =
     db.transaction(objectStoreName).objectStore(objectStoreName);
   objectStore.get(testKey).onsuccess = grabEventAndContinueHandler;
-  event = yield undefined;
+  event = yield;
 
   ok(testValue == event.target.result, "data still exists");
 
   finishTest();
-  yield undefined;
+  yield;
 }
 
 function start()
@@ -121,7 +121,7 @@ function start()
                                                  isInBrowserElement: false });
   SpecialPowers.addPermission("embed-apps", true, document);
 
-  SpecialPowers.setAllAppsLaunchable(true);
+  let originalAllAppsLaunchable = SpecialPowers.setAllAppsLaunchable(true);
 
   window.addEventListener("unload", function cleanup(event) {
     if (event.target == document) {
@@ -131,6 +131,7 @@ function start()
       SpecialPowers.removePermission("browser",
                                      location.protocol + "//" + appDomain);
       SpecialPowers.removePermission("embed-apps", location.href);
+      SpecialPowers.setAllAppsLaunchable(originalAllAppsLaunchable);
     }
   }, false);
 

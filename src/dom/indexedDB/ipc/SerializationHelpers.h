@@ -16,14 +16,6 @@
 namespace IPC {
 
 template <>
-struct ParamTraits<mozilla::dom::quota::PersistenceType> :
-  public ContiguousEnumSerializer<
-           mozilla::dom::quota::PersistenceType,
-           mozilla::dom::quota::PERSISTENCE_TYPE_PERSISTENT,
-           mozilla::dom::quota::PERSISTENCE_TYPE_INVALID>
-{ };
-
-template <>
 struct ParamTraits<mozilla::dom::indexedDB::Key>
 {
   typedef mozilla::dom::indexedDB::Key paramType;
@@ -46,10 +38,9 @@ struct ParamTraits<mozilla::dom::indexedDB::Key>
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::KeyPath::KeyPathType> :
-  public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::KeyPath::KeyPathType,
-           mozilla::dom::indexedDB::KeyPath::NONEXISTENT,
-           mozilla::dom::indexedDB::KeyPath::ENDGUARD>
+  public EnumSerializer<mozilla::dom::indexedDB::KeyPath::KeyPathType,
+                        mozilla::dom::indexedDB::KeyPath::NONEXISTENT,
+                        mozilla::dom::indexedDB::KeyPath::ENDGUARD>
 { };
 
 template <>
@@ -77,18 +68,16 @@ struct ParamTraits<mozilla::dom::indexedDB::KeyPath>
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::IDBCursor::Direction> :
-  public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::IDBCursor::Direction,
-           mozilla::dom::indexedDB::IDBCursor::NEXT,
-           mozilla::dom::indexedDB::IDBCursor::DIRECTION_INVALID>
+  public EnumSerializer<mozilla::dom::indexedDB::IDBCursor::Direction,
+                        mozilla::dom::indexedDB::IDBCursor::NEXT,
+                        mozilla::dom::indexedDB::IDBCursor::DIRECTION_INVALID>
 { };
 
 template <>
 struct ParamTraits<mozilla::dom::indexedDB::IDBTransaction::Mode> :
-  public ContiguousEnumSerializer<
-           mozilla::dom::indexedDB::IDBTransaction::Mode,
-           mozilla::dom::indexedDB::IDBTransaction::READ_ONLY,
-           mozilla::dom::indexedDB::IDBTransaction::MODE_INVALID>
+  public EnumSerializer<mozilla::dom::indexedDB::IDBTransaction::Mode,
+                        mozilla::dom::indexedDB::IDBTransaction::READ_ONLY,
+                        mozilla::dom::indexedDB::IDBTransaction::MODE_INVALID>
 { };
 
 template <>
@@ -165,10 +154,8 @@ struct ParamTraits<mozilla::dom::indexedDB::DatabaseInfoGuts>
   static void Write(Message* aMsg, const paramType& aParam)
   {
     WriteParam(aMsg, aParam.name);
-    WriteParam(aMsg, aParam.group);
     WriteParam(aMsg, aParam.origin);
     WriteParam(aMsg, aParam.version);
-    WriteParam(aMsg, aParam.persistenceType);
     WriteParam(aMsg, aParam.nextObjectStoreId);
     WriteParam(aMsg, aParam.nextIndexId);
   }
@@ -176,10 +163,8 @@ struct ParamTraits<mozilla::dom::indexedDB::DatabaseInfoGuts>
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     return ReadParam(aMsg, aIter, &aResult->name) &&
-           ReadParam(aMsg, aIter, &aResult->group) &&
            ReadParam(aMsg, aIter, &aResult->origin) &&
            ReadParam(aMsg, aIter, &aResult->version) &&
-           ReadParam(aMsg, aIter, &aResult->persistenceType) &&
            ReadParam(aMsg, aIter, &aResult->nextObjectStoreId) &&
            ReadParam(aMsg, aIter, &aResult->nextIndexId);
   }
@@ -187,7 +172,6 @@ struct ParamTraits<mozilla::dom::indexedDB::DatabaseInfoGuts>
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
     LogParam(aParam.name, aLog);
-    LogParam(aParam.group, aLog);
     LogParam(aParam.origin, aLog);
     LogParam(aParam.version, aLog);
     LogParam(aParam.nextObjectStoreId, aLog);
@@ -248,7 +232,7 @@ struct ParamTraits<mozilla::dom::indexedDB::SerializedStructuredCloneReadInfo>
         return false;
       }
     } else {
-      aResult->data = nullptr;
+      aResult->data = NULL;
     }
 
     return true;
@@ -287,7 +271,7 @@ struct ParamTraits<mozilla::dom::indexedDB::SerializedStructuredCloneWriteInfo>
         return false;
       }
     } else {
-      aResult->data = nullptr;
+      aResult->data = NULL;
     }
 
     if (!ReadParam(aMsg, aIter, &aResult->offsetToKeyProp)) {

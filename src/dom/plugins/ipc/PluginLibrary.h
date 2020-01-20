@@ -13,13 +13,14 @@
 #include "nscore.h"
 #include "nsTArray.h"
 #include "nsError.h"
-#include "mozilla/EventForwards.h"
 
+class gfxASurface;
 class gfxContext;
 class nsCString;
 struct nsIntRect;
 struct nsIntSize;
 class nsNPAPIPlugin;
+class nsGUIEvent;
 
 namespace mozilla {
 namespace layers {
@@ -53,7 +54,7 @@ public:
   virtual nsresult NP_GetMIMEDescription(const char** mimeDesc) = 0;
   virtual nsresult NP_GetValue(void *future, NPPVariable aVariable,
                                void *aValue, NPError* error) = 0;
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_OS2)
   virtual nsresult NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* error) = 0;
 #endif
   virtual nsresult NPP_New(NPMIMEType pluginType, NPP instance,
@@ -84,6 +85,9 @@ public:
                                          const nsIntRect&, gfxContext**) = 0;
   virtual nsresult EndUpdateBackground(NPP instance,
                                        gfxContext*, const nsIntRect&) = 0;
+#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
+  virtual nsresult HandleGUIEvent(NPP instance, const nsGUIEvent&, bool*) = 0;
+#endif
 };
 
 

@@ -15,8 +15,6 @@ public class Restarter extends Activity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-
         Log.i(LOGTAG, "Trying to restart " + AppConstants.MOZ_APP_NAME);
         try {
             int countdown = 40;
@@ -44,14 +42,19 @@ public class Restarter extends Activity {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
             intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME,
-                                AppConstants.BROWSER_INTENT_CLASS_NAME);
+                                AppConstants.BROWSER_INTENT_CLASS);
             Bundle b = getIntent().getExtras();
             if (b != null)
                 intent.putExtras(b);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
             Log.i(LOGTAG, intent.toString());
             startActivity(intent);
         } catch (Exception e) {
             Log.i(LOGTAG, e.toString());
         }
+        // Give the new process time to start before we die
+        GeckoAppShell.waitForAnotherGeckoProc();
+        System.exit(0);
     }
 }

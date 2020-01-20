@@ -1,7 +1,4 @@
 toolkit/library
-  dom
-    ipc
-    security/sandbox
   ipc
   netwerk/build
     netwerk
@@ -18,19 +15,21 @@ toolkit/library
   gfx
   toolkit/components/build
     toolkit/components
+  security/build
   security/manager
-    security/certverifier
-      security/build
-  accessible
+  security/dbm
+  security/nss
+  accessible/build
+    accessible
   dom
   content
   layout
   editor
   parser
   js/src
+    js/xpconnect
+      js/xpconnect/loader
     mfbt
-  js/xpconnect
-    js/xpconnect/loader
   view
   caps
   xpfe/appshell
@@ -57,7 +56,6 @@ browser/app
   browser/themes
   toolkit
   toolkit/components
-  toolkit/components/jsdownloads
   toolkit/content
   toolkit/crashreporter
   toolkit/devtools

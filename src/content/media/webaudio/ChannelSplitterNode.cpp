@@ -8,6 +8,7 @@
 #include "mozilla/dom/ChannelSplitterNodeBinding.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
+#include "mozilla/PodOperations.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,10 +24,10 @@ public:
     MOZ_ASSERT(NS_IsMainThread());
   }
 
-  virtual void ProcessBlocksOnPorts(AudioNodeStream* aStream,
-                                    const OutputChunks& aInput,
-                                    OutputChunks& aOutput,
-                                    bool* aFinished) MOZ_OVERRIDE
+  virtual void ProduceAudioBlocksOnPorts(AudioNodeStream* aStream,
+                                         const OutputChunks& aInput,
+                                         OutputChunks& aOutput,
+                                         bool* aFinished) MOZ_OVERRIDE
   {
     MOZ_ASSERT(aInput.Length() == 1, "Should only have one input port");
 
@@ -45,11 +46,6 @@ public:
       }
     }
   }
-
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
-  {
-    return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-  }
 };
 
 ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
@@ -65,9 +61,9 @@ ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
 }
 
 JSObject*
-ChannelSplitterNode::WrapObject(JSContext* aCx)
+ChannelSplitterNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return ChannelSplitterNodeBinding::Wrap(aCx, this);
+  return ChannelSplitterNodeBinding::Wrap(aCx, aScope, this);
 }
 
 }

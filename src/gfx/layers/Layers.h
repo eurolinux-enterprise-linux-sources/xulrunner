@@ -6,48 +6,28 @@
 #ifndef GFX_LAYERS_H
 #define GFX_LAYERS_H
 
-#include <stdint.h>                     // for uint32_t, uint64_t, uint8_t
-#include <stdio.h>                      // for FILE
-#include <sys/types.h>                  // for int32_t, int64_t
-#include "FrameMetrics.h"               // for FrameMetrics
-#include "Units.h"                      // for LayerMargin, LayerPoint
-#include "gfxContext.h"                 // for GraphicsOperator
-#include "gfxTypes.h"
-#include "gfxColor.h"                   // for gfxRGBA
-#include "gfxMatrix.h"                  // for gfxMatrix
-#include "GraphicsFilter.h"             // for GraphicsFilter
-#include "gfxPoint.h"                   // for gfxPoint
-#include "gfxRect.h"                    // for gfxRect
-#include "gfx2DGlue.h"
-#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2, etc
-#include "mozilla/DebugOnly.h"          // for DebugOnly
-#include "mozilla/EventForwards.h"      // for nsPaintEvent
-#include "mozilla/RefPtr.h"             // for TemporaryRef
-#include "mozilla/TimeStamp.h"          // for TimeStamp, TimeDuration
-#include "mozilla/gfx/BaseMargin.h"     // for BaseMargin
-#include "mozilla/gfx/BasePoint.h"      // for BasePoint
-#include "mozilla/gfx/Point.h"          // for IntSize
-#include "mozilla/gfx/Types.h"          // for SurfaceFormat
-#include "mozilla/gfx/UserData.h"       // for UserData, etc
+#include "mozilla/DebugOnly.h"
+
 #include "mozilla/layers/LayersTypes.h"
-#include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsAutoPtr, nsRefPtr, etc
-#include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsCSSProperty.h"              // for nsCSSProperty
-#include "nsDebug.h"                    // for NS_ASSERTION
-#include "nsISupportsImpl.h"            // for Layer::Release, etc
-#include "nsRect.h"                     // for nsIntRect
-#include "nsRegion.h"                   // for nsIntRegion
-#include "nsSize.h"                     // for nsIntSize
-#include "nsString.h"                   // for nsCString
-#include "nsStyleAnimation.h"           // for nsStyleAnimation::Value, etc
-#include "nsTArray.h"                   // for nsTArray
-#include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
-#include "nscore.h"                     // for nsACString, nsAString
-#include "prlog.h"                      // for PRLogModuleInfo
-#include "gfx2DGlue.h"
+#include "gfxTypes.h"
+#include "gfxASurface.h"
+#include "nsRegion.h"
+#include "nsPoint.h"
+#include "nsRect.h"
+#include "nsISupportsImpl.h"
+#include "nsAutoPtr.h"
+#include "gfx3DMatrix.h"
+#include "gfxColor.h"
+#include "gfxPattern.h"
+#include "nsTArray.h"
+#include "nsThreadUtils.h"
+#include "nsStyleAnimation.h"
+#include "FrameMetrics.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/TimeStamp.h"
 
 class gfxContext;
+class nsPaintEvent;
 
 extern uint8_t gLayerManagerLayerBuilder;
 
@@ -58,11 +38,6 @@ class WebGLContext;
 
 namespace gl {
 class GLContext;
-}
-
-namespace gfx {
-class DrawTarget;
-class SurfaceStream;
 }
 
 namespace css {
@@ -92,6 +67,7 @@ class LayerManagerComposite;
 class SpecificLayerAttributes;
 class SurfaceDescriptor;
 class Compositor;
+class LayerComposite;
 struct TextureFactoryIdentifier;
 struct EffectMask;
 
@@ -164,11 +140,6 @@ static void LayerManagerUserDataDestroy(void *data)
 class LayerManager {
   NS_INLINE_DECL_REFCOUNTING(LayerManager)
 
-protected:
-  typedef mozilla::gfx::DrawTarget DrawTarget;
-  typedef mozilla::gfx::IntSize IntSize;
-  typedef mozilla::gfx::SurfaceFormat SurfaceFormat;
-
 public:
   LayerManager()
     : mDestroyed(false)
@@ -178,6 +149,7 @@ public:
   {
     InitLog();
   }
+  virtual ~LayerManager() {}
 
   /**
    * Release layers and resources held by this layer manager, and mark
@@ -224,8 +196,7 @@ public:
   enum EndTransactionFlags {
     END_DEFAULT = 0,
     END_NO_IMMEDIATE_REDRAW = 1 << 0,  // Do not perform the drawing phase
-    END_NO_COMPOSITE = 1 << 1, // Do not composite after drawing thebes layer contents.
-    END_NO_REMOTE_COMPOSITE = 1 << 2 // Do not schedule a composition with a remote Compositor, if one exists.
+    END_NO_COMPOSITE = 1 << 1 // Do not composite after drawing thebes layer contents.
   };
 
   FrameLayerBuilder* GetLayerBuilder() {
@@ -271,7 +242,6 @@ public:
   typedef void (* DrawThebesLayerCallback)(ThebesLayer* aLayer,
                                            gfxContext* aContext,
                                            const nsIntRegion& aRegionToDraw,
-                                           DrawRegionClip aClip,
                                            const nsIntRegion& aRegionToInvalidate,
                                            void* aCallbackData);
 
@@ -286,13 +256,6 @@ public:
                               void* aCallbackData,
                               EndTransactionFlags aFlags = END_DEFAULT) = 0;
 
-  /**
-   * Schedule a composition with the remote Compositor, if one exists
-   * for this LayerManager. Useful in conjunction with the END_NO_REMOTE_COMPOSITE
-   * flag to EndTransaction.
-   */
-  virtual void Composite() {}
-
   virtual bool HasShadowManagerInternal() const { return false; }
   bool HasShadowManager() const { return HasShadowManagerInternal(); }
 
@@ -300,7 +263,7 @@ public:
 
   /**
    * Returns true if this LayerManager can properly support layers with
-   * SurfaceMode::SURFACE_COMPONENT_ALPHA. This can include disabling component
+   * SURFACE_COMPONENT_ALPHA. This can include disabling component
    * alpha if required.
    */
   virtual bool AreComponentAlphaLayersEnabled() { return true; }
@@ -343,29 +306,10 @@ public:
 #endif
 
   /**
-   * Hints that can be used during Thebes layer creation to influence the type
-   * or properties of the layer created.
-   *
-   * NONE: No hint.
-   * SCROLLABLE: This layer may represent scrollable content.
-   */
-  enum ThebesLayerCreationHint {
-    NONE, SCROLLABLE
-  };
-
-  /**
    * CONSTRUCTION PHASE ONLY
    * Create a ThebesLayer for this manager's layer tree.
    */
   virtual already_AddRefed<ThebesLayer> CreateThebesLayer() = 0;
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * Create a ThebesLayer for this manager's layer tree, with a creation hint
-   * parameter to help optimise the type of layer created.
-   */
-  virtual already_AddRefed<ThebesLayer> CreateThebesLayerWithHint(ThebesLayerCreationHint) {
-    return CreateThebesLayer();
-  }
   /**
    * CONSTRUCTION PHASE ONLY
    * Create a ContainerLayer for this manager's layer tree.
@@ -424,38 +368,37 @@ public:
   virtual LayersBackend GetBackendType() = 0;
 
   /**
-   * Type of layers backend that will be used to composite this layer tree.
-   * When compositing is done remotely, then this returns the layers type
-   * of the compositor.
+   * Creates a surface which is optimized for inter-operating with this layer
+   * manager.
    */
-  virtual LayersBackend GetCompositorBackendType() { return GetBackendType(); }
+  virtual already_AddRefed<gfxASurface>
+    CreateOptimalSurface(const gfxIntSize &aSize,
+                         gfxASurface::gfxImageFormat imageFormat);
+
+  /**
+   * Creates a surface for alpha masks which is optimized for inter-operating
+   * with this layer manager. In contrast to CreateOptimalSurface, this surface
+   * is optimised for drawing alpha only and we assume that drawing the mask
+   * is fairly simple.
+   */
+  virtual already_AddRefed<gfxASurface>
+    CreateOptimalMaskSurface(const gfxIntSize &aSize);
 
   /**
    * Creates a DrawTarget which is optimized for inter-operating with this
-   * layer manager.
-   */
-  virtual TemporaryRef<DrawTarget>
-    CreateOptimalDrawTarget(const IntSize &aSize,
-                            SurfaceFormat imageFormat);
-
-  /**
-   * Creates a DrawTarget for alpha masks which is optimized for inter-
-   * operating with this layer manager. In contrast to CreateOptimalDrawTarget,
-   * this surface is optimised for drawing alpha only and we assume that
-   * drawing the mask is fairly simple.
-   */
-  virtual TemporaryRef<DrawTarget>
-    CreateOptimalMaskDrawTarget(const IntSize &aSize);
-
-  /**
-   * Creates a DrawTarget for use with canvas which is optimized for
-   * inter-operating with this layermanager.
+   * layermanager.
    */
   virtual TemporaryRef<mozilla::gfx::DrawTarget>
     CreateDrawTarget(const mozilla::gfx::IntSize &aSize,
                      mozilla::gfx::SurfaceFormat aFormat);
 
-  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize &aSize) { return true; }
+  virtual bool CanUseCanvasLayerForSize(const gfxIntSize &aSize) { return true; }
+
+  /**
+   * Returns a TextureFactoryIdentifier which describes properties of the backend
+   * used to decide what kind of texture and buffer clients to create
+   */
+  virtual TextureFactoryIdentifier GetTextureFactoryIdentifier();
 
   /**
    * returns the maximum texture size on this layer backend, or INT32_MAX
@@ -495,7 +438,7 @@ public:
    * This getter can be used anytime. Ownership is retained by the layer
    * manager.
    */
-  LayerUserData* GetUserData(void* aKey) const
+  LayerUserData* GetUserData(void* aKey)
   {
     return static_cast<LayerUserData*>(mUserData.Get(static_cast<gfx::UserDataKey*>(aKey)));
   }
@@ -538,18 +481,22 @@ public:
    */
   virtual bool NeedsWidgetInvalidation() { return true; }
 
+  // We always declare the following logging symbols, because it's
+  // extremely tricky to conditionally declare them.  However, for
+  // ifndef MOZ_LAYERS_HAVE_LOG builds, they only have trivial
+  // definitions in Layers.cpp.
   virtual const char* Name() const { return "???"; }
 
   /**
    * Dump information about this layer manager and its managed tree to
    * aFile, which defaults to stderr.
    */
-  void Dump(FILE* aFile=nullptr, const char* aPrefix="", bool aDumpHtml=false);
+  void Dump(FILE* aFile=NULL, const char* aPrefix="", bool aDumpHtml=false);
   /**
    * Dump information about just this layer manager itself to aFile,
    * which defaults to stderr.
    */
-  void DumpSelf(FILE* aFile=nullptr, const char* aPrefix="");
+  void DumpSelf(FILE* aFile=NULL, const char* aPrefix="");
 
   /**
    * Log information about this layer manager and its managed tree to
@@ -577,17 +524,18 @@ public:
   /**
    * Returns a handle which represents current recording start position.
    */
-  virtual uint32_t StartFrameTimeRecording(int32_t aBufferSize);
+  uint32_t StartFrameTimeRecording();
 
   /**
-   *  Clears, then populates aFrameIntervals with the recorded frame timing
-   *  data. The array will be empty if data was overwritten since
-   *  aStartIndex was obtained.
+   *  Clears, then populates 2 arraye with the recorded frames timing data.
+   *  The arrays will be empty if data was overwritten since aStartIndex was obtained.
    */
-  virtual void StopFrameTimeRecording(uint32_t         aStartIndex,
-                                      nsTArray<float>& aFrameIntervals);
+  void StopFrameTimeRecording(uint32_t         aStartIndex,
+                              nsTArray<float>& aFrameIntervals,
+                              nsTArray<float>& aPaintTimes);
 
-  void RecordFrame();
+  void SetPaintStartTime(TimeStamp& aTime);
+
   void PostPresent();
 
   void BeginTabSwitch();
@@ -597,30 +545,20 @@ public:
 
   bool IsCompositingCheap(LayersBackend aBackend)
   {
-    // LayersBackend::LAYERS_NONE is an error state, but in that case we should try to
+    // LAYERS_NONE is an error state, but in that case we should try to
     // avoid loading the compositor!
-    return LayersBackend::LAYERS_BASIC != aBackend && LayersBackend::LAYERS_NONE != aBackend;
+    return LAYERS_BASIC != aBackend && LAYERS_NONE != aBackend;
   }
 
   virtual bool IsCompositingCheap() { return true; }
 
   bool IsInTransaction() const { return mInTransaction; }
 
-  virtual void SetRegionToClear(const nsIntRegion& aRegion)
-  {
-    mRegionToClear = aRegion;
-  }
-
 protected:
   nsRefPtr<Layer> mRoot;
   gfx::UserData mUserData;
   bool mDestroyed;
   bool mSnapEffectiveTransforms;
-
-  nsIntRegion mRegionToClear;
-
-  // Protected destructor, to discourage deletion outside of Release():
-  virtual ~LayerManager() {}
 
   // Print interesting information about this into aTo.  Internally
   // used to implement Dump*() and Log*().
@@ -642,7 +580,9 @@ private:
     bool mIsPaused;
     uint32_t mNextIndex;
     TimeStamp mLastFrameTime;
+    TimeStamp mPaintStartTime;
     nsTArray<float> mIntervals;
+    nsTArray<float> mPaints;
     uint32_t mLatestStartIndex;
     uint32_t mCurrentRunStartIndex;
   };
@@ -651,6 +591,7 @@ private:
   TimeStamp mTabSwitchStart;
 };
 
+class ThebesLayer;
 typedef InfallibleTArray<Animation> AnimationArray;
 
 struct AnimData {
@@ -678,6 +619,8 @@ public:
     TYPE_SHADOW,
     TYPE_THEBES
   };
+
+  virtual ~Layer();
 
   /**
    * Returns the LayerManager this Layer belongs to. Note that the layer
@@ -712,13 +655,7 @@ public:
      * transaction where there is no possibility of redrawing the content, so the
      * implementation should be ready for that.
      */
-    CONTENT_MAY_CHANGE_TRANSFORM = 0x08,
-
-    /**
-     * Disable subpixel AA for this layer. This is used if the display isn't suited
-     * for subpixel AA like hidpi or rotated content.
-     */
-    CONTENT_DISABLE_SUBPIXEL_AA = 0x10
+    CONTENT_MAY_CHANGE_TRANSFORM = 0x08
   };
   /**
    * CONSTRUCTION PHASE ONLY
@@ -760,38 +697,6 @@ public:
     }
   }
 
-  /*
-   * Compositor event handling
-   * =========================
-   * When a touch-start event (or similar) is sent to the AsyncPanZoomController,
-   * it needs to decide whether the event should be sent to the main thread.
-   * Each layer has a list of event handling regions. When the compositor needs
-   * to determine how to handle a touch event, it scans the layer tree from top
-   * to bottom in z-order (traversing children before their parents). Points
-   * outside the clip region for a layer cause that layer (and its subtree)
-   * to be ignored. If a layer has a mask layer, and that mask layer's alpha
-   * value is zero at the event point, then the layer and its subtree should
-   * be ignored.
-   * For each layer, if the point is outside its hit region, we ignore the layer
-   * and move onto the next. If the point is inside its hit region but
-   * outside the dispatch-to-content region, we can initiate a gesture without
-   * consulting the content thread. Otherwise we must dispatch the event to
-   * content.
-   */
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * Set the event handling region.
-   */
-  void SetEventRegions(const EventRegions& aRegions)
-  {
-    if (mEventRegions != aRegions) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) eventregions were %s, now %s", this,
-        mEventRegions.ToString().get(), aRegions.ToString().get()));
-      mEventRegions = aRegions;
-      Mutated();
-    }
-  }
-
   /**
    * CONSTRUCTION PHASE ONLY
    * Set the opacity which will be applied to this layer as it
@@ -804,34 +709,6 @@ public:
       mOpacity = aOpacity;
       Mutated();
     }
-  }
-
-  void SetMixBlendMode(gfx::CompositionOp aMixBlendMode)
-  {
-    if (mMixBlendMode != aMixBlendMode) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) MixBlendMode", this));
-      mMixBlendMode = aMixBlendMode;
-      Mutated();
-    }
-  }
-  
-  void DeprecatedSetMixBlendMode(gfxContext::GraphicsOperator aMixBlendMode)
-  {
-    SetMixBlendMode(gfx::CompositionOpForOp(aMixBlendMode));
-  }
-
-  void SetForceIsolatedGroup(bool aForceIsolatedGroup)
-  {
-    if(mForceIsolatedGroup != aForceIsolatedGroup) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ForceIsolatedGroup", this));
-      mForceIsolatedGroup = aForceIsolatedGroup;
-      Mutated();
-    }
-  }
-  
-  bool GetForceIsolatedGroup() const
-  {
-    return mForceIsolatedGroup;
   }
 
   /**
@@ -891,7 +768,8 @@ public:
   {
 #ifdef DEBUG
     if (aMaskLayer) {
-      bool maskIs2D = aMaskLayer->GetTransform().CanDraw2D();
+      gfxMatrix maskTransform;
+      bool maskIs2D = aMaskLayer->GetTransform().CanDraw2D(&maskTransform);
       NS_ASSERTION(maskIs2D, "Mask layer has invalid transform.");
     }
 #endif
@@ -907,8 +785,10 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Tell this layer what its transform should be. The transformation
    * is applied when compositing the layer into its parent container.
+   * XXX Currently only transformations corresponding to 2D affine transforms
+   * are supported.
    */
-  void SetBaseTransform(const gfx::Matrix4x4& aMatrix)
+  void SetBaseTransform(const gfx3DMatrix& aMatrix)
   {
     NS_ASSERTION(!aMatrix.IsSingular(),
                  "Shouldn't be trying to draw with a singular matrix!");
@@ -929,9 +809,9 @@ public:
    * method enqueues a new transform value to be set immediately after
    * the next transaction is opened.
    */
-  void SetBaseTransformForNextTransaction(const gfx::Matrix4x4& aMatrix)
+  void SetBaseTransformForNextTransaction(const gfx3DMatrix& aMatrix)
   {
-    mPendingTransform = new gfx::Matrix4x4(aMatrix);
+    mPendingTransform = new gfx3DMatrix(aMatrix);
   }
 
   void SetPostScale(float aXScale, float aYScale)
@@ -961,20 +841,16 @@ public:
   }
 
   // Call AddAnimation to add a new animation to this layer from layout code.
-  // Caller must fill in all the properties of the returned animation.
-  Animation* AddAnimation();
+  // Caller must add segments to the returned animation.
+  // aStart represents the time at the *end* of the delay.
+  Animation* AddAnimation(mozilla::TimeStamp aStart, mozilla::TimeDuration aDuration,
+                          float aIterations, int aDirection,
+                          nsCSSProperty aProperty, const AnimationData& aData);
   // ClearAnimations clears animations on this layer.
   void ClearAnimations();
   // This is only called when the layer tree is updated. Do not call this from
   // layout code.  To add an animation to this layer, use AddAnimation.
   void SetAnimations(const AnimationArray& aAnimations);
-
-  // These are a parallel to AddAnimation and clearAnimations, except
-  // they add pending animations that apply only when the next
-  // transaction is begun.  (See also
-  // SetBaseTransformForNextTransaction.)
-  Animation* AddAnimationForNextTransaction();
-  void ClearAnimationsForNextTransaction();
 
   /**
    * CONSTRUCTION PHASE ONLY
@@ -983,7 +859,7 @@ public:
    * same position when compositing the layer tree with a transformation
    * (such as when asynchronously scrolling and zooming).
    */
-  void SetFixedPositionAnchor(const LayerPoint& aAnchor)
+  void SetFixedPositionAnchor(const gfxPoint& aAnchor)
   {
     if (mAnchor != aAnchor) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FixedPositionAnchor", this));
@@ -1003,7 +879,7 @@ public:
    * layer represents are auto-positioned, and so fixed position margins should
    * not have an effect on the corresponding axis.
    */
-  void SetFixedPositionMargins(const LayerMargin& aMargins)
+  void SetFixedPositionMargins(const gfx::Margin& aMargins)
   {
     if (mMargins != aMargins) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FixedPositionMargins", this));
@@ -1012,82 +888,29 @@ public:
     }
   }
 
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * If a layer is "sticky position", |aScrollId| holds the scroll identifier
-   * of the scrollable content that contains it. The difference between the two
-   * rectangles |aOuter| and |aInner| is treated as two intervals in each
-   * dimension, with the current scroll position at the origin. For each
-   * dimension, while that component of the scroll position lies within either
-   * interval, the layer should not move relative to its scrolling container.
-   */
-  void SetStickyPositionData(FrameMetrics::ViewID aScrollId, LayerRect aOuter,
-                             LayerRect aInner)
-  {
-    if (!mStickyPositionData ||
-        !mStickyPositionData->mOuter.IsEqualEdges(aOuter) ||
-        !mStickyPositionData->mInner.IsEqualEdges(aInner)) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) StickyPositionData", this));
-      if (!mStickyPositionData) {
-        mStickyPositionData = new StickyPositionData;
-      }
-      mStickyPositionData->mScrollId = aScrollId;
-      mStickyPositionData->mOuter = aOuter;
-      mStickyPositionData->mInner = aInner;
-      Mutated();
-    }
-  }
-
-  enum ScrollDirection {
-    NONE,
-    VERTICAL,
-    HORIZONTAL
-  };
-
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * If a layer is a scrollbar layer, |aScrollId| holds the scroll identifier
-   * of the scrollable content that the scrollbar is for.
-   */
-  void SetScrollbarData(FrameMetrics::ViewID aScrollId, ScrollDirection aDir)
-  {
-    if (mScrollbarTargetId != aScrollId ||
-        mScrollbarDirection != aDir) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ScrollbarData", this));
-      mScrollbarTargetId = aScrollId;
-      mScrollbarDirection = aDir;
-      Mutated();
-    }
-  }
-
   // These getters can be used anytime.
   float GetOpacity() { return mOpacity; }
-  gfx::CompositionOp GetMixBlendMode() const { return mMixBlendMode; }
   const nsIntRect* GetClipRect() { return mUseClipRect ? &mClipRect : nullptr; }
   uint32_t GetContentFlags() { return mContentFlags; }
   const nsIntRegion& GetVisibleRegion() { return mVisibleRegion; }
-  const EventRegions& GetEventRegions() const { return mEventRegions; }
   ContainerLayer* GetParent() { return mParent; }
   Layer* GetNextSibling() { return mNextSibling; }
-  const Layer* GetNextSibling() const { return mNextSibling; }
   Layer* GetPrevSibling() { return mPrevSibling; }
-  const Layer* GetPrevSibling() const { return mPrevSibling; }
-  virtual Layer* GetFirstChild() const { return nullptr; }
-  virtual Layer* GetLastChild() const { return nullptr; }
-  const gfx::Matrix4x4 GetTransform() const;
-  const gfx::Matrix4x4& GetBaseTransform() const { return mTransform; }
-  float GetPostXScale() const { return mPostXScale; }
-  float GetPostYScale() const { return mPostYScale; }
+  virtual Layer* GetFirstChild() { return nullptr; }
+  virtual Layer* GetLastChild() { return nullptr; }
+  const gfx3DMatrix GetTransform();
+  const gfx3DMatrix& GetBaseTransform() { return mTransform; }
+  float GetPostXScale() { return mPostXScale; }
+  float GetPostYScale() { return mPostYScale; }
   bool GetIsFixedPosition() { return mIsFixedPosition; }
-  bool GetIsStickyPosition() { return mStickyPositionData; }
-  LayerPoint GetFixedPositionAnchor() { return mAnchor; }
-  const LayerMargin& GetFixedPositionMargins() { return mMargins; }
-  FrameMetrics::ViewID GetStickyScrollContainerId() { return mStickyPositionData->mScrollId; }
-  const LayerRect& GetStickyScrollRangeOuter() { return mStickyPositionData->mOuter; }
-  const LayerRect& GetStickyScrollRangeInner() { return mStickyPositionData->mInner; }
-  FrameMetrics::ViewID GetScrollbarTargetContainerId() { return mScrollbarTargetId; }
-  ScrollDirection GetScrollbarDirection() { return mScrollbarDirection; }
-  Layer* GetMaskLayer() const { return mMaskLayer; }
+  gfxPoint GetFixedPositionAnchor() { return mAnchor; }
+  const gfx::Margin& GetFixedPositionMargins() { return mMargins; }
+  Layer* GetMaskLayer() { return mMaskLayer; }
+
+  // These functions allow attaching an AsyncPanZoomController to this layer,
+  // and can be used anytime.
+  void SetAsyncPanZoomController(AsyncPanZoomController *controller);
+  AsyncPanZoomController* GetAsyncPanZoomController();
 
   // Note that all lengths in animation data are either in CSS pixels or app
   // units and must be converted to device pixels by the compositor.
@@ -1101,7 +924,7 @@ public:
    * Returns the local transform for this layer: either mTransform or,
    * for shadow layers, GetShadowTransform()
    */
-  const gfx::Matrix4x4 GetLocalTransform();
+  const gfx3DMatrix GetLocalTransform();
 
   /**
    * Returns the local opacity for this layer: either mOpacity or,
@@ -1132,13 +955,18 @@ public:
   // quality.
   bool CanUseOpaqueSurface();
 
+  enum SurfaceMode {
+    SURFACE_OPAQUE,
+    SURFACE_SINGLE_CHANNEL_ALPHA,
+    SURFACE_COMPONENT_ALPHA
+  };
   SurfaceMode GetSurfaceMode()
   {
     if (CanUseOpaqueSurface())
-      return SurfaceMode::SURFACE_OPAQUE;
+      return SURFACE_OPAQUE;
     if (mContentFlags & CONTENT_COMPONENT_ALPHA)
-      return SurfaceMode::SURFACE_COMPONENT_ALPHA;
-    return SurfaceMode::SURFACE_SINGLE_CHANNEL_ALPHA;
+      return SURFACE_COMPONENT_ALPHA;
+    return SURFACE_SINGLE_CHANNEL_ALPHA;
   }
 
   /**
@@ -1168,7 +996,7 @@ public:
    * This getter can be used anytime. Ownership is retained by the layer
    * manager.
    */
-  LayerUserData* GetUserData(void* aKey) const
+  LayerUserData* GetUserData(void* aKey)
   {
     return static_cast<LayerUserData*>(mUserData.Get(static_cast<gfx::UserDataKey*>(aKey)));
   }
@@ -1195,7 +1023,6 @@ public:
    * a ContainerLayer.
    */
   virtual ContainerLayer* AsContainerLayer() { return nullptr; }
-  virtual const ContainerLayer* AsContainerLayer() const { return nullptr; }
 
    /**
     * Dynamic cast to a RefLayer. Returns null if this is not a
@@ -1226,19 +1053,11 @@ public:
   // accounting for this layer possibly being a shadow.
   const nsIntRect* GetEffectiveClipRect();
   const nsIntRegion& GetEffectiveVisibleRegion();
-
   /**
    * Returns the product of the opacities of this layer and all ancestors up
    * to and excluding the nearest ancestor that has UseIntermediateSurface() set.
    */
   float GetEffectiveOpacity();
-  
-  /**
-   * Returns the blendmode of this layer.
-   */
-  gfx::CompositionOp GetEffectiveMixBlendMode();
-  gfxContext::GraphicsOperator DeprecatedGetEffectiveMixBlendMode();
-  
   /**
    * This returns the effective transform computed by
    * ComputeEffectiveTransforms. Typically this is a transform that transforms
@@ -1247,7 +1066,7 @@ public:
    * ancestor with UseIntermediateSurface() (or to the root, if there is no
    * such ancestor), but for BasicLayers it's different.
    */
-  const gfx::Matrix4x4& GetEffectiveTransform() const { return mEffectiveTransform; }
+  const gfx3DMatrix& GetEffectiveTransform() const { return mEffectiveTransform; }
 
   /**
    * @param aTransformToSurface the composition of the transforms
@@ -1260,12 +1079,12 @@ public:
    * We promise that when this is called on a layer, all ancestor layers
    * have already had ComputeEffectiveTransforms called.
    */
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) = 0;
+  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface) = 0;
 
   /**
    * computes the effective transform for a mask layer, if this layer has one
    */
-  void ComputeEffectiveTransformForMaskLayer(const gfx::Matrix4x4& aTransformToSurface);
+  void ComputeEffectiveTransformForMaskLayer(const gfx3DMatrix& aTransformToSurface);
 
   /**
    * Calculate the scissor rect required when rendering this layer.
@@ -1278,7 +1097,7 @@ public:
    * aWorldTransform is non-null.
    */
   nsIntRect CalculateScissorRect(const nsIntRect& aCurrentScissorRect,
-                                 const gfx::Matrix* aWorldTransform);
+                                 const gfxMatrix* aWorldTransform);
 
   virtual const char* Name() const =0;
   virtual LayerType GetType() const =0;
@@ -1301,12 +1120,12 @@ public:
    * Dump information about this layer manager and its managed tree to
    * aFile, which defaults to stderr.
    */
-  void Dump(FILE* aFile=nullptr, const char* aPrefix="", bool aDumpHtml=false);
+  void Dump(FILE* aFile=NULL, const char* aPrefix="", bool aDumpHtml=false);
   /**
    * Dump information about just this layer manager itself to aFile,
    * which defaults to stderr.
    */
-  void DumpSelf(FILE* aFile=nullptr, const char* aPrefix="");
+  void DumpSelf(FILE* aFile=NULL, const char* aPrefix="");
 
   /**
    * Log information about this layer manager and its managed tree to
@@ -1319,13 +1138,6 @@ public:
    */
   void LogSelf(const char* aPrefix="");
 
-  // Print interesting information about this into aTo.  Internally
-  // used to implement Dump*() and Log*().  If subclasses have
-  // additional interesting properties, they should override this with
-  // an implementation that first calls the base implementation then
-  // appends additional info to aTo.
-  virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix);
-
   static bool IsLogEnabled() { return LayerManager::IsLogEnabled(); }
 
   /**
@@ -1333,7 +1145,6 @@ public:
    * marked as needed to be recomposited.
    */
   const nsIntRegion& GetInvalidRegion() { return mInvalidRegion; }
-  const void SetInvalidRegion(const nsIntRegion& aRect) { mInvalidRegion = aRect; }
 
   /**
    * Mark the entirety of the layer's visible region as being invalid.
@@ -1360,17 +1171,20 @@ public:
 
   virtual LayerRenderState GetRenderState() { return LayerRenderState(); }
 
+protected:
+  Layer(LayerManager* aManager, void* aImplData);
 
   void Mutated()
   {
     mManager->Mutated(this);
   }
 
-protected:
-  Layer(LayerManager* aManager, void* aImplData);
-
-  // Protected destructor, to discourage deletion outside of Release():
-  virtual ~Layer();
+  // Print interesting information about this into aTo.  Internally
+  // used to implement Dump*() and Log*().  If subclasses have
+  // additional interesting properties, they should override this with
+  // an implementation that first calls the base implementation then
+  // appends additional info to aTo.
+  virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix);
 
   /**
    * We can snap layer transforms for two reasons:
@@ -1397,8 +1211,8 @@ protected:
    * @param aResidualTransform a transform to apply before the result transform
    * in order to get the results to completely match aTransform.
    */
-  gfx::Matrix4x4 SnapTransformTranslation(const gfx::Matrix4x4& aTransform,
-                                          gfx::Matrix* aResidualTransform);
+  gfx3DMatrix SnapTransformTranslation(const gfx3DMatrix& aTransform,
+                                       gfxMatrix* aResidualTransform);
   /**
    * See comment for SnapTransformTranslation.
    * This function implements type 2 snapping. If aTransform is a translation
@@ -1410,9 +1224,9 @@ protected:
    * @param aResidualTransform a transform to apply before the result transform
    * in order to get the results to completely match aTransform.
    */
-  gfx::Matrix4x4 SnapTransform(const gfx::Matrix4x4& aTransform,
-                               const gfxRect& aSnapRect,
-                               gfx::Matrix* aResidualTransform);
+  gfx3DMatrix SnapTransform(const gfx3DMatrix& aTransform,
+                            const gfxRect& aSnapRect,
+                            gfxMatrix* aResidualTransform);
 
   /**
    * Returns true if this layer's effective transform is not just
@@ -1430,22 +1244,17 @@ protected:
   nsRefPtr<Layer> mMaskLayer;
   gfx::UserData mUserData;
   nsIntRegion mVisibleRegion;
-  EventRegions mEventRegions;
-  gfx::Matrix4x4 mTransform;
+  gfx3DMatrix mTransform;
   // A mutation of |mTransform| that we've queued to be applied at the
   // end of the next transaction (if nothing else overrides it in the
   // meantime).
-  nsAutoPtr<gfx::Matrix4x4> mPendingTransform;
+  nsAutoPtr<gfx3DMatrix> mPendingTransform;
   float mPostXScale;
   float mPostYScale;
-  gfx::Matrix4x4 mEffectiveTransform;
+  gfx3DMatrix mEffectiveTransform;
   AnimationArray mAnimations;
-  // See mPendingTransform above.
-  nsAutoPtr<AnimationArray> mPendingAnimations;
   InfallibleTArray<AnimData> mAnimationData;
   float mOpacity;
-  gfx::CompositionOp mMixBlendMode;
-  bool mForceIsolatedGroup;
   nsIntRect mClipRect;
   nsIntRect mTileSourceRect;
   nsIntRegion mInvalidRegion;
@@ -1453,16 +1262,8 @@ protected:
   bool mUseClipRect;
   bool mUseTileSourceRect;
   bool mIsFixedPosition;
-  LayerPoint mAnchor;
-  LayerMargin mMargins;
-  struct StickyPositionData {
-    FrameMetrics::ViewID mScrollId;
-    LayerRect mOuter;
-    LayerRect mInner;
-  };
-  nsAutoPtr<StickyPositionData> mStickyPositionData;
-  FrameMetrics::ViewID mScrollbarTargetId;
-  ScrollDirection mScrollbarDirection;
+  gfxPoint mAnchor;
+  gfx::Margin mMargins;
   DebugOnly<uint32_t> mDebugColorIndex;
   // If this layer is used for OMTA, then this counter is used to ensure we
   // stay in sync with the animation manager
@@ -1512,18 +1313,18 @@ public:
 
   MOZ_LAYER_DECL_NAME("ThebesLayer", TYPE_THEBES)
 
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
+  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
   {
-    gfx::Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
-    gfx::Matrix residual;
+    gfx3DMatrix idealTransform = GetLocalTransform()*aTransformToSurface;
+    gfxMatrix residual;
     mEffectiveTransform = SnapTransformTranslation(idealTransform,
         mAllowResidualTranslation ? &residual : nullptr);
     // The residual can only be a translation because SnapTransformTranslation
     // only changes the transform if it's a translation
-    NS_ASSERTION(residual.IsTranslation(),
+    NS_ASSERTION(!residual.HasNonTranslation(),
                  "Residual transform can only be a translation");
-    if (!gfx::ThebesPoint(residual.GetTranslation()).WithinEpsilonOf(mResidualTranslation, 1e-3f)) {
-      mResidualTranslation = gfx::ThebesPoint(residual.GetTranslation());
+    if (!residual.GetTranslation().WithinEpsilonOf(mResidualTranslation, 1e-3f)) {
+      mResidualTranslation = residual.GetTranslation();
       NS_ASSERTION(-0.5 <= mResidualTranslation.x && mResidualTranslation.x < 0.5 &&
                    -0.5 <= mResidualTranslation.y && mResidualTranslation.y < 0.5,
                    "Residual translation out of range");
@@ -1580,9 +1381,6 @@ protected:
  */
 class ContainerLayer : public Layer {
 public:
-
-  ~ContainerLayer();
-
   /**
    * CONSTRUCTION PHASE ONLY
    * Insert aChild into the child list of this container. aChild must
@@ -1590,13 +1388,13 @@ public:
    * If aAfter is non-null, it must be a child of this container and
    * we insert after that layer. If it's null we insert at the start.
    */
-  virtual bool InsertAfter(Layer* aChild, Layer* aAfter);
+  virtual void InsertAfter(Layer* aChild, Layer* aAfter) = 0;
   /**
    * CONSTRUCTION PHASE ONLY
    * Remove aChild from the child list of this container. aChild must
    * be a child of this container.
    */
-  virtual bool RemoveChild(Layer* aChild);
+  virtual void RemoveChild(Layer* aChild) = 0;
   /**
    * CONSTRUCTION PHASE ONLY
    * Reposition aChild from the child list of this container. aChild must
@@ -1604,7 +1402,7 @@ public:
    * If aAfter is non-null, it must be a child of this container and we
    * reposition after that layer. If it's null, we reposition at the start.
    */
-  virtual bool RepositionChild(Layer* aChild, Layer* aAfter);
+  virtual void RepositionChild(Layer* aChild, Layer* aAfter) = 0;
 
   /**
    * CONSTRUCTION PHASE ONLY
@@ -1616,28 +1414,6 @@ public:
     if (mFrameMetrics != aFrameMetrics) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) FrameMetrics", this));
       mFrameMetrics = aFrameMetrics;
-      Mutated();
-    }
-  }
-
-  // These functions allow attaching an AsyncPanZoomController to this layer,
-  // and can be used anytime.
-  // A container layer has an APZC only-if GetFrameMetrics().IsScrollable()
-  void SetAsyncPanZoomController(AsyncPanZoomController *controller);
-  AsyncPanZoomController* GetAsyncPanZoomController() const;
-
-  /**
-   * CONSTRUCTION PHASE ONLY
-   * Set the ViewID of the ContainerLayer to which overscroll should be handed
-   * off. A value of NULL_SCROLL_ID means that the default handoff-parent-finding
-   * behaviour should be used (i.e. walk up the layer tree to find the next
-   * scrollable ancestor layer).
-   */
-  void SetScrollHandoffParentId(FrameMetrics::ViewID aScrollParentId)
-  {
-    if (mScrollHandoffParentId != aScrollParentId) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ScrollHandoffParentId", this));
-      mScrollHandoffParentId = aScrollParentId;
       Mutated();
     }
   }
@@ -1673,16 +1449,14 @@ public:
   // These getters can be used anytime.
 
   virtual ContainerLayer* AsContainerLayer() { return this; }
-  virtual const ContainerLayer* AsContainerLayer() const { return this; }
 
-  virtual Layer* GetFirstChild() const { return mFirstChild; }
-  virtual Layer* GetLastChild() const { return mLastChild; }
-  const FrameMetrics& GetFrameMetrics() const { return mFrameMetrics; }
-  FrameMetrics::ViewID GetScrollHandoffParentId() const { return mScrollHandoffParentId; }
-  float GetPreXScale() const { return mPreXScale; }
-  float GetPreYScale() const { return mPreYScale; }
-  float GetInheritedXScale() const { return mInheritedXScale; }
-  float GetInheritedYScale() const { return mInheritedYScale; }
+  virtual Layer* GetFirstChild() { return mFirstChild; }
+  virtual Layer* GetLastChild() { return mLastChild; }
+  const FrameMetrics& GetFrameMetrics() { return mFrameMetrics; }
+  float GetPreXScale() { return mPreXScale; }
+  float GetPreYScale() { return mPreYScale; }
+  float GetInheritedXScale() { return mInheritedXScale; }
+  float GetInheritedYScale() { return mInheritedYScale; }
 
   MOZ_LAYER_DECL_NAME("ContainerLayer", TYPE_CONTAINER)
 
@@ -1692,7 +1466,7 @@ public:
    * container is backend-specific. ComputeEffectiveTransforms must also set
    * mUseIntermediateSurface.
    */
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) = 0;
+  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface) = 0;
 
   /**
    * Call this only after ComputeEffectiveTransforms has been invoked
@@ -1723,38 +1497,43 @@ public:
    */
   bool SupportsComponentAlphaChildren() { return mSupportsComponentAlphaChildren; }
 
-  /**
-   * Returns true if aLayer or any layer in its parent chain has the opaque
-   * content flag set.
-   */
-  static bool HasOpaqueAncestorLayer(Layer* aLayer);
-
 protected:
   friend class ReadbackProcessor;
 
   void DidInsertChild(Layer* aLayer);
   void DidRemoveChild(Layer* aLayer);
 
-  ContainerLayer(LayerManager* aManager, void* aImplData);
+  ContainerLayer(LayerManager* aManager, void* aImplData)
+    : Layer(aManager, aImplData),
+      mFirstChild(nullptr),
+      mLastChild(nullptr),
+      mPreXScale(1.0f),
+      mPreYScale(1.0f),
+      mInheritedXScale(1.0f),
+      mInheritedYScale(1.0f),
+      mUseIntermediateSurface(false),
+      mSupportsComponentAlphaChildren(false),
+      mMayHaveReadbackChild(false)
+  {
+    mContentFlags = 0; // Clear NO_TEXT, NO_TEXT_OVER_TRANSPARENT
+  }
 
   /**
    * A default implementation of ComputeEffectiveTransforms for use by OpenGL
    * and D3D.
    */
-  void DefaultComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface);
+  void DefaultComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface);
 
   /**
    * Loops over the children calling ComputeEffectiveTransforms on them.
    */
-  void ComputeEffectiveTransformsForChildren(const gfx::Matrix4x4& aTransformToSurface);
+  void ComputeEffectiveTransformsForChildren(const gfx3DMatrix& aTransformToSurface);
 
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix);
 
   Layer* mFirstChild;
   Layer* mLastChild;
   FrameMetrics mFrameMetrics;
-  nsRefPtr<AsyncPanZoomController> mAPZC;
-  FrameMetrics::ViewID mScrollHandoffParentId;
   float mPreXScale;
   float mPreYScale;
   // The resolution scale inherited from the parent layer. This will already
@@ -1788,27 +1567,14 @@ public:
     }
   }
 
-  void SetBounds(const nsIntRect& aBounds)
-  {
-    if (!mBounds.IsEqualEdges(aBounds)) {
-      mBounds = aBounds;
-      Mutated();
-    }
-  }
-
-  const nsIntRect& GetBounds()
-  {
-    return mBounds;
-  }
-
   // This getter can be used anytime.
   virtual const gfxRGBA& GetColor() { return mColor; }
 
   MOZ_LAYER_DECL_NAME("ColorLayer", TYPE_COLOR)
 
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
+  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
   {
-    gfx::Matrix4x4 idealTransform = GetLocalTransform() * aTransformToSurface;
+    gfx3DMatrix idealTransform = GetLocalTransform()*aTransformToSurface;
     mEffectiveTransform = SnapTransformTranslation(idealTransform, nullptr);
     ComputeEffectiveTransformForMaskLayer(aTransformToSurface);
   }
@@ -1821,7 +1587,6 @@ protected:
 
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix);
 
-  nsIntRect mBounds;
   gfxRGBA mColor;
 };
 
@@ -1839,23 +1604,19 @@ class CanvasLayer : public Layer {
 public:
   struct Data {
     Data()
-      : mDrawTarget(nullptr)
+      : mSurface(nullptr)
+      , mDrawTarget(nullptr)
       , mGLContext(nullptr)
-      , mStream(nullptr)
-      , mTexID(0)
       , mSize(0,0)
       , mIsGLAlphaPremult(false)
     { }
 
     // One of these two must be specified for Canvas2D, but never both
+    gfxASurface* mSurface;  // a gfx Surface for the canvas contents
     mozilla::gfx::DrawTarget *mDrawTarget; // a DrawTarget for the canvas contents
-    mozilla::gl::GLContext* mGLContext; // or this, for GL.
 
-    // Canvas/SkiaGL uses this
-    mozilla::gfx::SurfaceStream* mStream;
-
-    // ID of the texture backing the canvas layer (defaults to 0)
-    uint32_t mTexID;
+    // Or this, for GL.
+    mozilla::gl::GLContext* mGLContext;
 
     // The size of the canvas content
     nsIntSize mSize;
@@ -1873,11 +1634,6 @@ public:
    * This must only be called once.
    */
   virtual void Initialize(const Data& aData) = 0;
-
-  /**
-   * Check the data is owned by this layer is still valid for rendering
-   */
-  virtual bool IsDataValid(const Data& aData) { return true; }
 
   /**
    * Notify this CanvasLayer that the canvas surface contents have
@@ -1938,7 +1694,7 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Set the filter used to resample this image (if necessary).
    */
-  void SetFilter(GraphicsFilter aFilter)
+  void SetFilter(gfxPattern::GraphicsFilter aFilter)
   {
     if (mFilter != aFilter) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Filter", this));
@@ -1946,11 +1702,11 @@ public:
       Mutated();
     }
   }
-  GraphicsFilter GetFilter() const { return mFilter; }
+  gfxPattern::GraphicsFilter GetFilter() const { return mFilter; }
 
   MOZ_LAYER_DECL_NAME("CanvasLayer", TYPE_CANVAS)
 
-  virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface)
+  virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
   {
     // Snap our local transform first, and snap the inherited transform as well.
     // This makes our snapping equivalent to what would happen if our content
@@ -1970,7 +1726,7 @@ protected:
     , mPreTransCallbackData(nullptr)
     , mPostTransCallback(nullptr)
     , mPostTransCallbackData(nullptr)
-    , mFilter(GraphicsFilter::FILTER_GOOD)
+    , mFilter(gfxPattern::FILTER_GOOD)
     , mDirty(false)
   {}
 
@@ -1991,7 +1747,7 @@ protected:
   void* mPreTransCallbackData;
   DidTransactionCallback mPostTransCallback;
   void* mPostTransCallbackData;
-  GraphicsFilter mFilter;
+  gfxPattern::GraphicsFilter mFilter;
 
 private:
   /**
@@ -2021,14 +1777,14 @@ class RefLayer : public ContainerLayer {
   friend class LayerManager;
 
 private:
-  virtual bool InsertAfter(Layer* aChild, Layer* aAfter) MOZ_OVERRIDE
-  { MOZ_CRASH(); return false; }
+  virtual void InsertAfter(Layer* aChild, Layer* aAfter)
+  { MOZ_NOT_REACHED("no"); }
 
-  virtual bool RemoveChild(Layer* aChild)
-  { MOZ_CRASH(); return false; }
+  virtual void RemoveChild(Layer* aChild)
+  { MOZ_NOT_REACHED("no"); }
 
-  virtual bool RepositionChild(Layer* aChild, Layer* aAfter)
-  { MOZ_CRASH(); return false; }
+  virtual void RepositionChild(Layer* aChild, Layer* aAfter)
+  { MOZ_NOT_REACHED("no"); }
 
   using ContainerLayer::SetFrameMetrics;
 
@@ -2098,13 +1854,10 @@ protected:
   uint64_t mId;
 };
 
-void SetAntialiasingFlags(Layer* aLayer, gfxContext* aTarget);
-void SetAntialiasingFlags(Layer* aLayer, gfx::DrawTarget* aTarget);
-
 #ifdef MOZ_DUMP_PAINTING
-void WriteSnapshotToDumpFile(Layer* aLayer, gfx::DataSourceSurface* aSurf);
-void WriteSnapshotToDumpFile(LayerManager* aManager, gfx::DataSourceSurface* aSurf);
-void WriteSnapshotToDumpFile(Compositor* aCompositor, gfx::DrawTarget* aTarget);
+void WriteSnapshotToDumpFile(Layer* aLayer, gfxASurface* aSurf);
+void WriteSnapshotToDumpFile(LayerManager* aManager, gfxASurface* aSurf);
+void WriteSnapshotToDumpFile(Compositor* aCompositor, gfxASurface* aSurf);
 #endif
 
 }

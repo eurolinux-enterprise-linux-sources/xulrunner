@@ -87,7 +87,7 @@ protected:
   bool mCompleted;
 };
 
-NS_IMPL_ISUPPORTS(UnownedCallback, mozIStorageStatementCallback)
+NS_IMPL_ISUPPORTS1(UnownedCallback, mozIStorageStatementCallback)
 
 bool UnownedCallback::sAlive = false;
 bool UnownedCallback::sResult = false;

@@ -7,18 +7,22 @@
 #define nsStandardURL_h__
 
 #include "nsString.h"
+#include "nsDependentString.h"
+#include "nsDependentSubstring.h"
 #include "nsISerializable.h"
 #include "nsIFileURL.h"
 #include "nsIStandardURL.h"
+#include "nsIFile.h"
+#include "nsIURLParser.h"
 #include "nsIUnicodeEncoder.h"
 #include "nsIObserver.h"
+#include "nsIIOService.h"
 #include "nsCOMPtr.h"
 #include "nsURLHelper.h"
 #include "nsIClassInfo.h"
 #include "nsISizeOf.h"
 #include "prclist.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
 #include "nsIIPCSerializableURI.h"
 
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -30,8 +34,6 @@ class nsIBinaryOutputStream;
 class nsIIDNService;
 class nsICharsetConverterManager;
 class nsIPrefBranch;
-class nsIFile;
-class nsIURLParser;
 
 //-----------------------------------------------------------------------------
 // standard URL implementation
@@ -56,8 +58,8 @@ public:
     NS_DECL_NSIIPCSERIALIZABLEURI
 
     // nsISizeOf
-    virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-    virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+    virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+    virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
     nsStandardURL(bool aSupportsFileURL = false);
     virtual ~nsStandardURL();
@@ -227,9 +229,6 @@ private:
 
     static void PrefsChanged(nsIPrefBranch *prefs, const char *pref);
 
-    void FindHostLimit(nsACString::const_iterator& aStart,
-                       nsACString::const_iterator& aEnd);
-
     // mSpec contains the normalized version of the URL spec (UTF-8 encoded).
     nsCString mSpec;
     int32_t   mDefaultPort;
@@ -274,7 +273,6 @@ private:
     // global objects.  don't use COMPtr as its destructor will cause a
     // coredump if we leak it.
     static nsIIDNService               *gIDN;
-    static char                         gHostLimitDigits[];
     static nsICharsetConverterManager  *gCharsetMgr;
     static bool                         gInitialized;
     static bool                         gEscapeUTF8;

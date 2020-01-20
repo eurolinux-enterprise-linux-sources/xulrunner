@@ -8,6 +8,7 @@
 #include "nscore.h"
 #include "prthread.h"
 #include "prprf.h"
+#include "prio.h"
 #include "prenv.h"
 #include "plstr.h"
 #include "nsThreadUtils.h"
@@ -24,14 +25,12 @@ const char kTypeChars[eventtracer::eLast] = {' ','N','S','W','E','D'};
 // Flushing thread and records queue monitor
 mozilla::Monitor * gMonitor = nullptr;
 
-// gInitialized and gCapture can be accessed from multiple threads
-// simultaneously without any locking.  However, since they are only ever
-// *set* from the main thread, the chance of races manifesting is small
-// and unlikely to be a problem in practice.
-bool gInitialized;
+// Accessed concurently but since this flag is not functionally critical
+// for optimization purposes is not accessed under a lock
+bool volatile gInitialized = false;
 
 // Flag to allow capturing
-bool gCapture;
+bool volatile gCapture = false;
 
 // Time stamp of the epoch we have started to capture
 mozilla::TimeStamp * gProfilerStart;
@@ -130,7 +129,7 @@ public:
 
   Record * mRecordsHead;
   Record * mRecordsTail;
-  Record * mNextRecord;
+  Record * volatile mNextRecord;
 
   RecordBatch * mNextBatch;
   char * mThreadNameCopy;
@@ -139,8 +138,8 @@ public:
 
 // Protected by gMonitor, accessed concurently
 // Linked list of batches threads want to flush on disk
-RecordBatch * gLogHead = nullptr;
-RecordBatch * gLogTail = nullptr;
+RecordBatch * volatile gLogHead = nullptr;
+RecordBatch * volatile gLogTail = nullptr;
 
 // Registers the batch in the linked list
 // static
@@ -350,7 +349,7 @@ EventFilter::Build(const char * filterVar)
 
   // Copied from nspr logging code (read of NSPR_LOG_MODULES)
   char eventName[64];
-  int pos = 0, count, delta = 0;
+  int evlen = strlen(filterVar), pos = 0, count, delta = 0;
 
   // Read up to a comma or EOF -> get name of an event first in the list
   count = sscanf(filterVar, "%63[^,]%n", eventName, &delta);
@@ -381,6 +380,9 @@ EventFilter::EventPasses(const char * eventName)
 
   return false;
 }
+
+// State var to stop the flushing thread
+bool gStopFlushingThread = false;
 
 // State and control variables, initialized in Init() method, after it 
 // immutable and read concurently.
@@ -518,7 +520,7 @@ protected:
   TimeStamp mProfilerStart;
 };
 
-NS_IMPL_ISUPPORTS(VisualEventTracerLog, nsIVisualEventTracerLog)
+NS_IMPL_ISUPPORTS1(VisualEventTracerLog, nsIVisualEventTracerLog)
 
 VisualEventTracerLog::~VisualEventTracerLog()
 {
@@ -580,34 +582,7 @@ VisualEventTracerLog::GetJSONString(nsACString & _retval)
   return NS_OK;
 }
 
-nsresult
-VisualEventTracerLog::WriteToProfilingFile()
-{
-  const char* filename = PR_GetEnv("MOZ_TRACE_FILE");
-  if (!filename) {
-    return NS_OK;
-  }
-
-  PRFileDesc* fd = PR_Open(filename, PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
-			   0644);
-  if (!fd) {
-    return NS_ERROR_FILE_ACCESS_DENIED;
-  }
-
-  nsCString json;
-  GetJSONString(json);
-
-  int32_t bytesWritten = PR_Write(fd, json.get(), json.Length());
-  PR_Close(fd);
-
-  if (bytesWritten < json.Length()) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  return NS_OK;
-}
-
-NS_IMPL_ISUPPORTS(VisualEventTracer, nsIVisualEventTracer)
+NS_IMPL_ISUPPORTS1(VisualEventTracer, nsIVisualEventTracer)
 
 NS_IMETHODIMP
 VisualEventTracer::Start(const uint32_t aMaxBacklogSeconds)
@@ -649,16 +624,7 @@ VisualEventTracer::Stop()
 
   gCapture = false;
 
-  nsresult rv = NS_OK;
-  if (PR_GetEnv("MOZ_TRACE_FILE")) {
-    nsCOMPtr<nsIVisualEventTracerLog> tracelog;
-    rv = Snapshot(getter_AddRefs(tracelog));
-    if (NS_SUCCEEDED(rv)) {
-      rv = tracelog->WriteToProfilingFile();
-    }
-  }
-
-  return rv;
+  return NS_OK;
 }
 
 NS_IMETHODIMP

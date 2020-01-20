@@ -21,7 +21,7 @@
 
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
-      class="theme-sidebar">
+      class="theme-body">
 
   <head>
 
@@ -98,13 +98,12 @@
               <a target="_blank" class="link theme-link"
                   onclick="${selector.openStyleEditor}"
                   onkeydown="${selector.maybeOpenStyleEditor}"
-                  title="${selector.href}"
-                  sourcelocation="${selector.source}"
-                  tabindex="0">${selector.source}</a>
+                  title="${selector.selectorInfo.href}"
+                  tabindex="0">${selector.selectorInfo.source}</a>
             </span>
             <span dir="ltr" class="rule-text ${selector.statusClass} theme-fg-color3" title="${selector.statusText}">
-              ${selector.sourceText}
-              <span class="other-property-value theme-fg-color1">${selector.outputFragment}</span>
+              ${selector.text(__element)}
+              <span class="other-property-value theme-fg-color1">${selector.selectorInfo.value}</span>
             </span>
           </p>
         </loop>

@@ -9,16 +9,18 @@ XPIDL_SOURCES += [
     'nsIDOMCDATASection.idl',
     'nsIDOMCharacterData.idl',
     'nsIDOMComment.idl',
+    'nsIDOMDOMException.idl',
+    'nsIDOMDOMImplementation.idl',
+    'nsIDOMDOMStringList.idl',
     'nsIDOMDocument.idl',
     'nsIDOMDocumentFragment.idl',
     'nsIDOMDocumentType.idl',
-    'nsIDOMDOMException.idl',
-    'nsIDOMDOMImplementation.idl',
     'nsIDOMElement.idl',
     'nsIDOMMozNamedAttrMap.idl',
+    'nsIDOMNSEditableElement.idl',
     'nsIDOMNode.idl',
     'nsIDOMNodeList.idl',
-    'nsIDOMNSEditableElement.idl',
+    'nsIDOMNodeSelector.idl',
     'nsIDOMProcessingInstruction.idl',
     'nsIDOMText.idl',
     'nsIDOMUserDataHandler.idl',
@@ -27,4 +29,10 @@ XPIDL_SOURCES += [
 ]
 
 XPIDL_MODULE = 'dom_core'
+
+XPIDL_FLAGS += [
+    '-I$(topsrcdir)/dom/interfaces/base',
+]
+
+MODULE = 'dom'
 

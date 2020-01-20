@@ -2,8 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_SpeechSynthesisChild_h
-#define mozilla_dom_SpeechSynthesisChild_h
+#pragma once
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/PSpeechSynthesisChild.h"
@@ -22,23 +21,23 @@ class SpeechSynthesisChild : public PSpeechSynthesisChild
   friend class nsSynthVoiceRegistry;
 
 public:
-  bool RecvVoiceAdded(const RemoteVoice& aVoice) MOZ_OVERRIDE;
+  bool RecvVoiceAdded(const RemoteVoice& aVoice);
 
-  bool RecvVoiceRemoved(const nsString& aUri) MOZ_OVERRIDE;
+  bool RecvVoiceRemoved(const nsString& aUri);
 
-  bool RecvSetDefaultVoice(const nsString& aUri, const bool& aIsDefault) MOZ_OVERRIDE;
+  bool RecvSetDefaultVoice(const nsString& aUri, const bool& aIsDefault);
 
 protected:
   SpeechSynthesisChild();
   virtual ~SpeechSynthesisChild();
 
-  PSpeechSynthesisRequestChild* AllocPSpeechSynthesisRequestChild(const nsString& aLang,
-                                                                  const nsString& aUri,
-                                                                  const nsString& aText,
-                                                                  const float& aVolume,
-                                                                  const float& aPitch,
-                                                                  const float& aRate) MOZ_OVERRIDE;
-  bool DeallocPSpeechSynthesisRequestChild(PSpeechSynthesisRequestChild* aActor) MOZ_OVERRIDE;
+  PSpeechSynthesisRequestChild* AllocPSpeechSynthesisRequest(const nsString& aLang,
+                                                             const nsString& aUri,
+                                                             const nsString& aText,
+                                                             const float& aVolume,
+                                                             const float& aPitch,
+                                                             const float& aRate);
+  bool DeallocPSpeechSynthesisRequest(PSpeechSynthesisRequestChild* aActor);
 };
 
 class SpeechSynthesisRequestChild : public PSpeechSynthesisRequestChild
@@ -48,21 +47,23 @@ public:
   virtual ~SpeechSynthesisRequestChild();
 
 protected:
-  virtual bool RecvOnStart() MOZ_OVERRIDE;
+  virtual bool RecvOnStart();
 
   virtual bool Recv__delete__(const bool& aIsError,
                               const float& aElapsedTime,
-                              const uint32_t& aCharIndex) MOZ_OVERRIDE;
+                              const uint32_t& aCharIndex);
 
-  virtual bool RecvOnPause(const float& aElapsedTime, const uint32_t& aCharIndex) MOZ_OVERRIDE;
+  virtual bool RecvOnPause(const float& aElapsedTime, const uint32_t& aCharIndex);
 
-  virtual bool RecvOnResume(const float& aElapsedTime, const uint32_t& aCharIndex) MOZ_OVERRIDE;
+  virtual bool RecvOnResume(const float& aElapsedTime, const uint32_t& aCharIndex);
+
+  virtual bool RecvOnError(const float& aElapsedTime, const uint32_t& aCharIndex);
 
   virtual bool RecvOnBoundary(const nsString& aName, const float& aElapsedTime,
-                              const uint32_t& aCharIndex) MOZ_OVERRIDE;
+                              const uint32_t& aCharIndex);
 
   virtual bool RecvOnMark(const nsString& aName, const float& aElapsedTime,
-                          const uint32_t& aCharIndex) MOZ_OVERRIDE;
+                          const uint32_t& aCharIndex);
 
   nsRefPtr<SpeechTaskChild> mTask;
 };
@@ -77,10 +78,8 @@ public:
   NS_IMETHOD Setup(nsISpeechTaskCallback* aCallback,
                    uint32_t aChannels, uint32_t aRate, uint8_t argc) MOZ_OVERRIDE;
 
-  NS_IMETHOD SendAudio(JS::Handle<JS::Value> aData, JS::Handle<JS::Value> aLandmarks,
-                       JSContext* aCx) MOZ_OVERRIDE;
-
-  NS_IMETHOD SendAudioNative(int16_t* aData, uint32_t aDataLen) MOZ_OVERRIDE;
+  NS_IMETHOD SendAudio (const JS::Value& aData, const JS::Value& aLandmarks,
+                        JSContext* aCx) MOZ_OVERRIDE;
 
   virtual void Pause();
 
@@ -94,5 +93,3 @@ private:
 
 } // namespace dom
 } // namespace mozilla
-
-#endif

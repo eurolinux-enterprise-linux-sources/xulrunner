@@ -9,11 +9,10 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "nsIStringBundle.h"
 #include "nsCOMPtr.h"
+#include "nsIPersistentProperties2.h"
 #include "nsString.h"
 #include "nsCOMArray.h"
-
-class nsIPersistentProperties;
-class nsIStringBundleOverride;
+#include "nsIStringBundleOverride.h"
 
 class nsStringBundle : public nsIStringBundle
 {
@@ -22,15 +21,15 @@ public:
     nsStringBundle(const char* aURLSpec, nsIStringBundleOverride*);
     nsresult LoadProperties();
     virtual ~nsStringBundle();
-
-    NS_DECL_THREADSAFE_ISUPPORTS
+  
+    NS_DECL_ISUPPORTS
     NS_DECL_NSISTRINGBUNDLE
 
     nsCOMPtr<nsIPersistentProperties> mProps;
 
 protected:
     //
-    // functional decomposition of the funitions repeatively called
+    // functional decomposition of the funitions repeatively called 
     //
     nsresult GetStringFromID(int32_t aID, nsAString& aResult);
     nsresult GetStringFromName(const nsAString& aName, nsAString& aResult);
@@ -43,15 +42,15 @@ private:
     mozilla::ReentrantMonitor    mReentrantMonitor;
     bool                         mAttemptedLoad;
     bool                         mLoaded;
-
+    
 public:
-    static nsresult FormatString(const char16_t *formatStr,
-                                 const char16_t **aParams, uint32_t aLength,
-                                 char16_t **aResult);
+    static nsresult FormatString(const PRUnichar *formatStr,
+                                 const PRUnichar **aParams, uint32_t aLength,
+                                 PRUnichar **aResult);
 };
 
 /**
- * An extensible implementation of the StringBundle interface.
+ * An extesible implementation of the StringBudle interface.
  *
  * @created         28/Dec/1999
  * @author  Catalin Rotaru [CATA]
@@ -63,7 +62,7 @@ class nsExtensibleStringBundle : public nsIStringBundle
 
   nsresult Init(const char * aCategory, nsIStringBundleService *);
 private:
-
+  
   nsCOMArray<nsIStringBundle> mBundles;
   bool               mLoaded;
 

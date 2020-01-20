@@ -13,12 +13,10 @@
 
 #include <limits>
 #include <math.h>
-#include <stdint.h>
-
-#include "jsapi.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/ErrorResult.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/FloatingPoint.h"
+#include "xpcpublic.h"
 
 namespace mozilla {
 namespace dom {
@@ -95,7 +93,8 @@ struct DisallowedConversion {
 private:
   static inline bool converter(JSContext* cx, JS::Handle<JS::Value> v,
                                jstype* retval) {
-    MOZ_CRASH("This should never be instantiated!");
+    MOZ_NOT_REACHED("This should never be instantiated!");
+    return false;
   }
 };
 
@@ -189,10 +188,10 @@ struct PrimitiveConversionTraits_Limits {
 template<>
 struct PrimitiveConversionTraits_Limits<int64_t> {
   static inline int64_t min() {
-    return -(1LL << 53);
+    return -(1LL << 53) + 1;
   }
   static inline int64_t max() {
-    return (1LL << 53);
+    return (1LL << 53) - 1;
   }
 };
 
@@ -202,7 +201,7 @@ struct PrimitiveConversionTraits_Limits<uint64_t> {
     return 0;
   }
   static inline uint64_t max() {
-    return (1LL << 53);
+    return (1LL << 53) - 1;
   }
 };
 
@@ -226,8 +225,8 @@ template<typename T>
 inline bool
 PrimitiveConversionTraits_EnforceRange(JSContext* cx, const double& d, T* retval)
 {
-  static_assert(std::numeric_limits<T>::is_integer,
-                "This can only be applied to integers!");
+  MOZ_STATIC_ASSERT(std::numeric_limits<T>::is_integer,
+                    "This can only be applied to integers!");
 
   if (!mozilla::IsFinite(d)) {
     return ThrowErrorMessage(cx, MSG_ENFORCE_RANGE_NON_FINITE, TypeName<T>::value());
@@ -254,8 +253,8 @@ template<typename T>
 inline bool
 PrimitiveConversionTraits_Clamp(JSContext* cx, const double& d, T* retval)
 {
-  static_assert(std::numeric_limits<T>::is_integer,
-                "This can only be applied to integers!");
+  MOZ_STATIC_ASSERT(std::numeric_limits<T>::is_integer,
+                    "This can only be applied to integers!");
 
   if (mozilla::IsNaN(d)) {
     *retval = 0;
@@ -307,7 +306,7 @@ struct PrimitiveConversionTraits<bool, B> : public DisallowedConversion<bool> {}
 
 template<>
 struct PrimitiveConversionTraits<bool, eDefault> {
-  typedef bool jstype;
+  typedef JSBool jstype;
   typedef bool intermediateType;
   static inline bool converter(JSContext* /* unused */, JS::Handle<JS::Value> v,
                                jstype* retval) {

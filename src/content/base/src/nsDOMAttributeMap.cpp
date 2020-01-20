@@ -9,16 +9,15 @@
 
 #include "nsDOMAttributeMap.h"
 
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MozNamedAttrMapBinding.h"
 #include "nsAttrName.h"
 #include "nsContentUtils.h"
 #include "nsError.h"
-#include "nsIContentInlines.h"
 #include "nsIDocument.h"
-#include "nsNameSpaceManager.h"
+#include "nsIDOMDocument.h"
+#include "nsINameSpaceManager.h"
 #include "nsNodeInfoManager.h"
 #include "nsUnicharUtils.h"
 #include "nsWrapperCacheInlines.h"
@@ -33,6 +32,7 @@ nsDOMAttributeMap::nsDOMAttributeMap(Element* aContent)
 {
   // We don't add a reference to our content. If it goes away,
   // we'll be told to drop our reference
+  mAttributeCache.Init();
   SetIsDOMBinding();
 }
 
@@ -59,8 +59,6 @@ nsDOMAttributeMap::DropReference()
   mAttributeCache.Enumerate(RemoveMapRef, nullptr);
   mContent = nullptr;
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMAttributeMap)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMAttributeMap)
   tmp->DropReference();
@@ -114,7 +112,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 // QueryInterface implementation for nsDOMAttributeMap
 NS_INTERFACE_TABLE_HEAD(nsDOMAttributeMap)
-  NS_INTERFACE_TABLE(nsDOMAttributeMap, nsIDOMMozNamedAttrMap)
+  NS_INTERFACE_TABLE1(nsDOMAttributeMap, nsIDOMMozNamedAttrMap)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsDOMAttributeMap)
@@ -217,12 +215,6 @@ nsDOMAttributeMap::NamedGetter(const nsAString& aAttrName, bool& aFound)
   return GetAttribute(ni, false);
 }
 
-bool
-nsDOMAttributeMap::NameIsEnumerable(const nsAString& aName)
-{
-  return true;
-}
-
 Attr*
 nsDOMAttributeMap::GetNamedItem(const nsAString& aAttrName)
 {
@@ -248,7 +240,7 @@ nsDOMAttributeMap::SetNamedItem(nsIDOMAttr* aAttr, nsIDOMAttr** aReturn)
   NS_ENSURE_ARG(attribute);
 
   ErrorResult rv;
-  *aReturn = SetNamedItem(*attribute, rv).take();
+  *aReturn = SetNamedItem(*attribute, rv).get();
   return rv.ErrorCode();
 }
 
@@ -259,7 +251,7 @@ nsDOMAttributeMap::SetNamedItemNS(nsIDOMAttr* aAttr, nsIDOMAttr** aReturn)
   NS_ENSURE_ARG(attribute);
 
   ErrorResult rv;
-  *aReturn = SetNamedItemNS(*attribute, rv).take();
+  *aReturn = SetNamedItemNS(*attribute, rv).get();
   return rv.ErrorCode();
 }
 
@@ -288,7 +280,7 @@ nsDOMAttributeMap::SetNamedItemInternal(Attr& aAttr,
   }
 
   nsresult rv;
-  if (mContent->OwnerDoc() != aAttr.OwnerDoc()) {
+  if (!mContent->HasSameOwnerDoc(&aAttr)) {
     nsCOMPtr<nsINode> adoptedNode =
       mContent->OwnerDoc()->AdoptNode(aAttr, aError);
     if (aError.Failed()) {
@@ -362,7 +354,7 @@ nsDOMAttributeMap::RemoveNamedItem(const nsAString& aName,
   NS_ENSURE_ARG_POINTER(aReturn);
 
   ErrorResult rv;
-  *aReturn = RemoveNamedItem(aName, rv).take();
+  *aReturn = RemoveNamedItem(aName, rv).get();
   return rv.ErrorCode();
 }
 
@@ -503,7 +495,7 @@ nsDOMAttributeMap::RemoveNamedItemNS(const nsAString& aNamespaceURI,
 {
   NS_ENSURE_ARG_POINTER(aReturn);
   ErrorResult rv;
-  *aReturn = RemoveNamedItemNS(aNamespaceURI, aLocalName, rv).take();
+  *aReturn = RemoveNamedItemNS(aNamespaceURI, aLocalName, rv).get();
   return rv.ErrorCode();
 }
 
@@ -541,14 +533,14 @@ nsDOMAttributeMap::Enumerate(AttrCache::EnumReadFunction aFunc,
 size_t
 AttrCacheSizeEnumerator(const nsAttrKey& aKey,
                         const nsRefPtr<Attr>& aValue,
-                        MallocSizeOf aMallocSizeOf,
+                        nsMallocSizeOfFun aMallocSizeOf,
                         void* aUserArg)
 {
   return aMallocSizeOf(aValue.get());
 }
 
 size_t
-nsDOMAttributeMap::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
+nsDOMAttributeMap::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
   n += mAttributeCache.SizeOfExcludingThis(AttrCacheSizeEnumerator,
@@ -559,7 +551,7 @@ nsDOMAttributeMap::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 /* virtual */ JSObject*
-nsDOMAttributeMap::WrapObject(JSContext* aCx)
+nsDOMAttributeMap::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return MozNamedAttrMapBinding::Wrap(aCx, this);
+  return MozNamedAttrMapBinding::Wrap(aCx, aScope, this);
 }

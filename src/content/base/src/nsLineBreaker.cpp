@@ -9,7 +9,6 @@
 #include "gfxFont.h" // for the gfxTextRun::CompressedGlyph::FLAG_BREAK_TYPE_* values
 #include "nsHyphenationManager.h"
 #include "nsHyphenator.h"
-#include "mozilla/gfx/2D.h"
 
 nsLineBreaker::nsLineBreaker()
   : mCurrentWordLanguage(nullptr),
@@ -26,7 +25,7 @@ nsLineBreaker::~nsLineBreaker()
 }
 
 static void
-SetupCapitalization(const char16_t* aWord, uint32_t aLength,
+SetupCapitalization(const PRUnichar* aWord, uint32_t aLength,
                     bool* aCapitalization)
 {
   // Capitalize the first alphanumeric character after a space or start
@@ -146,7 +145,7 @@ nsLineBreaker::FlushCurrentWord()
 }
 
 nsresult
-nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, uint32_t aLength,
+nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const PRUnichar* aText, uint32_t aLength,
                           uint32_t aFlags, nsILineBreakSink* aSink)
 {
   NS_ASSERTION(aLength > 0, "Appending empty text...");
@@ -219,7 +218,7 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, 
   }
 
   for (;;) {
-    char16_t ch = aText[offset];
+    PRUnichar ch = aText[offset];
     bool isSpace = IsSpace(ch);
     bool isBreakableSpace = isSpace && !(aFlags & BREAK_SUPPRESS_INSIDE);
 
@@ -271,10 +270,10 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, 
         // Save this word
         mCurrentWordContainsComplexChar = wordHasComplexChar;
         uint32_t len = offset - wordStart;
-        char16_t* elems = mCurrentWord.AppendElements(len);
+        PRUnichar* elems = mCurrentWord.AppendElements(len);
         if (!elems)
           return NS_ERROR_OUT_OF_MEMORY;
-        memcpy(elems, aText + wordStart, sizeof(char16_t)*len);
+        memcpy(elems, aText + wordStart, sizeof(PRUnichar)*len);
         mTextItems.AppendElement(TextItem(aSink, wordStart, len, aFlags));
         // Ensure that the break-before for this word is written out
         offset = wordStart + 1;
@@ -297,12 +296,12 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const char16_t* aText, 
 
 void
 nsLineBreaker::FindHyphenationPoints(nsHyphenator *aHyphenator,
-                                     const char16_t *aTextStart,
-                                     const char16_t *aTextLimit,
+                                     const PRUnichar *aTextStart,
+                                     const PRUnichar *aTextLimit,
                                      uint8_t *aBreakState)
 {
   nsDependentSubstring string(aTextStart, aTextLimit);
-  AutoFallibleTArray<bool,200> hyphens;
+  nsAutoTArray<bool,200> hyphens;
   if (NS_SUCCEEDED(aHyphenator->Hyphenate(string, hyphens))) {
     for (uint32_t i = 0; i + 1 < string.Length(); ++i) {
       if (hyphens[i]) {
@@ -427,7 +426,7 @@ nsLineBreaker::AppendText(nsIAtom* aHyphenationLanguage, const uint8_t* aText, u
         // Save this word
         mCurrentWordContainsComplexChar = wordHasComplexChar;
         uint32_t len = offset - wordStart;
-        char16_t* elems = mCurrentWord.AppendElements(len);
+        PRUnichar* elems = mCurrentWord.AppendElements(len);
         if (!elems)
           return NS_ERROR_OUT_OF_MEMORY;
         uint32_t i;

@@ -8,6 +8,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsString.h"
+#include "nsVoidArray.h"
 #include "mozIPersonalDictionary.h"
 #include "nsIUnicodeEncoder.h"
 #include "nsIObserver.h"

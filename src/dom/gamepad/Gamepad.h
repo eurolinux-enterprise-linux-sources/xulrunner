@@ -6,9 +6,10 @@
 #define mozilla_dom_gamepad_Gamepad_h
 
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/GamepadButton.h"
-#include <stdint.h>
+#include "mozilla/StandardInteger.h"
 #include "nsCOMPtr.h"
+#include "nsIDOMGamepad.h"
+#include "nsIVariant.h"
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsWrapperCache.h"
@@ -22,8 +23,18 @@ enum GamepadMappingType
   StandardMapping = 1
 };
 
-class Gamepad : public nsISupports,
-                public nsWrapperCache
+// TODO: fix the spec to expose both pressed and value:
+// https://www.w3.org/Bugs/Public/show_bug.cgi?id=21388
+struct GamepadButton
+{
+  bool pressed;
+  double value;
+
+  GamepadButton(): pressed(false), value(0.0) {}
+};
+
+class Gamepad : public nsIDOMGamepad
+              , public nsWrapperCache
 {
 public:
   Gamepad(nsISupports* aParent,
@@ -50,7 +61,8 @@ public:
     return mParent;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+			       JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   void GetId(nsAString& aID) const
   {
@@ -76,18 +88,25 @@ public:
     return mIndex;
   }
 
-  void GetButtons(nsTArray<nsRefPtr<GamepadButton>>& aButtons) const
+  already_AddRefed<nsIVariant> GetButtons(mozilla::ErrorResult& aRv)
   {
-    aButtons = mButtons;
+    nsCOMPtr<nsIVariant> buttons;
+    aRv = GetButtons(getter_AddRefs(buttons));
+    return buttons.forget();
   }
 
-  void GetAxes(nsTArray<double>& aAxes) const
+  already_AddRefed<nsIVariant> GetAxes(mozilla::ErrorResult& aRv)
   {
-    aAxes = mAxes;
+    nsCOMPtr<nsIVariant> axes;
+    aRv = GetAxes(getter_AddRefs(axes));
+    return axes.forget();
   }
 
 private:
   virtual ~Gamepad() {}
+
+  nsresult GetButtons(nsIVariant** aButtons);
+  nsresult GetAxes(nsIVariant** aAxes);
 
 protected:
   nsCOMPtr<nsISupports> mParent;
@@ -101,7 +120,7 @@ protected:
   bool mConnected;
 
   // Current state of buttons, axes.
-  nsTArray<nsRefPtr<GamepadButton>> mButtons;
+  nsTArray<GamepadButton> mButtons;
   nsTArray<double> mAxes;
 };
 

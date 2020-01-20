@@ -4,9 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsBaseChannel.h"
+#include "nsChannelProperties.h"
 #include "nsURLHelper.h"
 #include "nsNetUtil.h"
 #include "nsMimeTypes.h"
+#include "nsIOService.h"
 #include "nsIHttpEventSink.h"
 #include "nsIHttpChannel.h"
 #include "nsIChannelEventSink.h"
@@ -148,7 +150,8 @@ nsBaseChannel::ContinueRedirect()
 
   // close down this channel
   Cancel(NS_BINDING_REDIRECTED);
-  ChannelDone();
+  mListener = nullptr;
+  mListenerContext = nullptr;
 
   return NS_OK;
 }
@@ -156,7 +159,7 @@ nsBaseChannel::ContinueRedirect()
 bool
 nsBaseChannel::HasContentTypeHint() const
 {
-  NS_ASSERTION(!Pending(), "HasContentTypeHint called too late");
+  NS_ASSERTION(!IsPending(), "HasContentTypeHint called too late");
   return !mContentType.EqualsLiteral(UNKNOWN_CONTENT_TYPE);
 }
 
@@ -208,7 +211,7 @@ nsBaseChannel::BeginPumpingData()
       return rv;
   }
 
-  // By assigning mPump, we flag this channel as pending (see Pending).  It's
+  // By assigning mPump, we flag this channel as pending (see IsPending).  It's
   // important that the pending flag is set when we call into the stream (the
   // call to AsyncRead results in the stream's AsyncWait method being called)
   // and especially when we call into the loadgroup.  Our caller takes care to
@@ -253,7 +256,8 @@ nsBaseChannel::ContinueHandleAsyncRedirect(nsresult result)
     // Notify our consumer ourselves
     mListener->OnStartRequest(this, mListenerContext);
     mListener->OnStopRequest(this, mListenerContext, mStatus);
-    ChannelDone();
+    mListener = nullptr;
+    mListenerContext = nullptr;
   }
 
   if (mLoadGroup)
@@ -285,16 +289,16 @@ nsBaseChannel::ClassifyURI()
 //-----------------------------------------------------------------------------
 // nsBaseChannel::nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED(nsBaseChannel,
-                            nsHashPropertyBag,
-                            nsIRequest,
-                            nsIChannel,
-                            nsIInterfaceRequestor,
-                            nsITransportEventSink,
-                            nsIRequestObserver,
-                            nsIStreamListener,
-                            nsIAsyncVerifyRedirectCallback,
-                            nsIPrivateBrowsingChannel)
+NS_IMPL_ISUPPORTS_INHERITED8(nsBaseChannel,
+                             nsHashPropertyBag,
+                             nsIRequest,
+                             nsIChannel,
+                             nsIInterfaceRequestor,
+                             nsITransportEventSink,
+                             nsIRequestObserver,
+                             nsIStreamListener,
+                             nsIAsyncVerifyRedirectCallback,
+                             nsIPrivateBrowsingChannel)
 
 //-----------------------------------------------------------------------------
 // nsBaseChannel::nsIRequest
@@ -312,7 +316,7 @@ nsBaseChannel::GetName(nsACString &result)
 NS_IMETHODIMP
 nsBaseChannel::IsPending(bool *result)
 {
-  *result = Pending();
+  *result = IsPending();
   return NS_OK;
 }
 
@@ -596,7 +600,8 @@ nsBaseChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctxt)
   rv = BeginPumpingData();
   if (NS_FAILED(rv)) {
     mPump = nullptr;
-    ChannelDone();
+    mListener = nullptr;
+    mListenerContext = nullptr;
     mCallbacks = nullptr;
     return rv;
   }
@@ -725,12 +730,13 @@ nsBaseChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt,
   if (NS_SUCCEEDED(mStatus))
     mStatus = status;
 
-  // Cause Pending to return false.
+  // Cause IsPending to return false.
   mPump = nullptr;
 
   if (mListener) // null in case of redirect
       mListener->OnStopRequest(this, mListenerContext, mStatus);
-  ChannelDone();
+  mListener = nullptr;
+  mListenerContext = nullptr;
 
   // No need to suspend pump in this scope since we will not be receiving
   // any more events from it.

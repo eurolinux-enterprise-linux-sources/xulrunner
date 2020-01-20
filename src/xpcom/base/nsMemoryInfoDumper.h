@@ -8,8 +8,7 @@
 #define mozilla_nsMemoryInfoDumper_h
 
 #include "nsIMemoryInfoDumper.h"
-
-class nsACString;
+#include "nsString.h"
 
 /**
  * This class facilitates dumping information about our memory usage to disk.
@@ -30,9 +29,14 @@ public:
 public:
   static void Initialize();
 
-#ifdef MOZ_DMD
-  static nsresult DumpDMD(const nsAString &aIdentifier);
-#endif
+  /**
+   * This function creates a new unique file based on |aFilename| in a
+   * world-readable temp directory. This is the system temp directory
+   * or, in the case of Android, the downloads directory. If |aFile| is
+   * non-null, it is assumed to point to a folder, and that folder is used
+   * instead.
+   */
+  static nsresult OpenTempFile(const nsACString &aFilename, nsIFile* *aFile);
 };
 
 #define NS_MEMORY_INFO_DUMPER_CID \

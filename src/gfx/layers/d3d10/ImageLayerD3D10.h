@@ -19,7 +19,7 @@ class ImageLayerD3D10 : public ImageLayer,
 {
 public:
   ImageLayerD3D10(LayerManagerD3D10 *aManager)
-    : ImageLayer(aManager, nullptr)
+    : ImageLayer(aManager, NULL)
     , LayerD3D10(aManager)
   {
     mImplData = static_cast<LayerD3D10*>(this);
@@ -32,7 +32,7 @@ public:
 
   void AllocateTexturesYCbCr(PlanarYCbCrImage *aImage);
 
-  virtual already_AddRefed<ID3D10ShaderResourceView> GetAsTexture(gfx::IntSize* aSize);
+  virtual already_AddRefed<ID3D10ShaderResourceView> GetAsTexture(gfxIntSize* aSize);
 
 private:
  ID3D10ShaderResourceView* GetImageSRView(Image* aImage, bool& aHasAlpha, IDXGIKeyedMutex **aMutex = nullptr);
@@ -56,15 +56,15 @@ struct TextureD3D10BackendData : public ImageBackendData
 
 class RemoteDXGITextureImage : public Image {
 public:
-  RemoteDXGITextureImage() : Image(nullptr, ImageFormat::REMOTE_IMAGE_DXGI_TEXTURE) {}
+  RemoteDXGITextureImage() : Image(NULL, REMOTE_IMAGE_DXGI_TEXTURE) {}
 
-  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE;
+  already_AddRefed<gfxASurface> GetAsSurface();
 
-  mozilla::gfx::IntSize GetSize() { return mSize; }
+  gfxIntSize GetSize() { return mSize; }
 
   TextureD3D10BackendData *GetD3D10TextureBackendData(ID3D10Device *aDevice);
 
-  mozilla::gfx::IntSize mSize;
+  gfxIntSize mSize;
   RemoteImageData::Format mFormat;
   HANDLE mHandle;
 };

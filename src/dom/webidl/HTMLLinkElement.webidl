@@ -21,14 +21,16 @@ interface HTMLLinkElement : HTMLElement {
            attribute DOMString crossOrigin;
   [SetterThrows, Pure]
            attribute DOMString rel;
-  readonly attribute DOMTokenList relList;
+// Not supported yet:
+//  readonly attribute DOMTokenList relList;
   [SetterThrows, Pure]
            attribute DOMString media;
   [SetterThrows, Pure]
            attribute DOMString hreflang;
   [SetterThrows, Pure]
            attribute DOMString type;
-  [PutForwards=value] readonly attribute DOMSettableTokenList sizes;
+// Not supported yet:
+//  [PutForwards=value] readonly attribute DOMSettableTokenList sizes;
 };
 HTMLLinkElement implements LinkStyle;
 

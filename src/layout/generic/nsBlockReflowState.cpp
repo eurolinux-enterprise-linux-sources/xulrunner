@@ -10,11 +10,17 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include "nsBlockReflowContext.h"
 #include "nsBlockFrame.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
-#include "nsIFrameInlines.h"
+#include "nsGkAtoms.h"
+#include "nsIFrame.h"
+#include "nsFrameManager.h"
 #include "mozilla/AutoRestore.h"
+#include "FrameLayerBuilder.h"
+
+#include "nsINameSpaceManager.h"
 #include <algorithm>
 
 #ifdef DEBUG
@@ -29,8 +35,7 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
                                        nsBlockFrame* aFrame,
                                        bool aTopMarginRoot,
                                        bool aBottomMarginRoot,
-                                       bool aBlockNeedsFloatManager,
-                                       nscoord aConsumedHeight)
+                                       bool aBlockNeedsFloatManager)
   : mBlock(aFrame),
     mPresContext(aPresContext),
     mReflowState(aReflowState),
@@ -39,21 +44,18 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
     mPrevBottomMargin(),
     mLineNumber(0),
     mFlags(0),
-    mFloatBreakType(NS_STYLE_CLEAR_NONE),
-    mConsumedHeight(aConsumedHeight)
+    mFloatBreakType(NS_STYLE_CLEAR_NONE)
 {
   SetFlag(BRS_ISFIRSTINFLOW, aFrame->GetPrevInFlow() == nullptr);
   SetFlag(BRS_ISOVERFLOWCONTAINER,
           IS_TRUE_OVERFLOW_CONTAINER(aFrame));
 
   const nsMargin& borderPadding = BorderPadding();
-  mContainerWidth = aReflowState.ComputedWidth() +
-                    aReflowState.ComputedPhysicalBorderPadding().LeftRight();
 
-  if (aTopMarginRoot || 0 != aReflowState.ComputedPhysicalBorderPadding().top) {
+  if (aTopMarginRoot || 0 != aReflowState.mComputedBorderPadding.top) {
     SetFlag(BRS_ISTOPMARGINROOT, true);
   }
-  if (aBottomMarginRoot || 0 != aReflowState.ComputedPhysicalBorderPadding().bottom) {
+  if (aBottomMarginRoot || 0 != aReflowState.mComputedBorderPadding.bottom) {
     SetFlag(BRS_ISBOTTOMMARGINROOT, true);
   }
   if (GetFlag(BRS_ISTOPMARGINROOT)) {
@@ -89,11 +91,11 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
   // specified style height then we may end up limiting our height if
   // the availableHeight is constrained (this situation occurs when we
   // are paginated).
-  if (NS_UNCONSTRAINEDSIZE != aReflowState.AvailableHeight()) {
+  if (NS_UNCONSTRAINEDSIZE != aReflowState.availableHeight) {
     // We are in a paginated situation. The bottom edge is just inside
     // the bottom border and padding. The content area height doesn't
     // include either border or padding edge.
-    mBottomEdge = aReflowState.AvailableHeight() - borderPadding.bottom;
+    mBottomEdge = aReflowState.availableHeight - borderPadding.bottom;
     mContentArea.height = std::max(0, mBottomEdge - borderPadding.top);
   }
   else {
@@ -109,16 +111,6 @@ nsBlockReflowState::nsBlockReflowState(const nsHTMLReflowState& aReflowState,
   mCurrentLine = aFrame->end_lines();
 
   mMinLineHeight = aReflowState.CalcLineHeight();
-}
-
-nscoord
-nsBlockReflowState::GetConsumedHeight()
-{
-  if (mConsumedHeight == NS_INTRINSICSIZE) {
-    mConsumedHeight = mBlock->GetConsumedHeight();
-  }
-
-  return mConsumedHeight;
 }
 
 void
@@ -144,7 +136,7 @@ nsBlockReflowState::ComputeReplacedBlockOffsetsForFloats(nsIFrame* aFrame,
   } else {
     nsMargin frameMargin;
     nsCSSOffsetState os(aFrame, mReflowState.rendContext, mContentArea.width);
-    frameMargin = os.ComputedPhysicalMargin();
+    frameMargin = os.mComputedMargin;
 
     nscoord leftFloatXOffset = aFloatAvailableSpace.x - mContentArea.x;
     leftOffset = std::max(leftFloatXOffset, frameMargin.left) -
@@ -177,7 +169,7 @@ nsBlockReflowState::ComputeBlockAvailSpace(nsIFrame* aFrame,
   aResult.y = mY;
   aResult.height = GetFlag(BRS_UNCONSTRAINEDHEIGHT)
     ? NS_UNCONSTRAINEDSIZE
-    : mReflowState.AvailableHeight() - mY;
+    : mReflowState.availableHeight - mY;
   // mY might be greater than mBottomEdge if the block's top margin pushes
   // it off the page/column. Negative available height can confuse other code
   // and is nonsense in principle.
@@ -390,7 +382,8 @@ nsBlockReflowState::RecoverFloats(nsLineList::iterator aLine,
     while (fc) {
       nsIFrame* floatFrame = fc->mFloat;
       if (aDeltaY != 0) {
-        floatFrame->MovePositionBy(nsPoint(0, aDeltaY));
+        nsPoint p = floatFrame->GetPosition();
+        floatFrame->SetPosition(nsPoint(p.x, p.y + aDeltaY));
         nsContainerFrame::PositionFrameView(floatFrame);
         nsContainerFrame::PositionChildViews(floatFrame);
       }
@@ -485,7 +478,7 @@ nsBlockReflowState::AddFloat(nsLineLayout*       aLineLayout,
     // nsBlockFrame::DrainPushedFloats.
     nsBlockFrame *floatParent =
       static_cast<nsBlockFrame*>(aFloat->GetParent());
-    floatParent->StealFrame(aFloat);
+    floatParent->StealFrame(mPresContext, aFloat);
 
     aFloat->RemoveStateBits(NS_FRAME_IS_PUSHED_FLOAT);
 
@@ -570,17 +563,17 @@ FloatMarginWidth(const nsHTMLReflowState& aCBReflowState,
     nsSize(aCBReflowState.ComputedWidth(),
            aCBReflowState.ComputedHeight()),
     aFloatAvailableWidth,
-    nsSize(aFloatOffsetState.ComputedPhysicalMargin().LeftRight(),
-           aFloatOffsetState.ComputedPhysicalMargin().TopBottom()),
-    nsSize(aFloatOffsetState.ComputedPhysicalBorderPadding().LeftRight() -
-             aFloatOffsetState.ComputedPhysicalPadding().LeftRight(),
-           aFloatOffsetState.ComputedPhysicalBorderPadding().TopBottom() -
-             aFloatOffsetState.ComputedPhysicalPadding().TopBottom()),
-    nsSize(aFloatOffsetState.ComputedPhysicalPadding().LeftRight(),
-           aFloatOffsetState.ComputedPhysicalPadding().TopBottom()),
+    nsSize(aFloatOffsetState.mComputedMargin.LeftRight(),
+           aFloatOffsetState.mComputedMargin.TopBottom()),
+    nsSize(aFloatOffsetState.mComputedBorderPadding.LeftRight() -
+             aFloatOffsetState.mComputedPadding.LeftRight(),
+           aFloatOffsetState.mComputedBorderPadding.TopBottom() -
+             aFloatOffsetState.mComputedPadding.TopBottom()),
+    nsSize(aFloatOffsetState.mComputedPadding.LeftRight(),
+           aFloatOffsetState.mComputedPadding.TopBottom()),
     true).width +
-  aFloatOffsetState.ComputedPhysicalMargin().LeftRight() +
-  aFloatOffsetState.ComputedPhysicalBorderPadding().LeftRight();
+  aFloatOffsetState.mComputedMargin.LeftRight() +
+  aFloatOffsetState.mComputedBorderPadding.LeftRight();
 }
 
 bool
@@ -628,7 +621,6 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
                                               aFloat, offsets);
 
   nsMargin floatMargin; // computed margin
-  nsMargin floatOffsets;
   nsReflowStatus reflowStatus;
 
   // If it's a floating first-letter, we need to reflow it before we
@@ -636,8 +628,8 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // of the first letter until reflow!).
   bool isLetter = aFloat->GetType() == nsGkAtoms::letterFrame;
   if (isLetter) {
-    mBlock->ReflowFloat(*this, adjustedAvailableSpace, aFloat, floatMargin,
-                        floatOffsets, false, reflowStatus);
+    mBlock->ReflowFloat(*this, adjustedAvailableSpace, aFloat,
+                        floatMargin, false, reflowStatus);
     floatMarginWidth = aFloat->GetSize().width + floatMargin.LeftRight();
     NS_ASSERTION(NS_FRAME_IS_COMPLETE(reflowStatus),
                  "letter frames shouldn't break, and if they do now, "
@@ -661,7 +653,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
     mReflowState.mFlags.mIsTopOfPage && IsAdjacentWithTop();
 
   for (;;) {
-    if (mReflowState.AvailableHeight() != NS_UNCONSTRAINEDSIZE &&
+    if (mReflowState.availableHeight != NS_UNCONSTRAINEDSIZE &&
         floatAvailableSpace.mRect.height <= 0 &&
         !mustPlaceFloat) {
       // No space, nowhere to put anything.
@@ -766,8 +758,8 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
   // where to break.
   if (!isLetter) {
     bool pushedDown = mY != saveY;
-    mBlock->ReflowFloat(*this, adjustedAvailableSpace, aFloat, floatMargin,
-                        floatOffsets, pushedDown, reflowStatus);
+    mBlock->ReflowFloat(*this, adjustedAvailableSpace, aFloat,
+                        floatMargin, pushedDown, reflowStatus);
   }
   if (aFloat->GetPrevInFlow())
     floatMargin.top = 0;
@@ -813,7 +805,7 @@ nsBlockReflowState::FlowAndPlaceFloat(nsIFrame* aFloat)
                  floatMargin.top + floatY);
 
   // If float is relatively positioned, factor that in as well
-  nsHTMLReflowState::ApplyRelativePositioning(aFloat, floatOffsets, &origin);
+  origin += aFloat->GetRelativeOffset(floatDisplay);
 
   // Position the float and make sure and views are properly
   // positioned. We need to explicitly position its child views as
@@ -900,7 +892,7 @@ nsBlockReflowState::PushFloatPastBreak(nsIFrame *aFloat)
 
   // Put the float on the pushed floats list, even though it
   // isn't actually a continuation.
-  DebugOnly<nsresult> rv = mBlock->StealFrame(aFloat);
+  DebugOnly<nsresult> rv = mBlock->StealFrame(mPresContext, aFloat);
   NS_ASSERTION(NS_SUCCEEDED(rv), "StealFrame should succeed");
   AppendPushedFloat(aFloat);
 
@@ -989,7 +981,7 @@ nsBlockReflowState::ClearFloats(nscoord aY, uint8_t aBreakType,
         // See if there's room in the next band.
         newY += floatAvailableSpace.mRect.height;
       } else {
-        if (mReflowState.AvailableHeight() != NS_UNCONSTRAINEDSIZE) {
+        if (mReflowState.availableHeight != NS_UNCONSTRAINEDSIZE) {
           // Stop trying to clear here; we'll just get pushed to the
           // next column or page and try again there.
           break;

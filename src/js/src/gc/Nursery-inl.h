@@ -10,9 +10,8 @@
 
 #ifdef JSGC_GENERATIONAL
 
-#include "gc/Nursery.h"
-
 #include "gc/Heap.h"
+#include "gc/Nursery.h"
 
 namespace js {
 namespace gc {
@@ -23,10 +22,10 @@ namespace gc {
  */
 class RelocationOverlay
 {
-    friend class MinorCollectionTracer;
+    friend struct MinorCollectionTracer;
 
     /* The low bit is set so this should never equal a normal pointer. */
-    static const uintptr_t Relocated = uintptr_t(0xbad0bad1);
+    const static uintptr_t Relocated = uintptr_t(0xbad0bad1);
 
     /* Set to Relocated when moved. */
     uintptr_t magic_;
@@ -56,7 +55,7 @@ class RelocationOverlay
         JS_ASSERT(!isForwarded());
         magic_ = Relocated;
         newLocation_ = cell;
-        next_ = nullptr;
+        next_ = NULL;
     }
 
     RelocationOverlay *next() const {
@@ -68,7 +67,7 @@ class RelocationOverlay
 } /* namespace js */
 
 template <typename T>
-MOZ_ALWAYS_INLINE bool
+JS_ALWAYS_INLINE bool
 js::Nursery::getForwardedPointer(T **ref)
 {
     JS_ASSERT(ref);

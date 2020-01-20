@@ -9,8 +9,6 @@
  */
 
 #include "nsNodeInfoManager.h"
-
-#include "mozilla/DebugOnly.h"
 #include "nsNodeInfo.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
@@ -47,7 +45,13 @@ nsNodeInfoManager::GetNodeInfoInnerHashValue(const void *key)
   const nsINodeInfo::nsNodeInfoInner *node =
     reinterpret_cast<const nsINodeInfo::nsNodeInfoInner *>(key);
 
-  return node->mName ? node->mName->hash() : HashString(*(node->mNameString));
+  if (node->mName) {
+    // Ideally, we'd return node->mName->hash() here.  But that doesn't work at
+    // the moment because node->mName->hash() is not the same as
+    // HashString(*(node->mNameString)).  See bug 732815.
+    return HashString(nsDependentAtomString(node->mName));
+  }
+  return HashString(*(node->mNameString));
 }
 
 
@@ -113,9 +117,11 @@ static PLHashAllocOps allocOps =
 nsNodeInfoManager::nsNodeInfoManager()
   : mDocument(nullptr),
     mNonDocumentNodeInfos(0),
+    mPrincipal(nullptr),
     mTextNodeInfo(nullptr),
     mCommentNodeInfo(nullptr),
-    mDocumentNodeInfo(nullptr)
+    mDocumentNodeInfo(nullptr),
+    mBindingManager(nullptr)
 {
   nsLayoutStatics::AddRef();
 
@@ -140,9 +146,9 @@ nsNodeInfoManager::~nsNodeInfoManager()
     PL_HashTableDestroy(mNodeInfoHash);
 
   // Note: mPrincipal may be null here if we never got inited correctly
-  mPrincipal = nullptr;
+  NS_IF_RELEASE(mPrincipal);
 
-  mBindingManager = nullptr;
+  NS_IF_RELEASE(mBindingManager);
 
 #ifdef PR_LOGGING
   if (gNodeInfoManagerLeakPRLog)
@@ -152,8 +158,6 @@ nsNodeInfoManager::~nsNodeInfoManager()
 
   nsLayoutStatics::Release();
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsNodeInfoManager)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsNodeInfoManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsNodeInfoManager)
@@ -165,7 +169,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsNodeInfoManager)
   if (tmp->mNonDocumentNodeInfos) {
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mDocument)
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBindingManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mBindingManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsNodeInfoManager, AddRef)
@@ -178,12 +182,15 @@ nsNodeInfoManager::Init(nsIDocument *aDocument)
 
   NS_PRECONDITION(!mPrincipal,
                   "Being inited when we already have a principal?");
-  nsresult rv;
-  mPrincipal = do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
+  nsresult rv = CallCreateInstance("@mozilla.org/nullprincipal;1",
+                                   &mPrincipal);
   NS_ENSURE_TRUE(mPrincipal, rv);
 
   if (aDocument) {
     mBindingManager = new nsBindingManager(aDocument);
+    NS_ENSURE_TRUE(mBindingManager, NS_ERROR_OUT_OF_MEMORY);
+
+    NS_ADDREF(mBindingManager);
   }
 
   mDefaultPrincipal = mPrincipal;
@@ -243,8 +250,8 @@ nsNodeInfoManager::GetNodeInfo(nsIAtom *aName, nsIAtom *aPrefix,
   nsRefPtr<nsNodeInfo> newNodeInfo =
     new nsNodeInfo(aName, aPrefix, aNamespaceID, aNodeType, aExtraName, this);
 
-  DebugOnly<PLHashEntry*> he =
-    PL_HashTableAdd(mNodeInfoHash, &newNodeInfo->mInner, newNodeInfo);
+  PLHashEntry *he;
+  he = PL_HashTableAdd(mNodeInfoHash, &newNodeInfo->mInner, newNodeInfo);
   MOZ_ASSERT(he, "PL_HashTableAdd() failed");
 
   // Have to do the swap thing, because already_AddRefed<nsNodeInfo>
@@ -385,14 +392,14 @@ nsNodeInfoManager::GetDocumentNodeInfo()
 void
 nsNodeInfoManager::SetDocumentPrincipal(nsIPrincipal *aPrincipal)
 {
-  mPrincipal = nullptr;
+  NS_RELEASE(mPrincipal);
   if (!aPrincipal) {
     aPrincipal = mDefaultPrincipal;
   }
 
   NS_ASSERTION(aPrincipal, "Must have principal by this point!");
-
-  mPrincipal = aPrincipal;
+  
+  NS_ADDREF(mPrincipal = aPrincipal);
 }
 
 void

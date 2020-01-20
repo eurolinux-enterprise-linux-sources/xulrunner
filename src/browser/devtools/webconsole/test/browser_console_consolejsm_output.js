@@ -7,13 +7,13 @@
 
 function test()
 {
-  let storage = Cc["@mozilla.org/consoleAPI-storage;1"].getService(Ci.nsIConsoleAPIStorage);
+  let storage = Cu.import("resource://gre/modules/ConsoleAPIStorage.jsm", {}).ConsoleAPIStorage;
   storage.clearEvents();
 
   let console = Cu.import("resource://gre/modules/devtools/Console.jsm", {}).console;
   console.log("bug861338-log-cached");
 
-  HUDService.toggleBrowserConsole().then(consoleOpened);
+  HUDConsoleUI.toggleBrowserConsole().then(consoleOpened);
   let hud = null;
 
   function consoleOpened(aHud)
@@ -71,7 +71,7 @@ function test()
         },
         {
           name: "console.error output",
-          text: /\bbug851231-error\b.+\{\s*bug851231prop:\s"bug851231value"\s*\}/,
+          text: /\bbug851231-error\b.+\[object Object\]/,
           category: CATEGORY_WEBDEV,
           severity: SEVERITY_ERROR,
           objects: true,
@@ -91,7 +91,7 @@ function test()
         },
         {
           name: "console.dir output",
-          consoleDir: /XULDocument\s+.+\s+chrome:\/\/.+\/browser\.xul/,
+          consoleDir: "[object XULDocument]",
         },
         {
           name: "console.time output",
@@ -125,7 +125,7 @@ function test()
 
       hud.jsterm.on("variablesview-fetched", onFetch);
 
-      clickable.scrollIntoView(false);
+      scrollOutputToNode(clickable);
 
       info("wait for variablesview-fetched");
       executeSoon(() =>

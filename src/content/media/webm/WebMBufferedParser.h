@@ -10,11 +10,9 @@
 #include "nsTArray.h"
 #include "mozilla/ReentrantMonitor.h"
 
-namespace mozilla {
-
-namespace dom {
 class TimeRanges;
-}
+
+namespace mozilla {
 
 // Stores a stream byte offset and the scaled timecode of the block at
 // that offset.  The timecode must be scaled by the stream's timecode
@@ -182,7 +180,7 @@ private:
   uint32_t mSkipBytes;
 };
 
-class WebMBufferedState MOZ_FINAL
+class WebMBufferedState
 {
   NS_INLINE_DECL_REFCOUNTING(WebMBufferedState)
 
@@ -191,17 +189,15 @@ public:
     MOZ_COUNT_CTOR(WebMBufferedState);
   }
 
-  void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
-  bool CalculateBufferedForRange(int64_t aStartOffset, int64_t aEndOffset,
-                                 uint64_t* aStartTime, uint64_t* aEndTime);
-  bool GetOffsetForTime(uint64_t aTime, int64_t* aOffset);
-
-private:
-  // Private destructor, to discourage deletion outside of Release():
   ~WebMBufferedState() {
     MOZ_COUNT_DTOR(WebMBufferedState);
   }
 
+  void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
+  bool CalculateBufferedForRange(int64_t aStartOffset, int64_t aEndOffset,
+                                 uint64_t* aStartTime, uint64_t* aEndTime);
+
+private:
   // Synchronizes access to the mTimeMapping array.
   ReentrantMonitor mReentrantMonitor;
 

@@ -4,30 +4,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGFEImageElement.h"
-
-#include "mozilla/EventStates.h"
 #include "mozilla/dom/SVGFEImageElementBinding.h"
 #include "mozilla/dom/SVGFilterElement.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/RefPtr.h"
-#include "nsContentUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
 #include "nsNetUtil.h"
-#include "imgIContainer.h"
-#include "gfx2DGlue.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEImage)
-
-using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEImageElement::WrapNode(JSContext *aCx)
+SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGFEImageElementBinding::Wrap(aCx, this);
+  return SVGFEImageElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
@@ -39,15 +30,15 @@ nsSVGElement::StringInfo SVGFEImageElement::sStringInfo[2] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED(SVGFEImageElement, SVGFEImageElementBase,
-                            nsIDOMNode, nsIDOMElement, nsIDOMSVGElement,
-                            imgINotificationObserver, nsIImageLoadingContent,
-                            imgIOnloadBlocker)
+NS_IMPL_ISUPPORTS_INHERITED6(SVGFEImageElement, SVGFEImageElementBase,
+                             nsIDOMNode, nsIDOMElement, nsIDOMSVGElement,
+                             imgINotificationObserver, nsIImageLoadingContent,
+                             imgIOnloadBlocker)
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGFEImageElement::SVGFEImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGFEImageElement::SVGFEImageElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGFEImageElementBase(aNodeInfo)
 {
   // We start out broken
@@ -172,7 +163,7 @@ SVGFEImageElement::UnbindFromTree(bool aDeep, bool aNullParent)
   SVGFEImageElementBase::UnbindFromTree(aDeep, aNullParent);
 }
 
-EventStates
+nsEventStates
 SVGFEImageElement::IntrinsicState() const
 {
   return SVGFEImageElementBase::IntrinsicState() |
@@ -193,59 +184,58 @@ SVGFEImageElement::Href()
 //----------------------------------------------------------------------
 // nsIDOMSVGFEImageElement methods
 
-FilterPrimitiveDescription
-SVGFEImageElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
-                                           const IntRect& aFilterSubregion,
-                                           const nsTArray<bool>& aInputsAreTainted,
-                                           nsTArray<RefPtr<SourceSurface>>& aInputImages)
+nsresult
+SVGFEImageElement::Filter(nsSVGFilterInstance *instance,
+                          const nsTArray<const Image*>& aSources,
+                          const Image* aTarget,
+                          const nsIntRect& rect)
 {
   nsIFrame* frame = GetPrimaryFrame();
-  if (!frame) {
-    return FilterPrimitiveDescription(PrimitiveType::Empty);
-  }
+  if (!frame) return NS_ERROR_FAILURE;
 
   nsCOMPtr<imgIRequest> currentRequest;
   GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
              getter_AddRefs(currentRequest));
 
   nsCOMPtr<imgIContainer> imageContainer;
-  if (currentRequest) {
+  if (currentRequest)
     currentRequest->GetImage(getter_AddRefs(imageContainer));
+
+  nsRefPtr<gfxASurface> currentFrame;
+  if (imageContainer)
+    imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
+                             imgIContainer::FLAG_SYNC_DECODE,
+                             getter_AddRefs(currentFrame));
+
+  // We need to wrap the surface in a pattern to have somewhere to set the
+  // graphics filter.
+  nsRefPtr<gfxPattern> thebesPattern;
+  if (currentFrame)
+    thebesPattern = new gfxPattern(currentFrame);
+
+  if (thebesPattern) {
+    thebesPattern->SetFilter(nsLayoutUtils::GetGraphicsFilterForFrame(frame));
+
+    int32_t nativeWidth, nativeHeight;
+    imageContainer->GetWidth(&nativeWidth);
+    imageContainer->GetHeight(&nativeHeight);
+
+    const gfxRect& filterSubregion = aTarget->mFilterPrimitiveSubregion;
+
+    gfxMatrix viewBoxTM =
+      SVGContentUtils::GetViewBoxTransform(filterSubregion.Width(), filterSubregion.Height(),
+                                           0,0, nativeWidth, nativeHeight,
+                                           mPreserveAspectRatio);
+
+    gfxMatrix xyTM = gfxMatrix().Translate(gfxPoint(filterSubregion.X(), filterSubregion.Y()));
+
+    gfxMatrix TM = viewBoxTM * xyTM;
+    
+    nsRefPtr<gfxContext> ctx = new gfxContext(aTarget->mImage);
+    nsSVGUtils::CompositePatternMatrix(ctx, thebesPattern, TM, nativeWidth, nativeHeight, 1.0);
   }
 
-  RefPtr<SourceSurface> image;
-  if (imageContainer) {
-    image = imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
-                                     imgIContainer::FLAG_SYNC_DECODE);
-  }
-
-  if (!image) {
-    return FilterPrimitiveDescription(PrimitiveType::Empty);
-  }
-
-  IntSize nativeSize;
-  imageContainer->GetWidth(&nativeSize.width);
-  imageContainer->GetHeight(&nativeSize.height);
-
-  Matrix viewBoxTM =
-    SVGContentUtils::GetViewBoxTransform(aFilterSubregion.width, aFilterSubregion.height,
-                                         0, 0, nativeSize.width, nativeSize.height,
-                                         mPreserveAspectRatio);
-  Matrix xyTM = Matrix().Translate(aFilterSubregion.x, aFilterSubregion.y);
-  Matrix TM = viewBoxTM * xyTM;
-
-  Filter filter = ToFilter(nsLayoutUtils::GetGraphicsFilterForFrame(frame));
-
-  FilterPrimitiveDescription descr(PrimitiveType::Image);
-  descr.Attributes().Set(eImageFilter, (uint32_t)filter);
-  descr.Attributes().Set(eImageTransform, TM);
-
-  // Append the image to aInputImages and store its index in the description.
-  size_t imageIndex = aInputImages.Length();
-  aInputImages.AppendElement(image);
-  descr.Attributes().Set(eImageInputIndex, (uint32_t)imageIndex);
-
-  return descr;
+  return NS_OK;
 }
 
 bool
@@ -259,45 +249,14 @@ SVGFEImageElement::AttributeAffectsRendering(int32_t aNameSpaceID,
           aAttribute == nsGkAtoms::preserveAspectRatio);
 }
 
-bool
-SVGFEImageElement::OutputIsTainted(const nsTArray<bool>& aInputsAreTainted,
-                                   nsIPrincipal* aReferencePrincipal)
+nsIntRect
+SVGFEImageElement::ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
+        const nsSVGFilterInstance& aInstance)
 {
-  nsresult rv;
-  nsCOMPtr<imgIRequest> currentRequest;
-  GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
-             getter_AddRefs(currentRequest));
-
-  if (!currentRequest) {
-    return false;
-  }
-
-  uint32_t status;
-  currentRequest->GetImageStatus(&status);
-  if ((status & imgIRequest::STATUS_LOAD_COMPLETE) == 0) {
-    // The load has not completed yet.
-    return false;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal;
-  rv = currentRequest->GetImagePrincipal(getter_AddRefs(principal));
-  if (NS_FAILED(rv) || !principal) {
-    return true;
-  }
-
-  int32_t corsmode;
-  if (NS_SUCCEEDED(currentRequest->GetCORSMode(&corsmode)) &&
-      corsmode != imgIRequest::CORS_NONE) {
-    // If CORS was used to load the image, the page is allowed to read from it.
-    return false;
-  }
-
-  if (aReferencePrincipal->Subsumes(principal)) {
-    // The page is allowed to read from the image.
-    return false;
-  }
-
-  return true;
+  // XXX can do better here ... we could check what we know of the source
+  // image bounds and compute an accurate bounding box for the filter
+  // primitive result.
+  return GetMaxRect();
 }
 
 //----------------------------------------------------------------------

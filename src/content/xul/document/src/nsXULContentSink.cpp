@@ -14,6 +14,7 @@
 
 #include "nsXULContentSink.h"
 
+#include "jsapi.h"
 #include "jsfriendapi.h"
 
 #include "nsCOMPtr.h"
@@ -25,12 +26,13 @@
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMXULDocument.h"
 #include "nsIFormControl.h"
+#include "nsINameSpaceManager.h"
 #include "nsINodeInfo.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
+#include "nsIScriptRuntime.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
-#include "nsNameSpaceManager.h"
 #include "nsParserBase.h"
 #include "nsViewManager.h"
 #include "nsIXULDocument.h"
@@ -55,10 +57,9 @@
 #include "nsXMLContentSink.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
-#include "nsContentTypeParser.h"
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo* gContentSinkLog;
+static PRLogModuleInfo* gLog;
 #endif
 
 //----------------------------------------------------------------------
@@ -169,8 +170,8 @@ XULContentSinkImpl::XULContentSinkImpl()
 {
 
 #ifdef PR_LOGGING
-    if (! gContentSinkLog)
-        gContentSinkLog = PR_NewLogModule("nsXULContentSink");
+    if (! gLog)
+        gLog = PR_NewLogModule("nsXULContentSink");
 #endif
 }
 
@@ -188,8 +189,6 @@ XULContentSinkImpl::~XULContentSinkImpl()
 
 //----------------------------------------------------------------------
 // nsISupports interface
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(XULContentSinkImpl)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(XULContentSinkImpl)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNodeInfoManager)
@@ -336,7 +335,7 @@ XULContentSinkImpl::Init(nsIDocument* aDocument,
 //
 
 bool
-XULContentSinkImpl::IsDataInBuffer(char16_t* buffer, int32_t length)
+XULContentSinkImpl::IsDataInBuffer(PRUnichar* buffer, int32_t length)
 {
     for (int32_t i = 0; i < length; ++i) {
         if (buffer[i] == ' ' ||
@@ -412,7 +411,7 @@ XULContentSinkImpl::FlushText(bool aCreateTextNode)
 //----------------------------------------------------------------------
 
 nsresult
-XULContentSinkImpl::NormalizeAttributeString(const char16_t *aExpatName,
+XULContentSinkImpl::NormalizeAttributeString(const PRUnichar *aExpatName,
                                              nsAttrName &aName)
 {
     int32_t nameSpaceID;
@@ -453,8 +452,8 @@ XULContentSinkImpl::CreateElement(nsINodeInfo *aNodeInfo,
 
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleStartElement(const char16_t *aName, 
-                                       const char16_t **aAtts,
+XULContentSinkImpl::HandleStartElement(const PRUnichar *aName, 
+                                       const PRUnichar **aAtts,
                                        uint32_t aAttsCount, 
                                        int32_t aIndex, 
                                        uint32_t aLineNumber)
@@ -496,7 +495,7 @@ XULContentSinkImpl::HandleStartElement(const char16_t *aName,
 
   case eInEpilog:
   case eInScript:
-      PR_LOG(gContentSinkLog, PR_LOG_WARNING,
+      PR_LOG(gLog, PR_LOG_WARNING,
              ("xul: warning: unexpected tags in epilog at line %d",
              aLineNumber));
       rv = NS_ERROR_UNEXPECTED; // XXX
@@ -516,7 +515,7 @@ XULContentSinkImpl::HandleStartElement(const char16_t *aName,
 }
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleEndElement(const char16_t *aName)
+XULContentSinkImpl::HandleEndElement(const PRUnichar *aName)
 {
     // Never EVER return anything but NS_OK or
     // NS_ERROR_HTMLPARSER_BLOCK from this method. Doing so will blow
@@ -566,7 +565,8 @@ XULContentSinkImpl::HandleEndElement(const char16_t *aName)
             script->mOutOfLine = false;
             if (doc)
                 script->Compile(mText, mTextLength, mDocumentURL,
-                                script->mLineNo, doc, mPrototype);
+                                script->mLineNo, doc,
+                                mPrototype->GetScriptGlobalObject());
         }
 
         FlushText(false);
@@ -603,14 +603,14 @@ XULContentSinkImpl::HandleEndElement(const char16_t *aName)
 }
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleComment(const char16_t *aName)
+XULContentSinkImpl::HandleComment(const PRUnichar *aName)
 {
    FlushText();
    return NS_OK;
 }
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleCDataSection(const char16_t *aData, uint32_t aLength)
+XULContentSinkImpl::HandleCDataSection(const PRUnichar *aData, uint32_t aLength)
 {
     FlushText();
     return AddText(aData, aLength);
@@ -627,7 +627,7 @@ XULContentSinkImpl::HandleDoctypeDecl(const nsAString & aSubset,
 }
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleCharacterData(const char16_t *aData, 
+XULContentSinkImpl::HandleCharacterData(const PRUnichar *aData, 
                                         uint32_t aLength)
 {
   if (aData && mState != eInProlog && mState != eInEpilog) {
@@ -637,8 +637,8 @@ XULContentSinkImpl::HandleCharacterData(const char16_t *aData,
 }
 
 NS_IMETHODIMP 
-XULContentSinkImpl::HandleProcessingInstruction(const char16_t *aTarget, 
-                                                const char16_t *aData)
+XULContentSinkImpl::HandleProcessingInstruction(const PRUnichar *aTarget, 
+                                                const PRUnichar *aData)
 {
     FlushText();
 
@@ -674,8 +674,8 @@ XULContentSinkImpl::HandleProcessingInstruction(const char16_t *aTarget,
 
 
 NS_IMETHODIMP
-XULContentSinkImpl::HandleXMLDeclaration(const char16_t *aVersion,
-                                         const char16_t *aEncoding,
+XULContentSinkImpl::HandleXMLDeclaration(const PRUnichar *aVersion,
+                                         const PRUnichar *aEncoding,
                                          int32_t aStandalone)
 {
   return NS_OK;
@@ -683,8 +683,8 @@ XULContentSinkImpl::HandleXMLDeclaration(const char16_t *aVersion,
 
 
 NS_IMETHODIMP
-XULContentSinkImpl::ReportError(const char16_t* aErrorText, 
-                                const char16_t* aSourceText,
+XULContentSinkImpl::ReportError(const PRUnichar* aErrorText, 
+                                const PRUnichar* aSourceText,
                                 nsIScriptError *aError,
                                 bool *_retval)
 {
@@ -712,13 +712,13 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
     return NS_OK;
   }
 
-  const char16_t* noAtts[] = { 0, 0 };
+  const PRUnichar* noAtts[] = { 0, 0 };
 
   NS_NAMED_LITERAL_STRING(errorNs,
                           "http://www.mozilla.org/newlayout/xml/parsererror.xml");
 
   nsAutoString parsererror(errorNs);
-  parsererror.Append((char16_t)0xFFFF);
+  parsererror.Append((PRUnichar)0xFFFF);
   parsererror.AppendLiteral("parsererror");
   
   rv = HandleStartElement(parsererror.get(), noAtts, 0, -1, 0);
@@ -728,7 +728,7 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
   NS_ENSURE_SUCCESS(rv,rv);  
   
   nsAutoString sourcetext(errorNs);
-  sourcetext.Append((char16_t)0xFFFF);
+  sourcetext.Append((PRUnichar)0xFFFF);
   sourcetext.AppendLiteral("sourcetext");
 
   rv = HandleStartElement(sourcetext.get(), noAtts, 0, -1, 0);
@@ -747,7 +747,7 @@ XULContentSinkImpl::ReportError(const char16_t* aErrorText,
 }
 
 nsresult
-XULContentSinkImpl::OpenRoot(const char16_t** aAttributes, 
+XULContentSinkImpl::OpenRoot(const PRUnichar** aAttributes, 
                              const uint32_t aAttrLen, 
                              nsINodeInfo *aNodeInfo)
 {
@@ -759,7 +759,7 @@ XULContentSinkImpl::OpenRoot(const char16_t** aAttributes,
 
     if (aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XHTML) || 
         aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XUL)) {
-        PR_LOG(gContentSinkLog, PR_LOG_ERROR,
+        PR_LOG(gLog, PR_LOG_ERROR,
                ("xul: script tag not allowed as root content element"));
 
         return NS_ERROR_UNEXPECTED;
@@ -771,10 +771,10 @@ XULContentSinkImpl::OpenRoot(const char16_t** aAttributes,
 
     if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
-        if (PR_LOG_TEST(gContentSinkLog, PR_LOG_ERROR)) {
+        if (PR_LOG_TEST(gLog, PR_LOG_ERROR)) {
             nsAutoString anodeC;
             aNodeInfo->GetName(anodeC);
-            PR_LOG(gContentSinkLog, PR_LOG_ERROR,
+            PR_LOG(gLog, PR_LOG_ERROR,
                    ("xul: unable to create element '%s' at line %d",
                     NS_ConvertUTF16toUTF8(anodeC).get(),
                     -1)); // XXX pass in line number
@@ -801,7 +801,7 @@ XULContentSinkImpl::OpenRoot(const char16_t** aAttributes,
 }
 
 nsresult
-XULContentSinkImpl::OpenTag(const char16_t** aAttributes, 
+XULContentSinkImpl::OpenTag(const PRUnichar** aAttributes, 
                             const uint32_t aAttrLen,
                             const uint32_t aLineNumber,
                             nsINodeInfo *aNodeInfo)
@@ -814,10 +814,10 @@ XULContentSinkImpl::OpenTag(const char16_t** aAttributes,
 
     if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
-        if (PR_LOG_TEST(gContentSinkLog, PR_LOG_ERROR)) {
+        if (PR_LOG_TEST(gLog, PR_LOG_ERROR)) {
             nsAutoString anodeC;
             aNodeInfo->GetName(anodeC);
-            PR_LOG(gContentSinkLog, PR_LOG_ERROR,
+            PR_LOG(gLog, PR_LOG_ERROR,
                    ("xul: unable to create element '%s' at line %d",
                     NS_ConvertUTF16toUTF8(anodeC).get(),
                     aLineNumber));
@@ -866,7 +866,7 @@ XULContentSinkImpl::OpenTag(const char16_t** aAttributes,
 }
 
 nsresult
-XULContentSinkImpl::OpenScript(const char16_t** aAttributes,
+XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
                                const uint32_t aLineNumber)
 {
   uint32_t langID = nsIProgrammingLanguage::JAVASCRIPT;
@@ -984,7 +984,8 @@ XULContentSinkImpl::OpenScript(const char16_t** aAttributes,
           // file right away.  Otherwise we'll end up reloading the script and
           // corrupting the FastLoad file trying to serialize it, in the case
           // where it's already there.
-          script->DeserializeOutOfLine(nullptr, mPrototype);
+          if (globalObject)
+                script->DeserializeOutOfLine(nullptr, globalObject);
       }
 
       nsPrototypeArray* children = nullptr;
@@ -1005,7 +1006,7 @@ XULContentSinkImpl::OpenScript(const char16_t** aAttributes,
 }
 
 nsresult
-XULContentSinkImpl::AddAttributes(const char16_t** aAttributes, 
+XULContentSinkImpl::AddAttributes(const PRUnichar** aAttributes, 
                                   const uint32_t aAttrLen, 
                                   nsXULPrototypeElement* aElement)
 {
@@ -1034,7 +1035,7 @@ XULContentSinkImpl::AddAttributes(const char16_t** aAttributes,
       NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef PR_LOGGING
-      if (PR_LOG_TEST(gContentSinkLog, PR_LOG_DEBUG)) {
+      if (PR_LOG_TEST(gLog, PR_LOG_DEBUG)) {
           nsAutoString extraWhiteSpace;
           int32_t cnt = mContextStack.Depth();
           while (--cnt >= 0)
@@ -1042,7 +1043,7 @@ XULContentSinkImpl::AddAttributes(const char16_t** aAttributes,
           nsAutoString qnameC,valueC;
           qnameC.Assign(aAttributes[0]);
           valueC.Assign(aAttributes[1]);
-          PR_LOG(gContentSinkLog, PR_LOG_DEBUG,
+          PR_LOG(gLog, PR_LOG_DEBUG,
                  ("xul: %.5d. %s    %s=%s",
                   -1, // XXX pass in line number
                   NS_ConvertUTF16toUTF8(extraWhiteSpace).get(),
@@ -1056,12 +1057,12 @@ XULContentSinkImpl::AddAttributes(const char16_t** aAttributes,
 }
 
 nsresult
-XULContentSinkImpl::AddText(const char16_t* aText, 
+XULContentSinkImpl::AddText(const PRUnichar* aText, 
                             int32_t aLength)
 {
   // Create buffer when we first need it
   if (0 == mTextSize) {
-      mText = (char16_t *) moz_malloc(sizeof(char16_t) * 4096);
+      mText = (PRUnichar *) moz_malloc(sizeof(PRUnichar) * 4096);
       if (nullptr == mText) {
           return NS_ERROR_OUT_OF_MEMORY;
       }
@@ -1084,13 +1085,13 @@ XULContentSinkImpl::AddText(const char16_t* aText,
       }
       else {
         mTextSize += aLength;
-        mText = (char16_t *) moz_realloc(mText, sizeof(char16_t) * mTextSize);
+        mText = (PRUnichar *) moz_realloc(mText, sizeof(PRUnichar) * mTextSize);
         if (nullptr == mText) {
             return NS_ERROR_OUT_OF_MEMORY;
         }
       }
     }
-    memcpy(&mText[mTextLength],aText + offset, sizeof(char16_t) * amount);
+    memcpy(&mText[mTextLength],aText + offset, sizeof(PRUnichar) * amount);
     
     mTextLength += amount;
     offset += amount;

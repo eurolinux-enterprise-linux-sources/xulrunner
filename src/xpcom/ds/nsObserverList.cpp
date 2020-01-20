@@ -56,7 +56,10 @@ nsresult
 nsObserverList::GetObserverList(nsISimpleEnumerator** anEnumerator)
 {
     nsRefPtr<nsObserverEnumerator> e(new nsObserverEnumerator(this));
-    e.forget(anEnumerator);
+    if (!e)
+        return NS_ERROR_OUT_OF_MEMORY;
+
+    NS_ADDREF(*anEnumerator = e);
     return NS_OK;
 }
 
@@ -87,7 +90,7 @@ nsObserverList::FillObserverArray(nsCOMArray<nsIObserver> &aArray)
 void
 nsObserverList::NotifyObservers(nsISupports *aSubject,
                                 const char *aTopic,
-                                const char16_t *someData)
+                                const PRUnichar *someData)
 {
     nsCOMArray<nsIObserver> observers;
     FillObserverArray(observers);
@@ -107,7 +110,7 @@ nsObserverList::UnmarkGrayStrongObservers()
     }
 }
 
-NS_IMPL_ISUPPORTS(nsObserverEnumerator, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS1(nsObserverEnumerator, nsISimpleEnumerator)
 
 nsObserverEnumerator::nsObserverEnumerator(nsObserverList* aObserverList)
     : mIndex(0)

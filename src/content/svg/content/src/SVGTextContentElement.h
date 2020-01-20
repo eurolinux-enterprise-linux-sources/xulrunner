@@ -7,15 +7,9 @@
 #define mozilla_dom_SVGTextContentElement_h
 
 #include "mozilla/dom/SVGGraphicsElement.h"
-#include "mozilla/dom/SVGAnimatedEnumeration.h"
-#include "nsSVGEnum.h"
-#include "nsSVGLength2.h"
 
-static const unsigned short SVG_LENGTHADJUST_UNKNOWN          = 0;
-static const unsigned short SVG_LENGTHADJUST_SPACING          = 1;
-static const unsigned short SVG_LENGTHADJUST_SPACINGANDGLYPHS = 2;
-
-class SVGTextFrame;
+class nsSVGTextContainerFrame;
+class nsSVGTextFrame2;
 
 namespace mozilla {
 class nsISVGPoint;
@@ -32,8 +26,6 @@ public:
   using FragmentOrElement::TextLength;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedLength> TextLength();
-  already_AddRefed<SVGAnimatedEnumeration> LengthAdjust();
   int32_t GetNumberOfChars();
   float GetComputedTextLength();
   void SelectSubString(uint32_t charnum, uint32_t nchars, ErrorResult& rv);
@@ -46,20 +38,13 @@ public:
 
 protected:
 
-  SVGTextContentElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  SVGTextContentElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGTextContentElementBase(aNodeInfo)
   {}
 
-  SVGTextFrame* GetSVGTextFrame();
-
-  enum { LENGTHADJUST };
-  virtual nsSVGEnum* EnumAttributes() = 0;
-  static nsSVGEnumMapping sLengthAdjustMap[];
-  static EnumInfo sEnumInfo[1];
-
-  enum { TEXTLENGTH };
-  virtual nsSVGLength2* LengthAttributes() = 0;
-  static LengthInfo sLengthInfo[1];
+  nsSVGTextContainerFrame* GetTextContainerFrame();
+  nsSVGTextFrame2* GetSVGTextFrame();
+  bool FrameIsSVGText();
 };
 
 } // namespace dom

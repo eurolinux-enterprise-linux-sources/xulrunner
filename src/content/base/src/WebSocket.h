@@ -8,23 +8,36 @@
 #define WebSocket_h__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/dom/TypedArray.h"
-#include "mozilla/dom/WebSocketBinding.h" // for BinaryType
-#include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/ErrorResult.h"
-#include "nsAutoPtr.h"
-#include "nsCOMPtr.h"
-#include "nsCycleCollectionParticipant.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIObserver.h"
-#include "nsIRequest.h"
+#include "mozilla/Util.h"
+
+#include "nsWrapperCache.h"
+#include "nsIWebSocketListener.h"
 #include "nsISupports.h"
+
+#include "mozilla/ErrorResult.h"
+#include "mozilla/dom/TypedArray.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/EventHandlerBinding.h"
+
+// Need this for BinaryType.
+#include "mozilla/dom/WebSocketBinding.h"
+
+#include "jsfriendapi.h"
 #include "nsISupportsUtils.h"
+#include "nsCOMPtr.h"
+#include "nsString.h"
+#include "nsIPrincipal.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsIDOMEventListener.h"
+#include "nsDOMEventTargetHelper.h"
+#include "nsAutoPtr.h"
+#include "nsIDOMDOMStringList.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsIWebSocketChannel.h"
 #include "nsIWebSocketListener.h"
-#include "nsString.h"
+#include "nsIObserver.h"
+#include "nsIRequest.h"
 #include "nsWeakReference.h"
-#include "nsWrapperCache.h"
 
 #define DEFAULT_WS_SCHEME_PORT  80
 #define DEFAULT_WSS_SCHEME_PORT 443
@@ -32,7 +45,7 @@
 namespace mozilla {
 namespace dom {
 
-class WebSocket : public DOMEventTargetHelper,
+class WebSocket : public nsDOMEventTargetHelper,
                   public nsIInterfaceRequestor,
                   public nsIWebSocketListener,
                   public nsIObserver,
@@ -52,8 +65,8 @@ public:
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
-    WebSocket, DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(WebSocket,
+                                                                   nsDOMEventTargetHelper)
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIWEBSOCKETLISTENER
   NS_DECL_NSIOBSERVER
@@ -68,26 +81,30 @@ public:
   // nsWrapperCache
   nsPIDOMWindow* GetParentObject() { return GetOwner(); }
 
-  virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public: // static helpers:
 
   // Determine if preferences allow WebSocket
-  static bool PrefEnabled(JSContext* aCx = nullptr, JSObject* aGlobal = nullptr);
+  static bool PrefEnabled();
 
 public: // WebIDL interface:
 
   // Constructor:
   static already_AddRefed<WebSocket> Constructor(const GlobalObject& aGlobal,
+                                                 JSContext *aCx,
                                                  const nsAString& aUrl,
                                                  ErrorResult& rv);
 
   static already_AddRefed<WebSocket> Constructor(const GlobalObject& aGlobal,
+                                                 JSContext *aCx,
                                                  const nsAString& aUrl,
                                                  const nsAString& aProtocol,
                                                  ErrorResult& rv);
 
   static already_AddRefed<WebSocket> Constructor(const GlobalObject& aGlobal,
+                                                 JSContext *aCx,
                                                  const nsAString& aUrl,
                                                  const Sequence<nsString>& aProtocols,
                                                  ErrorResult& rv);
@@ -133,18 +150,19 @@ public: // WebIDL interface:
             ErrorResult& aRv);
   void Send(nsIDOMBlob* aData,
             ErrorResult& aRv);
-  void Send(const ArrayBuffer& aData,
+  void Send(ArrayBuffer& aData,
             ErrorResult& aRv);
-  void Send(const ArrayBufferView& aData,
+  void Send(ArrayBufferView& aData,
             ErrorResult& aRv);
 
 private: // constructor && distructor
-  WebSocket(nsPIDOMWindow* aOwnerWindow);
+  WebSocket();
   virtual ~WebSocket();
 
 protected:
   nsresult Init(JSContext* aCx,
                 nsIPrincipal* aPrincipal,
+                nsPIDOMWindow* aOwnerWindow,
                 const nsAString& aURL,
                 nsTArray<nsString>& aProtocolArray);
 
@@ -166,8 +184,8 @@ protected:
 
   nsresult ConsoleError();
   nsresult PrintErrorOnConsole(const char* aBundleURI,
-                               const char16_t* aError,
-                               const char16_t** aFormatStrings,
+                               const PRUnichar* aError,
+                               const PRUnichar** aFormatStrings,
                                uint32_t aFormatStringsLen);
 
   nsresult DoOnMessageAvailable(const nsACString& aMsg,

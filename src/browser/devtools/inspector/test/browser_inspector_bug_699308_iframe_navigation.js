@@ -8,31 +8,21 @@ function test() {
   let inspector;
 
   function startTest() {
-    openInspector(aInspector => {
-      inspector = aInspector;
-      runInspectorTests();
-    });
+    openInspector(runInspectorTests);
   }
 
-  function showHighlighter(cb) {
-    inspector.toolbox.highlighterUtils.startPicker().then(() => {
-      EventUtils.synthesizeMouse(content.document.body, 1, 1,
-        {type: "mousemove"}, content);
-      inspector.toolbox.once("highlighter-ready", cb);
-    });
-  }
+  function runInspectorTests(aInspector) {
+    inspector = aInspector;
 
-  function runInspectorTests() {
     iframe = content.document.querySelector("iframe");
     ok(iframe, "found the iframe element");
 
-    showHighlighter(() => {
-      ok(isHighlighting(), "Inspector is highlighting");
+    ok(inspector.highlighter._highlighting, "Inspector is highlighting");
 
-      iframe.addEventListener("load", onIframeLoad, false);
-      executeSoon(() => {
-        iframe.contentWindow.location = "javascript:location.reload()";
-      });
+    iframe.addEventListener("load", onIframeLoad, false);
+
+    executeSoon(function() {
+      iframe.contentWindow.location = "javascript:location.reload()";
     });
   }
 
@@ -45,9 +35,8 @@ function test() {
     }
 
     iframe.removeEventListener("load", onIframeLoad, false);
-    info("Finished reloading iframe and inspector updated");
 
-    ok(isHighlighting(), "Inspector is highlighting after iframe nav");
+    ok(inspector.highlighter._highlighting, "Inspector is highlighting after iframe nav");
 
     checksAfterLoads = true;
 
@@ -58,11 +47,9 @@ function test() {
     is(iframeLoads, 2, "iframe loads");
     ok(checksAfterLoads, "the Inspector tests got the chance to run after iframe reloads");
 
-    inspector.toolbox.highlighterUtils.stopPicker().then(() => {
-      iframe = null;
-      gBrowser.removeCurrentTab();
-      executeSoon(finish);
-    });
+    iframe = null;
+    gBrowser.removeCurrentTab();
+    executeSoon(finish);
   }
 
   waitForExplicitFinish();
@@ -73,7 +60,6 @@ function test() {
     waitForFocus(startTest, content);
   }, true);
 
-  content.location = "data:text/html;charset=utf-8," +
-                     "<p>bug 699308 - test iframe navigation</p>" +
-                     "<iframe src='data:text/html;charset=utf-8,hello world'></iframe>";
+  content.location = "data:text/html,<p>bug 699308 - test iframe navigation" +
+    "<iframe src='data:text/html,hello world'></iframe>";
 }

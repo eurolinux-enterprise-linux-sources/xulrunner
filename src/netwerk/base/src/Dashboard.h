@@ -5,42 +5,57 @@
 #ifndef nsDashboard_h__
 #define nsDashboard_h__
 
-#include "mozilla/Mutex.h"
-#include "mozilla/net/DashboardTypes.h"
 #include "nsIDashboard.h"
 #include "nsIDashboardEventNotifier.h"
-#include "nsIDNSListener.h"
+#include "nsTArray.h"
+#include "nsString.h"
+#include "nsIDNSService.h"
 #include "nsIServiceManager.h"
-#include "nsITimer.h"
-#include "nsITransport.h"
-
-class nsIDNSService;
-class nsISocketTransport;
-class nsIThread;
+#include "nsIThread.h"
+#include "nsSocketTransport2.h"
+#include "mozilla/net/DashboardTypes.h"
 
 namespace mozilla {
 namespace net {
 
-class SocketData;
-class HttpData;
-class DnsData;
-class WebSocketRequest;
-class ConnectionData;
-
-class Dashboard
-    : public nsIDashboard
-    , public nsIDashboardEventNotifier
+class Dashboard:
+    public nsIDashboard,
+    public nsIDashboardEventNotifier
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIDASHBOARD
     NS_DECL_NSIDASHBOARDEVENTNOTIFIER
 
     Dashboard();
-    static const char *GetErrorString(nsresult rv);
-    nsresult GetConnectionStatus(ConnectionData *aConnectionData);
+private:
+    virtual ~Dashboard();
+
+    void GetSocketsDispatch();
+    void GetHttpDispatch();
+    void GetDnsInfoDispatch();
+
+    /* Helper methods that pass the JSON to the callback function. */
+    nsresult GetSockets();
+    nsresult GetHttpConnections();
+    nsresult GetWebSocketConnections();
+    nsresult GetDNSCacheEntries();
 
 private:
+    struct SocketData
+    {
+        uint64_t totalSent;
+        uint64_t totalRecv;
+        nsTArray<SocketInfo> data;
+        nsCOMPtr<NetDashboardCallback> cb;
+        nsIThread* thread;
+    };
+
+    struct HttpData {
+        nsTArray<HttpRetParams> data;
+        nsCOMPtr<NetDashboardCallback> cb;
+        nsIThread* thread;
+    };
 
     struct LogData
     {
@@ -78,27 +93,25 @@ private:
         }
         nsTArray<LogData> data;
         mozilla::Mutex lock;
+        nsCOMPtr<NetDashboardCallback> cb;
+        nsIThread* thread;
     };
 
+    struct DnsData
+    {
+        nsCOMPtr<nsIDNSService> serv;
+        nsTArray<DNSCacheEntries> data;
+        nsCOMPtr<NetDashboardCallback> cb;
+        nsIThread* thread;
+    };
 
     bool mEnableLogging;
-    WebSocketData mWs;
 
-private:
-    virtual ~Dashboard();
+    struct SocketData mSock;
+    struct HttpData mHttp;
+    struct WebSocketData mWs;
+    struct DnsData mDns;
 
-    nsresult GetSocketsDispatch(SocketData *);
-    nsresult GetHttpDispatch(HttpData *);
-    nsresult GetDnsInfoDispatch(DnsData *);
-    nsresult TestNewConnection(ConnectionData *);
-
-    /* Helper methods that pass the JSON to the callback function. */
-    nsresult GetSockets(SocketData *);
-    nsresult GetHttpConnections(HttpData *);
-    nsresult GetDNSCacheEntries(DnsData *);
-    nsresult GetWebSocketConnections(WebSocketRequest *);
-
-    nsCOMPtr<nsIDNSService> mDnsService;
 };
 
 } } // namespace mozilla::net

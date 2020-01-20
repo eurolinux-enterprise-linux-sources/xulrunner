@@ -32,18 +32,28 @@ RenderFrameChild::Destroy()
   // WARNING: |this| is dead, hands off
 }
 
-PLayerTransactionChild*
-RenderFrameChild::AllocPLayerTransactionChild()
+void
+RenderFrameChild::CancelDefaultPanZoom()
 {
-  LayerTransactionChild* c = new LayerTransactionChild();
-  c->AddIPDLReference();
-  return c;
+  SendCancelDefaultPanZoom();
+}
+
+void
+RenderFrameChild::DetectScrollableSubframe()
+{
+  SendDetectScrollableSubframe();
+}
+
+PLayerTransactionChild*
+RenderFrameChild::AllocPLayerTransaction()
+{
+  return new LayerTransactionChild();
 }
 
 bool
-RenderFrameChild::DeallocPLayerTransactionChild(PLayerTransactionChild* aLayers)
+RenderFrameChild::DeallocPLayerTransaction(PLayerTransactionChild* aLayers)
 {
-  static_cast<LayerTransactionChild*>(aLayers)->ReleaseIPDLReference();
+  delete aLayers;
   return true;
 }
 

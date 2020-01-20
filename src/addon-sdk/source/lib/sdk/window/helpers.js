@@ -6,8 +6,7 @@
 const { defer } = require('../core/promise');
 const events = require('../system/events');
 const { open: openWindow, onFocus, getToplevelWindow,
-        isInteractive, getOuterId } = require('./utils');
-const { Ci } = require("chrome");
+        isInteractive } = require('./utils');
 
 function open(uri, options) {
   return promise(openWindow.apply(null, arguments), 'load');
@@ -15,14 +14,15 @@ function open(uri, options) {
 exports.open = open;
 
 function close(window) {
+  // We shouldn't wait for unload, as it is dispatched
+  // before the window is actually closed.
+  // `domwindowclosed` is a better match.
   let deferred = defer();
   let toplevelWindow = getToplevelWindow(window);
-  let outerId = getOuterId(toplevelWindow);
-  events.on("outer-window-destroyed", function onclose({subject}) {
-    let id = subject.QueryInterface(Ci.nsISupportsPRUint64).data;
-    if (id == outerId) {
-      events.off("outer-window-destroyed", onclose);
-      deferred.resolve();
+  events.on("domwindowclosed", function onclose({subject}) {
+    if (subject == toplevelWindow) {
+      events.off("domwindowclosed", onclose);
+      deferred.resolve(window);
     }
   }, true);
   window.close();

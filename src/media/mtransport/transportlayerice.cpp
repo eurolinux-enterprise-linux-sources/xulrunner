@@ -95,7 +95,7 @@ TransportLayerIce::TransportLayerIce(const std::string& name,
   stream_->SignalPacketReceived.connect(this,
                                         &TransportLayerIce::IcePacketReceived);
   if (stream_->state() == NrIceMediaStream::ICE_OPEN) {
-    TL_SET_STATE(TS_OPEN);
+    SetState(TS_OPEN);
   }
 }
 
@@ -113,7 +113,7 @@ TransportResult TransportLayerIce::SendPacket(const unsigned char *data,
         TE_WOULDBLOCK : TE_ERROR;
   }
 
-  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << " SendPacket(" << len << ") succeeded");
+  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << " SendPacket(" << len << ") succeeded");
 
   return len;
 }
@@ -126,12 +126,12 @@ void TransportLayerIce::IceCandidate(NrIceMediaStream *stream,
 
 void TransportLayerIce::IceReady(NrIceMediaStream *stream) {
   CheckThread();
-  TL_SET_STATE(TS_OPEN);
+  SetState(TS_OPEN);
 }
 
 void TransportLayerIce::IceFailed(NrIceMediaStream *stream) {
   CheckThread();
-  TL_SET_STATE(TS_ERROR);
+  SetState(TS_ERROR);
 }
 
 void TransportLayerIce::IcePacketReceived(NrIceMediaStream *stream, int component,
@@ -142,7 +142,7 @@ void TransportLayerIce::IcePacketReceived(NrIceMediaStream *stream, int componen
   if (component_ != component)
     return;
 
-  MOZ_MTLOG(ML_DEBUG, LAYER_INFO << "PacketReceived(" << stream->name() << ","
+  MOZ_MTLOG(PR_LOG_DEBUG, LAYER_INFO << "PacketReceived(" << stream->name() << ","
     << component << "," << len << ")");
   SignalPacketReceived(this, data, len);
 }

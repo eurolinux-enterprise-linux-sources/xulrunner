@@ -28,6 +28,7 @@ interface nsIDOMNode;
 interface nsIDOMNodeList;
 interface nsIDOMProcessingInstruction;
 interface nsIDOMText;
+interface nsIDOMDOMStringList;
 interface nsIDOMClientRect;
 interface nsIDOMClientRectList;
 
@@ -36,14 +37,20 @@ interface DOMException;
 
 // Style Sheets
 interface nsIDOMStyleSheetList;
+interface nsIDOMLinkStyle;
 interface nsIDOMStyleSheet;
 interface nsIDOMMediaList;
 
 // Base
 interface nsIDOMWindow;
 interface nsIDOMWindowCollection;
+interface nsIDOMPlugin;
+interface nsIDOMPluginArray;
+interface nsIDOMMimeType;
+interface nsIDOMMimeTypeArray;
 interface nsIDOMNavigator;
 interface nsIDOMScreen;
+interface nsIDOMHistory;
 
 // Events
 interface nsIDOMEvent;
@@ -70,13 +77,20 @@ interface nsIDOMRect;
 interface nsIDOMCSSStyleRule;
 interface nsIDOMCSSStyleRuleCollection;
 interface nsIDOMHTMLTableCaptionElement;
+interface nsIDOMHTMLTableSectionElement;
 
 // Range
 interface nsIDOMRange;
 
 // Crypto
+interface nsIDOMCRMFObject;
 interface nsIDOMCrypto;
+interface nsIDOMPkcs11;
 
 // Used font face (for inspector)
 interface nsIDOMFontFace;
 interface nsIDOMFontFaceList;
+
+// Power
+interface nsIDOMMozPowerManager;
+interface nsIDOMMozWakeLock;

@@ -15,8 +15,7 @@ namespace gfx {
 class DrawTargetRecording : public DrawTarget
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetRecording)
-  DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT, bool aHasData = false);
+  DrawTargetRecording(DrawEventRecorder *aRecorder, DrawTarget *aDT);
   ~DrawTargetRecording();
 
   virtual BackendType GetType() const { return mFinalDT->GetType(); }
@@ -47,11 +46,6 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
-
-  virtual void DrawFilter(FilterNode *aNode,
-                          const Rect &aSourceRect,
-                          const Point &aDestPoint,
-                          const DrawOptions &aOptions = DrawOptions());
 
   /*
    * Blend a surface to the draw target with a shadow. The shadow is drawn as a
@@ -163,7 +157,7 @@ public:
                           const GlyphBuffer &aBuffer,
                           const Pattern &aPattern,
                           const DrawOptions &aOptions = DrawOptions(),
-                          const GlyphRenderingOptions *aRenderingOptions = nullptr);
+                          const GlyphRenderingOptions *aRenderingOptions = NULL);
 
   /*
    * This takes a source pattern and a mask, and composites the source pattern
@@ -242,7 +236,7 @@ public:
    * ID2D1SimplifiedGeometrySink requires the fill mode
    * to be set before calling BeginFigure().
    */
-  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FillRule::FILL_WINDING) const;
+  virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FILL_WINDING) const;
 
   /*
    * Create a GradientStops object that holds information about a set of
@@ -257,9 +251,7 @@ public:
   virtual TemporaryRef<GradientStops>
     CreateGradientStops(GradientStop *aStops,
                         uint32_t aNumStops,
-                        ExtendMode aExtendMode = ExtendMode::CLAMP) const;
-
-  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
+                        ExtendMode aExtendMode = EXTEND_CLAMP) const;
 
   /*
    * Set a transform on the surface, this transform is applied at drawing time

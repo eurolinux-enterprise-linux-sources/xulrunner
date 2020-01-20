@@ -8,13 +8,12 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/Decimal.h"
-#include "mozilla/EventForwards.h"
 #include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsCOMPtr.h"
 
 class nsBaseContentList;
-class nsDisplayRangeFocusRing;
+class nsGUIEvent;
 
 class nsRangeFrame : public nsContainerFrame,
                      public nsIAnonymousContentCreator
@@ -22,12 +21,8 @@ class nsRangeFrame : public nsContainerFrame,
   friend nsIFrame*
   NS_NewRangeFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  friend class nsDisplayRangeFocusRing;
-
   nsRangeFrame(nsStyleContext* aContext);
   virtual ~nsRangeFrame();
-
-  typedef mozilla::dom::Element Element;
 
 public:
   NS_DECL_QUERYFRAME_TARGET(nsRangeFrame)
@@ -45,13 +40,13 @@ public:
                         const nsRect&           aDirtyRect,
                         const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual nsresult Reflow(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
+                    nsHTMLReflowMetrics&     aDesiredSize,
+                    const nsHTMLReflowState& aReflowState,
+                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-#ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
+#ifdef DEBUG
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
     return MakeFrameName(NS_LITERAL_STRING("Range"), aResult);
   }
 #endif
@@ -67,9 +62,9 @@ public:
   virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
                                         uint32_t aFilter) MOZ_OVERRIDE;
 
-  virtual nsresult AttributeChanged(int32_t  aNameSpaceID,
-                                    nsIAtom* aAttribute,
-                                    int32_t  aModType) MOZ_OVERRIDE;
+  NS_IMETHOD AttributeChanged(int32_t  aNameSpaceID,
+                              nsIAtom* aAttribute,
+                              int32_t  aModType) MOZ_OVERRIDE;
 
   virtual nsSize ComputeAutoSize(nsRenderingContext *aRenderingContext,
                                  nsSize aCBSize, nscoord aAvailableWidth,
@@ -86,10 +81,6 @@ public:
     return nsContainerFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
-
-  nsStyleContext* GetAdditionalStyleContext(int32_t aIndex) const MOZ_OVERRIDE;
-  void SetAdditionalStyleContext(int32_t aIndex,
-                                 nsStyleContext* aStyleContext) MOZ_OVERRIDE;
 
   /**
    * Returns true if the slider's thumb moves horizontally, or else false if it
@@ -120,7 +111,7 @@ public:
    */
   bool ShouldUseNativeStyle() const;
 
-  mozilla::Decimal GetValueAtEventPoint(mozilla::WidgetGUIEvent* aEvent);
+  mozilla::Decimal GetValueAtEventPoint(nsGUIEvent* aEvent);
 
   /**
    * Helper that's used when the value of the range changes to reposition the
@@ -131,11 +122,9 @@ public:
    */
   void UpdateForValueChange();
 
-  virtual Element* GetPseudoElement(nsCSSPseudoElements::Type aType) MOZ_OVERRIDE;
-
 private:
 
-  nsresult MakeAnonymousDiv(Element** aResult,
+  nsresult MakeAnonymousDiv(nsIContent** aResult,
                             nsCSSPseudoElements::Type aPseudoType,
                             nsTArray<ContentInfo>& aElements);
 
@@ -154,7 +143,7 @@ private:
    * The div used to show the ::-moz-range-track pseudo-element.
    * @see nsRangeFrame::CreateAnonymousContent
    */
-  nsCOMPtr<Element> mTrackDiv;
+  nsCOMPtr<nsIContent> mTrackDiv;
 
   /**
    * The div used to show the ::-moz-range-progress pseudo-element, which is
@@ -162,18 +151,13 @@ private:
    * thumb's current position.
    * @see nsRangeFrame::CreateAnonymousContent
    */
-  nsCOMPtr<Element> mProgressDiv;
+  nsCOMPtr<nsIContent> mProgressDiv;
 
   /**
    * The div used to show the ::-moz-range-thumb pseudo-element.
    * @see nsRangeFrame::CreateAnonymousContent
    */
-  nsCOMPtr<Element> mThumbDiv;
-
-  /**
-   * Cached style context for -moz-focus-outer CSS pseudo-element style.
-   */
-  nsRefPtr<nsStyleContext> mOuterFocusStyle;
+  nsCOMPtr<nsIContent> mThumbDiv;
 };
 
 #endif

@@ -8,6 +8,7 @@
 #include "nsROCSSPrimitiveValue.h"
 
 #include "mozilla/dom/CSSPrimitiveValueBinding.h"
+#include "nsContentUtils.h"
 #include "nsPresContext.h"
 #include "nsStyleUtil.h"
 #include "nsDOMCSSRGBColor.h"
@@ -42,8 +43,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsROCSSPrimitiveValue)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, CSSValue)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsROCSSPrimitiveValue)
-
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(nsROCSSPrimitiveValue)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsROCSSPrimitiveValue)
@@ -54,8 +53,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsROCSSPrimitiveValue)
   } else if (tmp->mType == CSS_RECT) {
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mValue.mRect)
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsROCSSPrimitiveValue)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -63,9 +62,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsROCSSPrimitiveValue)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 JSObject*
-nsROCSSPrimitiveValue::WrapObject(JSContext *cx)
+nsROCSSPrimitiveValue::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return dom::CSSPrimitiveValueBinding::Wrap(cx, this);
+  return dom::CSSPrimitiveValueBinding::Wrap(cx, scope, this);
 }
 
 // nsIDOMCSSValue
@@ -82,7 +81,7 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
     case CSS_PX :
       {
         float val = nsPresContext::AppUnitsToFloatCSSPixels(mValue.mAppUnits);
-        nsStyleUtil::AppendCSSNumber(val, tmpStr);
+        tmpStr.AppendFloat(val);
         tmpStr.AppendLiteral("px");
         break;
       }
@@ -121,52 +120,18 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
       {
         tmpStr.AppendLiteral("attr(");
         tmpStr.Append(mValue.mString);
-        tmpStr.Append(char16_t(')'));
+        tmpStr.Append(PRUnichar(')'));
         break;
       }
     case CSS_PERCENTAGE :
       {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat * 100, tmpStr);
-        tmpStr.Append(char16_t('%'));
+        tmpStr.AppendFloat(mValue.mFloat * 100);
+        tmpStr.Append(PRUnichar('%'));
         break;
       }
     case CSS_NUMBER :
       {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
-        break;
-      }
-    case CSS_NUMBER_INT32 :
-      {
-        tmpStr.AppendInt(mValue.mInt32);
-        break;
-      }
-    case CSS_NUMBER_UINT32 :
-      {
-        tmpStr.AppendInt(mValue.mUint32);
-        break;
-      }
-    case CSS_DEG :
-      {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
-        tmpStr.AppendLiteral("deg");
-        break;
-      }
-    case CSS_GRAD :
-      {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
-        tmpStr.AppendLiteral("grad");
-        break;
-      }
-    case CSS_RAD :
-      {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
-        tmpStr.AppendLiteral("rad");
-        break;
-      }
-    case CSS_TURN :
-      {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
-        tmpStr.AppendLiteral("turn");
+        tmpStr.AppendFloat(mValue.mFloat);
         break;
       }
     case CSS_RECT :
@@ -253,7 +218,7 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
       }
     case CSS_S :
       {
-        nsStyleUtil::AppendCSSNumber(mValue.mFloat, tmpStr);
+        tmpStr.AppendFloat(mValue.mFloat);
         tmpStr.AppendLiteral("s");
         break;
       }
@@ -265,6 +230,9 @@ nsROCSSPrimitiveValue::GetCssText(nsAString& aCssText)
     case CSS_UNKNOWN :
     case CSS_EMS :
     case CSS_EXS :
+    case CSS_DEG :
+    case CSS_RAD :
+    case CSS_GRAD :
     case CSS_MS :
     case CSS_HZ :
     case CSS_KHZ :
@@ -320,7 +288,7 @@ NS_IMETHODIMP
 nsROCSSPrimitiveValue::GetPrimitiveType(uint16_t* aPrimitiveType)
 {
   NS_ENSURE_ARG_POINTER(aPrimitiveType);
-  *aPrimitiveType = PrimitiveType();
+  *aPrimitiveType = mType;
 
   return NS_OK;
 }
@@ -392,12 +360,6 @@ nsROCSSPrimitiveValue::GetFloatValue(uint16_t aUnitType, ErrorResult& aRv)
     case CSS_NUMBER :
       if (mType == CSS_NUMBER) {
         return mValue.mFloat;
-      }
-      if (mType == CSS_NUMBER_INT32) {
-        return mValue.mInt32;
-      }
-      if (mType == CSS_NUMBER_UINT32) {
-        return mValue.mUint32;
       }
 
       break;
@@ -538,16 +500,16 @@ void
 nsROCSSPrimitiveValue::SetNumber(int32_t aValue)
 {
   Reset();
-  mValue.mInt32 = aValue;
-  mType = CSS_NUMBER_INT32;
+  mValue.mFloat = float(aValue);
+  mType = CSS_NUMBER;
 }
 
 void
 nsROCSSPrimitiveValue::SetNumber(uint32_t aValue)
 {
   Reset();
-  mValue.mUint32 = aValue;
-  mType = CSS_NUMBER_UINT32;
+  mValue.mFloat = float(aValue);
+  mType = CSS_NUMBER;
 }
 
 void
@@ -556,38 +518,6 @@ nsROCSSPrimitiveValue::SetPercent(float aValue)
   Reset();
   mValue.mFloat = aValue;
   mType = CSS_PERCENTAGE;
-}
-
-void
-nsROCSSPrimitiveValue::SetDegree(float aValue)
-{
-  Reset();
-  mValue.mFloat = aValue;
-  mType = CSS_DEG;
-}
-
-void
-nsROCSSPrimitiveValue::SetGrad(float aValue)
-{
-  Reset();
-  mValue.mFloat = aValue;
-  mType = CSS_GRAD;
-}
-
-void
-nsROCSSPrimitiveValue::SetRadian(float aValue)
-{
-  Reset();
-  mValue.mFloat = aValue;
-  mType = CSS_RAD;
-}
-
-void
-nsROCSSPrimitiveValue::SetTurn(float aValue)
-{
-  Reset();
-  mValue.mFloat = aValue;
-  mType = CSS_TURN;
 }
 
 void

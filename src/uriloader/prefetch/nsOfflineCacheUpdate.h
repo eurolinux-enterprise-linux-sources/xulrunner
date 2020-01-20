@@ -15,6 +15,7 @@
 #include "nsIChannelEventSink.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMNode.h"
+#include "nsIDOMLoadStatus.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIMutableArray.h"
 #include "nsIObserver.h"
@@ -31,9 +32,6 @@
 #include "nsWeakReference.h"
 #include "nsICryptoHash.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/WeakPtr.h"
-#include "nsTHashtable.h"
-#include "nsHashKeys.h"
 
 class nsOfflineCacheUpdate;
 
@@ -41,13 +39,15 @@ class nsICacheEntryDescriptor;
 class nsIUTF8StringEnumerator;
 class nsILoadContext;
 
-class nsOfflineCacheUpdateItem : public nsIStreamListener
+class nsOfflineCacheUpdateItem : public nsIDOMLoadStatus
+                               , public nsIStreamListener
                                , public nsIRunnable
                                , public nsIInterfaceRequestor
                                , public nsIChannelEventSink
 {
 public:
     NS_DECL_ISUPPORTS
+    NS_DECL_NSIDOMLOADSTATUS
     NS_DECL_NSIREQUESTOBSERVER
     NS_DECL_NSISTREAMLISTENER
     NS_DECL_NSIRUNNABLE
@@ -76,16 +76,7 @@ public:
     bool IsScheduled();
     bool IsCompleted();
 
-    nsresult GetStatus(uint16_t *aStatus);
-
 private:
-    enum LoadStatus MOZ_ENUM_TYPE(uint16_t) {
-      UNINITIALIZED = 0U,
-      REQUESTED = 1U,
-      RECEIVING = 2U,
-      LOADED = 3U
-    };
-
     nsRefPtr<nsOfflineCacheUpdate> mUpdate;
     nsCOMPtr<nsIChannel>           mChannel;
     uint16_t                       mState;
@@ -186,11 +177,8 @@ private:
 };
 
 class nsOfflineCacheUpdateOwner
-  : public mozilla::SupportsWeakPtr<nsOfflineCacheUpdateOwner>
 {
 public:
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(nsOfflineCacheUpdateOwner)
-    virtual ~nsOfflineCacheUpdateOwner() {}
     virtual nsresult UpdateFinished(nsOfflineCacheUpdate *aUpdate) = 0;
 };
 
@@ -200,7 +188,6 @@ class nsOfflineCacheUpdate MOZ_FINAL : public nsIOfflineCacheUpdate
                                      , public nsOfflineCacheUpdateOwner
 {
 public:
-    MOZ_DECLARE_REFCOUNTED_TYPENAME(nsOfflineCacheUpdate)
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOFFLINECACHEUPDATE
     NS_DECL_NSIOFFLINECACHEUPDATEOBSERVER
@@ -266,7 +253,7 @@ private:
         STATE_FINISHED
     } mState;
 
-    mozilla::WeakPtr<nsOfflineCacheUpdateOwner> mOwner;
+    nsOfflineCacheUpdateOwner *mOwner;
 
     bool mAddedItems;
     bool mPartialUpdate;
@@ -363,13 +350,10 @@ public:
                                            nsIPrefBranch *aPrefBranch,
                                            bool *aPinned);
 
-    static nsTHashtable<nsCStringHashKey>* AllowedDomains();
-
 private:
     nsresult ProcessNextUpdate();
 
     nsTArray<nsRefPtr<nsOfflineCacheUpdate> > mUpdates;
-    static nsTHashtable<nsCStringHashKey>* mAllowedDomains;
 
     bool mDisabled;
     bool mUpdateRunning;

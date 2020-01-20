@@ -4,10 +4,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-[Constructor(DOMString type, optional DeviceLightEventInit eventInitDict)]
+[Constructor(DOMString type, optional DeviceLightEventInit eventInitDict), HeaderFile="GeneratedEventClasses.h"]
 interface DeviceLightEvent : Event
 {
-  readonly attribute unrestricted double value;
+  readonly attribute double value;
 };
 
 dictionary DeviceLightEventInit : EventInit

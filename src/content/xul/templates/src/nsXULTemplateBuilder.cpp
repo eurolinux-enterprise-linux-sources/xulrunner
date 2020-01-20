@@ -28,6 +28,7 @@
 #include "nsIDocument.h"
 #include "nsBindingManager.h"
 #include "nsIDOMNodeList.h"
+#include "nsINameSpaceManager.h"
 #include "nsIObserverService.h"
 #include "nsIRDFCompositeDataSource.h"
 #include "nsIRDFInferDataSource.h"
@@ -37,7 +38,6 @@
 #include "nsIXULBuilderListener.h"
 #include "nsIRDFRemoteDataSource.h"
 #include "nsIRDFService.h"
-#include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
 #include "nsISimpleEnumerator.h"
@@ -45,7 +45,6 @@
 #include "nsIURL.h"
 #include "nsIXPConnect.h"
 #include "nsContentCID.h"
-#include "nsNameSpaceManager.h"
 #include "nsRDFCID.h"
 #include "nsXULContentUtils.h"
 #include "nsString.h"
@@ -68,11 +67,15 @@
 #include "nsXULTemplateQueryProcessorXML.h"
 #include "nsXULTemplateQueryProcessorStorage.h"
 #include "nsContentUtils.h"
-#include "ChildIterator.h"
-#include "mozilla/dom/ScriptSettings.h"
+#include "nsCxPusher.h"
 
 using namespace mozilla::dom;
 using namespace mozilla;
+
+//----------------------------------------------------------------------
+
+static NS_DEFINE_CID(kRDFContainerUtilsCID,      NS_RDFCONTAINERUTILS_CID);
+static NS_DEFINE_CID(kRDFServiceCID,             NS_RDFSERVICE_CID);
 
 //----------------------------------------------------------------------
 //
@@ -103,7 +106,6 @@ nsXULTemplateBuilder::nsXULTemplateBuilder(void)
       mTop(nullptr),
       mObservedDocument(nullptr)
 {
-    MOZ_COUNT_CTOR(nsXULTemplateBuilder);
 }
 
 static PLDHashOperator
@@ -130,8 +132,6 @@ nsXULTemplateBuilder::~nsXULTemplateBuilder(void)
         NS_IF_RELEASE(gScriptSecurityManager);
         NS_IF_RELEASE(gObserverService);
     }
-
-    MOZ_COUNT_DTOR(nsXULTemplateBuilder);
 }
 
 
@@ -143,12 +143,10 @@ nsXULTemplateBuilder::InitGlobals()
     if (gRefCnt++ == 0) {
         // Initialize the global shared reference to the service
         // manager and get some shared resource objects.
-        NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
         rv = CallGetService(kRDFServiceCID, &gRDFService);
         if (NS_FAILED(rv))
             return rv;
 
-        NS_DEFINE_CID(kRDFContainerUtilsCID, NS_RDFCONTAINERUTILS_CID);
         rv = CallGetService(kRDFContainerUtilsCID, &gRDFContainerUtils);
         if (NS_FAILED(rv))
             return rv;
@@ -172,24 +170,10 @@ nsXULTemplateBuilder::InitGlobals()
         gXULTemplateLog = PR_NewLogModule("nsXULTemplateBuilder");
 #endif
 
+    if (!mMatchMap.IsInitialized())
+        mMatchMap.Init();
+
     return NS_OK;
-}
-
-void
-nsXULTemplateBuilder::StartObserving(nsIDocument* aDocument)
-{
-    aDocument->AddObserver(this);
-    mObservedDocument = aDocument;
-    gObserverService->AddObserver(this, DOM_WINDOW_DESTROYED_TOPIC, false);
-}
-
-void
-nsXULTemplateBuilder::StopObserving()
-{
-    MOZ_ASSERT(mObservedDocument);
-    mObservedDocument->RemoveObserver(this);
-    mObservedDocument = nullptr;
-    gObserverService->RemoveObserver(this, DOM_WINDOW_DESTROYED_TOPIC);
 }
 
 void
@@ -214,7 +198,10 @@ void
 nsXULTemplateBuilder::Uninit(bool aIsFinal)
 {
     if (mObservedDocument && aIsFinal) {
-        StopObserving();
+        gObserverService->RemoveObserver(this, DOM_WINDOW_DESTROYED_TOPIC);
+        gObserverService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+        mObservedDocument->RemoveObserver(this);
+        mObservedDocument = nullptr;
     }
 
     if (mQueryProcessor)
@@ -246,8 +233,6 @@ TraverseMatchList(nsISupports* aKey, nsTemplateMatch* aMatch, void* aContext)
     return PL_DHASH_NEXT;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateBuilder)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDataSource)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDB)
@@ -256,7 +241,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootResult)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mListeners)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mQueryProcessor)
-    tmp->mMatchMap.Enumerate(DestroyMatchList, nullptr);
+    if (tmp->mMatchMap.IsInitialized()) {
+      tmp->mMatchMap.Enumerate(DestroyMatchList, nullptr);
+    }
     for (uint32_t i = 0; i < tmp->mQuerySets.Length(); ++i) {
         nsTemplateQuerySet* qs = tmp->mQuerySets[i];
         delete qs;
@@ -276,7 +263,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRootResult)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListeners)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueryProcessor)
-    tmp->mMatchMap.EnumerateRead(TraverseMatchList, &cb);
+    if (tmp->mMatchMap.IsInitialized())
+        tmp->mMatchMap.EnumerateRead(TraverseMatchList, &cb);
     {
       uint32_t i, count = tmp->mQuerySets.Length();
       for (i = 0; i < count; ++i) {
@@ -446,7 +434,14 @@ nsXULTemplateBuilder::Init(nsIContent* aElement)
     nsresult rv = LoadDataSources(doc, &shouldDelay);
 
     if (NS_SUCCEEDED(rv)) {
-        StartObserving(doc);
+        // Add ourselves as a document observer
+        doc->AddObserver(this);
+
+        mObservedDocument = doc;
+        gObserverService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID,
+                                      false);
+        gObserverService->AddObserver(this, DOM_WINDOW_DESTROYED_TOPIC,
+                                      false);
     }
 
     return rv;
@@ -1073,7 +1068,7 @@ nsXULTemplateBuilder::RemoveListener(nsIXULBuilderListener* aListener)
 NS_IMETHODIMP
 nsXULTemplateBuilder::Observe(nsISupports* aSubject,
                               const char* aTopic,
-                              const char16_t* aData)
+                              const PRUnichar* aData)
 {
     // Uuuuber hack to clean up circular references that the cycle collector
     // doesn't know about. See bug 394514.
@@ -1084,6 +1079,8 @@ nsXULTemplateBuilder::Observe(nsISupports* aSubject,
             if (doc && doc == mObservedDocument)
                 NodeWillBeDestroyed(doc);
         }
+    } else if (!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+        UninitTrue();
     }
     return NS_OK;
 }
@@ -1133,8 +1130,7 @@ nsXULTemplateBuilder::ContentRemoved(nsIDocument* aDocument,
         nsContentUtils::AddScriptRunner(
             NS_NewRunnableMethod(this, &nsXULTemplateBuilder::UninitFalse));
 
-        MOZ_ASSERT(aDocument == mObservedDocument);
-        StopObserving();
+        aDocument->RemoveObserver(this);
 
         nsCOMPtr<nsIXULDocument> xuldoc = do_QueryInterface(aDocument);
         if (xuldoc)
@@ -1380,16 +1376,20 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
     if (! global)
         return NS_ERROR_UNEXPECTED;
 
-    nsCOMPtr<nsIGlobalObject> innerWin =
-        do_QueryInterface(doc->GetInnerWindow());
+    nsIScriptContext *context = global->GetContext();
+    if (! context)
+        return NS_ERROR_UNEXPECTED;
 
-    // We are going to run script via JS_SetProperty, so we need a script entry
-    // point, but as this is XUL related it does not appear in the HTML spec.
-    AutoEntryScript entryScript(innerWin, true);
-    JSContext* jscontext = entryScript.cx();
+    AutoPushJSContext jscontext(context->GetNativeContext());
+    NS_ASSERTION(context != nullptr, "no jscontext");
+    if (! jscontext)
+        return NS_ERROR_UNEXPECTED;
 
+    JS::Rooted<JSObject*> scope(jscontext, global->GetGlobalJSObject());
     JS::Rooted<JS::Value> v(jscontext);
-    rv = nsContentUtils::WrapNative(jscontext, mRoot, mRoot, &v);
+    nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
+    rv = nsContentUtils::WrapNative(jscontext, scope, mRoot, mRoot, v.address(),
+                                    getter_AddRefs(wrapper));
     NS_ENSURE_SUCCESS(rv, rv);
 
     JS::Rooted<JSObject*> jselement(jscontext, JSVAL_TO_OBJECT(v));
@@ -1397,12 +1397,13 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
     if (mDB) {
         // database
         JS::Rooted<JS::Value> jsdatabase(jscontext);
-        rv = nsContentUtils::WrapNative(jscontext, mDB,
+        rv = nsContentUtils::WrapNative(jscontext, scope, mDB,
                                         &NS_GET_IID(nsIRDFCompositeDataSource),
-                                        &jsdatabase);
+                                        jsdatabase.address(), getter_AddRefs(wrapper));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        bool ok = JS_SetProperty(jscontext, jselement, "database", jsdatabase);
+        bool ok;
+        ok = JS_SetProperty(jscontext, jselement, "database", jsdatabase.address());
         NS_ASSERTION(ok, "unable to set database property");
         if (! ok)
             return NS_ERROR_FAILURE;
@@ -1411,13 +1412,15 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
     {
         // builder
         JS::Rooted<JS::Value> jsbuilder(jscontext);
-        rv = nsContentUtils::WrapNative(jscontext,
+        nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
+        rv = nsContentUtils::WrapNative(jscontext, jselement,
                                         static_cast<nsIXULTemplateBuilder*>(this),
                                         &NS_GET_IID(nsIXULTemplateBuilder),
-                                        &jsbuilder);
+                                        jsbuilder.address(), getter_AddRefs(wrapper));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        bool ok = JS_SetProperty(jscontext, jselement, "builder", jsbuilder);
+        bool ok;
+        ok = JS_SetProperty(jscontext, jselement, "builder", jsbuilder.address());
         if (! ok)
             return NS_ERROR_FAILURE;
     }
@@ -1470,13 +1473,13 @@ nsXULTemplateBuilder::ParseAttribute(const nsAString& aAttributeValue,
         // A variable is either prefixed with '?' (in the extended
         // syntax) or "rdf:" (in the simple syntax).
         bool isvar;
-        if (*iter == char16_t('?') && (++iter != done_parsing)) {
+        if (*iter == PRUnichar('?') && (++iter != done_parsing)) {
             isvar = true;
         }
-        else if ((*iter == char16_t('r') && (++iter != done_parsing)) &&
-                 (*iter == char16_t('d') && (++iter != done_parsing)) &&
-                 (*iter == char16_t('f') && (++iter != done_parsing)) &&
-                 (*iter == char16_t(':') && (++iter != done_parsing))) {
+        else if ((*iter == PRUnichar('r') && (++iter != done_parsing)) &&
+                 (*iter == PRUnichar('d') && (++iter != done_parsing)) &&
+                 (*iter == PRUnichar('f') && (++iter != done_parsing)) &&
+                 (*iter == PRUnichar(':') && (++iter != done_parsing))) {
             isvar = true;
         }
         else {
@@ -1497,7 +1500,7 @@ nsXULTemplateBuilder::ParseAttribute(const nsAString& aAttributeValue,
             (*aTextCallback)(this, Substring(mark, backup), aClosure);
         }
 
-        if (*iter == char16_t('?')) {
+        if (*iter == PRUnichar('?')) {
             // Well, it was not really a variable, but "??". We use one
             // question mark (the second one, actually) literally.
             mark = iter;
@@ -1510,10 +1513,10 @@ nsXULTemplateBuilder::ParseAttribute(const nsAString& aAttributeValue,
         // whichever comes first.
         nsAString::const_iterator first(backup);
 
-        char16_t c = 0;
+        PRUnichar c = 0;
         while (iter != done_parsing) {
             c = *iter;
-            if ((c == char16_t(' ')) || (c == char16_t('^')))
+            if ((c == PRUnichar(' ')) || (c == PRUnichar('^')))
                 break;
 
             ++iter;
@@ -1524,7 +1527,7 @@ nsXULTemplateBuilder::ParseAttribute(const nsAString& aAttributeValue,
         // Back up so we don't consume the terminating character
         // *unless* the terminating character was a caret: the caret
         // means "concatenate with no space in between".
-        if (c != char16_t('^'))
+        if (c != PRUnichar('^'))
             --iter;
 
         (*aVariableCallback)(this, Substring(first, last), aClosure);
@@ -1651,28 +1654,47 @@ nsXULTemplateBuilder::GetTemplateRoot(nsIContent** aResult)
         }
     }
 
-    // If root node has no template attribute, then look for a child
-    // node which is a template tag.
-    for (nsIContent* child = mRoot->GetFirstChild();
-         child;
-         child = child->GetNextSibling()) {
+#if 1 // XXX hack to workaround bug with XBL insertion/removal?
+    {
+        // If root node has no template attribute, then look for a child
+        // node which is a template tag
+        for (nsIContent* child = mRoot->GetFirstChild();
+             child;
+             child = child->GetNextSibling()) {
 
-        if (IsTemplateElement(child)) {
-            NS_ADDREF(*aResult = child);
-            return NS_OK;
+            if (IsTemplateElement(child)) {
+                NS_ADDREF(*aResult = child);
+                return NS_OK;
+            }
         }
     }
+#endif
 
-    // Look through the anonymous children as well. Although FlattenedChildIterator
-    // will find a template element that has been placed in an insertion point, many
-    // bindings do not have a specific insertion point for the template element, which
-    // would cause it to not be part of the flattened content tree. The check above to
-    // check the explicit children as well handles this case.
-    FlattenedChildIterator iter(mRoot);
-    for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
-        if (IsTemplateElement(child)) {
-            NS_ADDREF(*aResult = child);
-            return NS_OK;
+    // If we couldn't find a real child, look through the anonymous
+    // kids, too.
+    nsCOMPtr<nsIDocument> doc = mRoot->GetDocument();
+    if (! doc)
+        return NS_OK;
+
+    nsCOMPtr<nsIDOMNodeList> kids;
+    doc->BindingManager()->GetXBLChildNodesFor(mRoot, getter_AddRefs(kids));
+
+    if (kids) {
+        uint32_t length;
+        kids->GetLength(&length);
+
+        for (uint32_t i = 0; i < length; ++i) {
+            nsCOMPtr<nsIDOMNode> node;
+            kids->Item(i, getter_AddRefs(node));
+            if (! node)
+                continue;
+
+            nsCOMPtr<nsIContent> child = do_QueryInterface(node);
+
+            if (IsTemplateElement(child)) {
+                NS_ADDREF(*aResult = child.get());
+                return NS_OK;
+            }
         }
     }
 
@@ -2073,7 +2095,7 @@ nsXULTemplateBuilder::DetermineMemberVariable(nsIContent* aElement)
          child = child->GetNextSibling()) {
         nsAutoString uri;
         child->GetAttr(kNameSpaceID_None, nsGkAtoms::uri, uri);
-        if (!uri.IsEmpty() && uri[0] == char16_t('?')) {
+        if (!uri.IsEmpty() && uri[0] == PRUnichar('?')) {
             return NS_NewAtom(uri);
         }
 
@@ -2115,7 +2137,7 @@ nsXULTemplateBuilder::DetermineRDFQueryRef(nsIContent* aQueryElement, nsIAtom** 
         content->GetAttr(kNameSpaceID_None, nsGkAtoms::tag, tag);
 
         if (!tag.IsEmpty())
-            *aTag = NS_NewAtom(tag).take();
+            *aTag = NS_NewAtom(tag).get();
     }
 }
 
@@ -2223,7 +2245,7 @@ nsXULTemplateBuilder::CompileWhereCondition(nsTemplateRule* aRule,
     }
 
     nsCOMPtr<nsIAtom> svar;
-    if (subject[0] == char16_t('?'))
+    if (subject[0] == PRUnichar('?'))
         svar = do_GetAtom(subject);
 
     nsAutoString relstring;
@@ -2247,7 +2269,7 @@ nsXULTemplateBuilder::CompileWhereCondition(nsTemplateRule* aRule,
                               nsGkAtoms::_true, eCaseMatters);
 
     nsCOMPtr<nsIAtom> vvar;
-    if (!shouldMultiple && (value[0] == char16_t('?'))) {
+    if (!shouldMultiple && (value[0] == PRUnichar('?'))) {
         vvar = do_GetAtom(value);
     }
 
@@ -2341,7 +2363,7 @@ nsXULTemplateBuilder::CompileBinding(nsTemplateRule* aRule,
     }
 
     nsCOMPtr<nsIAtom> svar;
-    if (subject[0] == char16_t('?')) {
+    if (subject[0] == PRUnichar('?')) {
         svar = do_GetAtom(subject);
     }
     else {
@@ -2367,7 +2389,7 @@ nsXULTemplateBuilder::CompileBinding(nsTemplateRule* aRule,
     }
 
     nsCOMPtr<nsIAtom> ovar;
-    if (object[0] == char16_t('?')) {
+    if (object[0] == PRUnichar('?')) {
         ovar = do_GetAtom(object);
     }
     else {

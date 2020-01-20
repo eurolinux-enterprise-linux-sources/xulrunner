@@ -11,7 +11,7 @@
 namespace MPAPI {
 
 enum ColorFormat {
-  I420,
+  YCbCr,
   RGB565
 };
 
@@ -135,7 +135,6 @@ struct PluginHost {
   void (*SetMetaDataReadMode)(Decoder *aDecoder);
   void (*SetPlaybackReadMode)(Decoder *aDecoder);
   bool (*GetIntPref)(const char *aPref, int32_t *aResult);
-  bool (*GetSystemInfoString)(const char *aKey, char *aResult, size_t aResultLen);
 };
 
 struct Decoder {

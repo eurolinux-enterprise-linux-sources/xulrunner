@@ -7,24 +7,12 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
-// Log on level :5, instead of default :4.
-#undef LOG
-#define LOG(args) LOG5(args)
-#undef LOG_ENABLED
-#define LOG_ENABLED() LOG5_ENABLED()
-
 #include "nsHttpConnectionInfo.h"
-#include "mozilla/net/DNS.h"
-#include "prnetdb.h"
-
-namespace mozilla {
-namespace net {
 
 nsHttpConnectionInfo::nsHttpConnectionInfo(const nsACString &host, int32_t port,
-                                           const nsACString &username,
                                            nsProxyInfo* proxyInfo,
                                            bool usingSSL)
-    : mUsername(username)
+    : mRef(0)
     , mProxyInfo(proxyInfo)
     , mUsingSSL(usingSSL)
     , mUsingConnect(false)
@@ -77,11 +65,6 @@ nsHttpConnectionInfo::SetOriginServer(const nsACString &host, int32_t port)
     mHashKey.Append(keyHost);
     mHashKey.Append(':');
     mHashKey.AppendInt(keyPort);
-    if (!mUsername.IsEmpty()) {
-        mHashKey.Append('[');
-        mHashKey.Append(mUsername);
-        mHashKey.Append(']');
-    }
 
     if (mUsingHttpProxy)
         mHashKey.SetCharAt('P', 0);
@@ -113,7 +96,7 @@ nsHttpConnectionInfo::SetOriginServer(const nsACString &host, int32_t port)
 nsHttpConnectionInfo*
 nsHttpConnectionInfo::Clone() const
 {
-    nsHttpConnectionInfo* clone = new nsHttpConnectionInfo(mHost, mPort, mUsername, mProxyInfo, mUsingSSL);
+    nsHttpConnectionInfo* clone = new nsHttpConnectionInfo(mHost, mPort, mProxyInfo, mUsingSSL);
 
     // Make sure the anonymous and private flags are transferred!
     clone->SetAnonymous(GetAnonymous());
@@ -130,22 +113,3 @@ nsHttpConnectionInfo::UsingProxy()
     return !mProxyInfo->IsDirect();
 }
 
-bool
-nsHttpConnectionInfo::HostIsLocalIPLiteral() const
-{
-    PRNetAddr prAddr;
-    // If the host/proxy host is not an IP address literal, return false.
-    if (ProxyHost()) {
-        if (PR_StringToNetAddr(ProxyHost(), &prAddr) != PR_SUCCESS) {
-          return false;
-        }
-    } else if (PR_StringToNetAddr(Host(), &prAddr) != PR_SUCCESS) {
-        return false;
-    }
-    NetAddr netAddr;
-    PRNetAddrToNetAddr(&prAddr, &netAddr);
-    return IsIPAddrLocal(&netAddr);
-}
-
-} // namespace mozilla::net
-} // namespace mozilla

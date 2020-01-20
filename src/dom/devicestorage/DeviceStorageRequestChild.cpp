@@ -5,7 +5,6 @@
 
 
 #include "DeviceStorageRequestChild.h"
-#include "DeviceStorageFileDescriptor.h"
 #include "nsDeviceStorage.h"
 #include "nsDOMFile.h"
 #include "mozilla/dom/ipc/Blob.h"
@@ -21,27 +20,11 @@ DeviceStorageRequestChild::DeviceStorageRequestChild()
 }
 
 DeviceStorageRequestChild::DeviceStorageRequestChild(DOMRequest* aRequest,
-                                                     DeviceStorageFile* aDSFile)
+                                                     DeviceStorageFile* aFile)
   : mRequest(aRequest)
-  , mDSFile(aDSFile)
+  , mFile(aFile)
   , mCallback(nullptr)
 {
-  MOZ_ASSERT(aRequest);
-  MOZ_ASSERT(aDSFile);
-  MOZ_COUNT_CTOR(DeviceStorageRequestChild);
-}
-
-DeviceStorageRequestChild::DeviceStorageRequestChild(DOMRequest* aRequest,
-                                                     DeviceStorageFile* aDSFile,
-                                                     DeviceStorageFileDescriptor* aDSFileDescriptor)
-  : mRequest(aRequest)
-  , mDSFile(aDSFile)
-  , mDSFileDescriptor(aDSFileDescriptor)
-  , mCallback(nullptr)
-{
-  MOZ_ASSERT(aRequest);
-  MOZ_ASSERT(aDSFile);
-  MOZ_ASSERT(aDSFileDescriptor);
   MOZ_COUNT_CTOR(DeviceStorageRequestChild);
 }
 
@@ -50,17 +33,11 @@ DeviceStorageRequestChild::~DeviceStorageRequestChild() {
 }
 
 bool
-DeviceStorageRequestChild::
-  Recv__delete__(const DeviceStorageResponseValue& aValue)
+DeviceStorageRequestChild::Recv__delete__(const DeviceStorageResponseValue& aValue)
 {
   if (mCallback) {
     mCallback->RequestComplete();
     mCallback = nullptr;
-  }
-
-  nsCOMPtr<nsPIDOMWindow> window = mRequest->GetOwner();
-  if (!window) {
-    return true;
   }
 
   switch (aValue.type()) {
@@ -74,27 +51,11 @@ DeviceStorageRequestChild::
 
     case DeviceStorageResponseValue::TSuccessResponse:
     {
-      nsString fullPath;
-      mDSFile->GetFullPath(fullPath);
+      nsString compositePath;
+      mFile->GetCompositePath(compositePath);
       AutoJSContext cx;
       JS::Rooted<JS::Value> result(cx,
-        StringToJsval(window, fullPath));
-      mRequest->FireSuccess(result);
-      break;
-    }
-
-    case DeviceStorageResponseValue::TFileDescriptorResponse:
-    {
-      FileDescriptorResponse r = aValue;
-
-      nsString fullPath;
-      mDSFile->GetFullPath(fullPath);
-      AutoJSContext cx;
-      JS::Rooted<JS::Value> result(cx,
-        StringToJsval(window, fullPath));
-
-      mDSFileDescriptor->mDSFile = mDSFile;
-      mDSFileDescriptor->mFileDescriptor = r.fileDescriptor();
+        StringToJsval(mRequest->GetOwner(), compositePath));
       mRequest->FireSuccess(result);
       break;
     }
@@ -108,7 +69,7 @@ DeviceStorageRequestChild::
       nsCOMPtr<nsIDOMFile> file = do_QueryInterface(blob);
       AutoJSContext cx;
       JS::Rooted<JS::Value> result(cx,
-        InterfaceToJsval(window, file, &NS_GET_IID(nsIDOMFile)));
+        InterfaceToJsval(mRequest->GetOwner(), file, &NS_GET_IID(nsIDOMFile)));
       mRequest->FireSuccess(result);
       break;
     }
@@ -136,47 +97,7 @@ DeviceStorageRequestChild::
       AvailableStorageResponse r = aValue;
       AutoJSContext cx;
       JS::Rooted<JS::Value> result(
-        cx, StringToJsval(window, r.mountState()));
-      mRequest->FireSuccess(result);
-      break;
-    }
-
-    case DeviceStorageResponseValue::TStorageStatusResponse:
-    {
-      StorageStatusResponse r = aValue;
-      AutoJSContext cx;
-      JS::Rooted<JS::Value> result(
-        cx, StringToJsval(window, r.storageStatus()));
-      mRequest->FireSuccess(result);
-      break;
-    }
-
-    case DeviceStorageResponseValue::TFormatStorageResponse:
-    {
-      FormatStorageResponse r = aValue;
-      AutoJSContext cx;
-      JS::Rooted<JS::Value> result(
-        cx, StringToJsval(window, r.mountState()));
-      mRequest->FireSuccess(result);
-      break;
-    }
-
-    case DeviceStorageResponseValue::TMountStorageResponse:
-    {
-      MountStorageResponse r = aValue;
-      AutoJSContext cx;
-      JS::Rooted<JS::Value> result(
-        cx, StringToJsval(window, r.storageStatus()));
-      mRequest->FireSuccess(result);
-      break;
-    }
-
-    case DeviceStorageResponseValue::TUnmountStorageResponse:
-    {
-      UnmountStorageResponse r = aValue;
-      AutoJSContext cx;
-      JS::Rooted<JS::Value> result(
-        cx, StringToJsval(window, r.storageStatus()));
+        cx, StringToJsval(mRequest->GetOwner(), r.mountState()));
       mRequest->FireSuccess(result);
       break;
     }
@@ -184,18 +105,18 @@ DeviceStorageRequestChild::
     case DeviceStorageResponseValue::TEnumerationResponse:
     {
       EnumerationResponse r = aValue;
-      nsDOMDeviceStorageCursor* cursor
-        = static_cast<nsDOMDeviceStorageCursor*>(mRequest.get());
+      nsDOMDeviceStorageCursor* cursor = static_cast<nsDOMDeviceStorageCursor*>(mRequest.get());
 
       uint32_t count = r.paths().Length();
       for (uint32_t i = 0; i < count; i++) {
-        nsRefPtr<DeviceStorageFile> dsf
-          = new DeviceStorageFile(r.type(), r.paths()[i].storageName(),
-                                  r.rootdir(), r.paths()[i].name());
+        nsRefPtr<DeviceStorageFile> dsf = new DeviceStorageFile(r.type(),
+                                                                r.paths()[i].storageName(),
+                                                                r.rootdir(),
+                                                                r.paths()[i].name());
         cursor->mFiles.AppendElement(dsf);
       }
 
-      nsRefPtr<ContinueCursorEvent> event = new ContinueCursorEvent(cursor);
+      nsCOMPtr<ContinueCursorEvent> event = new ContinueCursorEvent(cursor);
       event->Continue();
       break;
     }
@@ -210,8 +131,7 @@ DeviceStorageRequestChild::
 }
 
 void
-DeviceStorageRequestChild::
-  SetCallback(DeviceStorageRequestChildCallback *aCallback)
+DeviceStorageRequestChild::SetCallback(DeviceStorageRequestChildCallback *aCallback)
 {
   mCallback = aCallback;
 }

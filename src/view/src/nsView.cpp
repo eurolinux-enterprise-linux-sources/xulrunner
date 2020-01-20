@@ -6,18 +6,16 @@
 #include "nsView.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/BasicEvents.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Poison.h"
 #include "nsIWidget.h"
 #include "nsViewManager.h"
 #include "nsIFrame.h"
+#include "nsGUIEvent.h"
 #include "nsPresArena.h"
 #include "nsXULPopupManager.h"
 #include "nsIWidgetListener.h"
-#include "nsContentUtils.h" // for nsAutoScriptBlocker
 
 using namespace mozilla;
 
@@ -210,10 +208,9 @@ nsIntRect nsView::CalcWidgetBounds(nsWindowType aType)
   nsRect viewBounds(mDimBounds);
 
   nsView* parent = GetParent();
-  nsIWidget* parentWidget = nullptr;
   if (parent) {
     nsPoint offset;
-    parentWidget = parent->GetNearestWidget(&offset, p2a);
+    nsIWidget* parentWidget = parent->GetNearestWidget(&offset, p2a);
     // make viewBounds be relative to the parent widget, in appunits
     viewBounds += offset;
 
@@ -228,33 +225,6 @@ nsIntRect nsView::CalcWidgetBounds(nsWindowType aType)
 
   // Compute widget bounds in device pixels
   nsIntRect newBounds = viewBounds.ToNearestPixels(p2a);
-
-#ifdef XP_MACOSX
-  // cocoa rounds widget coordinates to the nearest global "display pixel"
-  // integer value. So we avoid fractional display pixel values by rounding
-  // to the nearest value that won't yield a fractional display pixel.
-  nsIWidget* widget = parentWidget ? parentWidget : mWindow;
-  uint32_t round;
-  if (aType == eWindowType_popup && widget &&
-      ((round = widget->RoundsWidgetCoordinatesTo()) > 1)) {
-    nsIntSize pixelRoundedSize = newBounds.Size();
-    // round the top left and bottom right to the nearest round pixel
-    newBounds.x = NSToIntRoundUp(NSAppUnitsToDoublePixels(viewBounds.x, p2a) / round) * round;
-    newBounds.y = NSToIntRoundUp(NSAppUnitsToDoublePixels(viewBounds.y, p2a) / round) * round;
-    newBounds.width =
-      NSToIntRoundUp(NSAppUnitsToDoublePixels(viewBounds.XMost(), p2a) / round) * round - newBounds.x;
-    newBounds.height =
-      NSToIntRoundUp(NSAppUnitsToDoublePixels(viewBounds.YMost(), p2a) / round) * round - newBounds.y;
-    // but if that makes the widget larger then our frame may not paint the
-    // extra pixels, so reduce the size to the nearest round value
-    if (newBounds.width > pixelRoundedSize.width) {
-      newBounds.width -= round;
-    }
-    if (newBounds.height > pixelRoundedSize.height) {
-      newBounds.height -= round;
-    }
-  }
-#endif
 
   // Compute where the top-left of our widget ended up relative to the parent
   // widget, in appunits.
@@ -290,7 +260,8 @@ void nsView::DoResetWidgetBounds(bool aMoveOnly,
   nsIntRect newBounds;
   nsRefPtr<nsDeviceContext> dx = mViewManager->GetDeviceContext();
 
-  nsWindowType type = widget->WindowType();
+  nsWindowType type;
+  widget->GetWindowType(type);
 
   nsIntRect curBounds;
   widget->GetClientBounds(curBounds);
@@ -340,9 +311,9 @@ void nsView::DoResetWidgetBounds(bool aMoveOnly,
   // unscaledAppUnitsPerDevPixel value. On platforms where the device-pixel
   // scale is uniform across all displays (currently all except OS X), we'll
   // always use the precise value from mWindow->GetDefaultScale here.
-  CSSToLayoutDeviceScale scale = widget->GetDefaultScale();
-  if (NSToIntRound(60.0 / scale.scale) == dx->UnscaledAppUnitsPerDevPixel()) {
-    invScale = 1.0 / scale.scale;
+  double scale = widget->GetDefaultScale();
+  if (NSToIntRound(60.0 / scale) == dx->UnscaledAppUnitsPerDevPixel()) {
+    invScale = 1.0 / scale;
   } else {
     invScale = dx->UnscaledAppUnitsPerDevPixel() / 60.0;
   }
@@ -516,7 +487,9 @@ static void UpdateNativeWidgetZIndexes(nsView* aView, int32_t aZIndex)
 {
   if (aView->HasWidget()) {
     nsIWidget* widget = aView->GetWidget();
-    if (widget->GetZIndex() != aZIndex) {
+    int32_t curZ;
+    widget->GetZIndex(&curZ);
+    if (curZ != aZIndex) {
       widget->SetZIndex(aZIndex);
     }
   } else {
@@ -578,7 +551,7 @@ nsresult nsView::CreateWidget(nsWidgetInitData *aWidgetInitData,
   // XXX: using aForceUseIWidgetParent=true to preserve previous
   // semantics.  It's not clear that it's actually needed.
   mWindow = parentWidget->CreateChild(trect, dx, aWidgetInitData,
-                                      true).take();
+                                      true).get();
   if (!mWindow) {
     return NS_ERROR_FAILURE;
   }
@@ -607,7 +580,7 @@ nsresult nsView::CreateWidgetForParent(nsIWidget* aParentWidget,
   nsRefPtr<nsDeviceContext> dx = mViewManager->GetDeviceContext();
 
   mWindow =
-    aParentWidget->CreateChild(trect, dx, aWidgetInitData).take();
+    aParentWidget->CreateChild(trect, dx, aWidgetInitData).get();
   if (!mWindow) {
     return NS_ERROR_FAILURE;
   }
@@ -639,7 +612,7 @@ nsresult nsView::CreateWidgetForPopup(nsWidgetInitData *aWidgetInitData,
     // XXX: using aForceUseIWidgetParent=true to preserve previous
     // semantics.  It's not clear that it's actually needed.
     mWindow = aParentWidget->CreateChild(trect, dx, aWidgetInitData,
-                                         true).take();
+                                         true).get();
   }
   else {
     nsIWidget* nearestParent = GetParent() ? GetParent()->GetNearestWidget(nullptr)
@@ -651,7 +624,7 @@ nsresult nsView::CreateWidgetForPopup(nsWidgetInitData *aWidgetInitData,
     }
 
     mWindow =
-      nearestParent->CreateChild(trect, dx, aWidgetInitData).take();
+      nearestParent->CreateChild(trect, dx, aWidgetInitData).get();
   }
   if (!mWindow) {
     return NS_ERROR_FAILURE;
@@ -713,7 +686,9 @@ nsresult nsView::AttachToTopLevelWidget(nsIWidget* aWidget)
   mWidgetIsTopLevel = true;
 
   // Refresh the view bounds
-  CalcWidgetBounds(mWindow->WindowType());
+  nsWindowType type;
+  mWindow->GetWindowType(type);
+  CalcWidgetBounds(type);
 
   return NS_OK;
 }
@@ -732,11 +707,12 @@ nsresult nsView::DetachFromTopLevelWidget()
   return NS_OK;
 }
 
-void nsView::SetZIndex(bool aAuto, int32_t aZIndex)
+void nsView::SetZIndex(bool aAuto, int32_t aZIndex, bool aTopMost)
 {
   bool oldIsAuto = GetZIndexIsAuto();
   mVFlags = (mVFlags & ~NS_VIEW_FLAG_AUTO_ZINDEX) | (aAuto ? NS_VIEW_FLAG_AUTO_ZINDEX : 0);
   mZIndex = aZIndex;
+  SetTopMost(aTopMost);
   
   if (HasWidget() || !oldIsAuto || !aAuto) {
     UpdateNativeWidgetZIndexes(this, FindNonAutoZIndex(this));
@@ -788,8 +764,9 @@ void nsView::List(FILE* out, int32_t aIndent) const
     nsRect nonclientBounds = rect.ToAppUnits(p2a);
     nsrefcnt widgetRefCnt = mWindow->AddRef() - 1;
     mWindow->Release();
-    int32_t Z = mWindow->GetZIndex();
-    fprintf(out, "(widget=%p[%" PRIuPTR "] z=%d pos={%d,%d,%d,%d}) ",
+    int32_t Z;
+    mWindow->GetZIndex(&Z);
+    fprintf(out, "(widget=%p[%d] z=%d pos={%d,%d,%d,%d}) ",
             (void*)mWindow, widgetRefCnt, Z,
             nonclientBounds.x, nonclientBounds.y,
             windowBounds.width, windowBounds.height);
@@ -961,7 +938,9 @@ nsView::ConvertFromParentCoords(nsPoint aPt) const
 static bool
 IsPopupWidget(nsIWidget* aWidget)
 {
-  return (aWidget->WindowType() == eWindowType_popup);
+  nsWindowType type;
+  aWidget->GetWindowType(type);
+  return (type == eWindowType_popup);
 }
 
 nsIPresShell*
@@ -996,15 +975,6 @@ nsView::WindowResized(nsIWidget* aWidget, int32_t aWidth, int32_t aHeight)
     int32_t p2a = devContext->AppUnitsPerDevPixel();
     mViewManager->SetWindowDimensions(NSIntPixelsToAppUnits(aWidth, p2a),
                                       NSIntPixelsToAppUnits(aHeight, p2a));
-
-    nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
-    if (pm) {
-      nsIPresShell* presShell = mViewManager->GetPresShell();
-      if (presShell && presShell->GetDocument()) {
-        pm->AdjustPopupsOnWindowChange(presShell);
-      }
-    }
-
     return true;
   }
   else if (IsPopupWidget(aWidget)) {
@@ -1025,7 +995,7 @@ nsView::RequestWindowClose(nsIWidget* aWidget)
       mFrame->GetType() == nsGkAtoms::menuPopupFrame) {
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     if (pm) {
-      pm->HidePopup(mFrame->GetContent(), false, true, false, false);
+      pm->HidePopup(mFrame->GetContent(), false, true, false);
       return true;
     }
   }
@@ -1058,16 +1028,6 @@ nsView::DidPaintWindow()
 }
 
 void
-nsView::DidCompositeWindow()
-{
-  nsIPresShell* presShell = mViewManager->GetPresShell();
-  if (presShell) {
-    nsAutoScriptBlocker scriptBlocker;
-    presShell->GetPresContext()->GetDisplayRootPresContext()->GetRootPresContext()->NotifyDidPaintForSubtree(nsIPresShell::PAINT_COMPOSITE);
-  }
-}
-
-void
 nsView::RequestRepaint()
 {
   nsIPresShell* presShell = mViewManager->GetPresShell();
@@ -1077,8 +1037,7 @@ nsView::RequestRepaint()
 }
 
 nsEventStatus
-nsView::HandleEvent(WidgetGUIEvent* aEvent,
-                    bool aUseAttachedEvents)
+nsView::HandleEvent(nsGUIEvent* aEvent, bool aUseAttachedEvents)
 {
   NS_PRECONDITION(nullptr != aEvent->widget, "null widget ptr");
 

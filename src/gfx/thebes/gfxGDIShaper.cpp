@@ -15,7 +15,7 @@
 
 bool
 gfxGDIShaper::ShapeText(gfxContext      *aContext,
-                        const char16_t *aText,
+                        const PRUnichar *aText,
                         uint32_t         aOffset,
                         uint32_t         aLength,
                         int32_t          aScript,
@@ -25,13 +25,13 @@ gfxGDIShaper::ShapeText(gfxContext      *aContext,
     AutoSelectFont selectFont(dc, static_cast<gfxGDIFont*>(mFont)->GetHFONT());
 
     uint32_t length = aLength;
-    AutoFallibleTArray<WORD,500> glyphArray;
+    nsAutoTArray<WORD,500> glyphArray;
     if (!glyphArray.SetLength(length)) {
         return false;
     }
     WORD *glyphs = glyphArray.Elements();
 
-    DWORD ret = ::GetGlyphIndicesW(dc, char16ptr_t(aText), length,
+    DWORD ret = ::GetGlyphIndicesW(dc, aText, length,
                                    glyphs, GGI_MARK_NONEXISTING_GLYPHS);
     if (ret == GDI_ERROR) {
         return false;
@@ -43,7 +43,7 @@ gfxGDIShaper::ShapeText(gfxContext      *aContext,
     }
  
     SIZE size;
-    AutoFallibleTArray<int,500> partialWidthArray;
+    nsAutoTArray<int,500> partialWidthArray;
     if (!partialWidthArray.SetLength(length)) {
         return false;
     }
@@ -52,7 +52,7 @@ gfxGDIShaper::ShapeText(gfxContext      *aContext,
                                            glyphs,
                                            length,
                                            INT_MAX,
-                                           nullptr,
+                                           NULL,
                                            partialWidthArray.Elements(),
                                            &size);
     if (!success) {

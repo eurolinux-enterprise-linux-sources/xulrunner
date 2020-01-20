@@ -7,7 +7,7 @@
 #ifndef jit_StupidAllocator_h
 #define jit_StupidAllocator_h
 
-#include "jit/RegisterAllocator.h"
+#include "RegisterAllocator.h"
 
 // Simple register allocator that only carries registers within basic blocks.
 
@@ -22,9 +22,6 @@ class StupidAllocator : public RegisterAllocator
     struct AllocatedRegister {
         AnyRegister reg;
 
-        // The type of the value in the register.
-        LDefinition::Type type;
-
         // Virtual register this physical reg backs, or MISSING_ALLOCATION.
         uint32_t vreg;
 
@@ -34,7 +31,7 @@ class StupidAllocator : public RegisterAllocator
         // Whether the physical register is not synced with the backing stack slot.
         bool dirty;
 
-        void set(uint32_t vreg, LInstruction *ins = nullptr, bool dirty = false) {
+        void set(uint32_t vreg, LInstruction *ins = NULL, bool dirty = false) {
             this->vreg = vreg;
             this->age = ins ? ins->id() : 0;
             this->dirty = dirty;
@@ -42,7 +39,7 @@ class StupidAllocator : public RegisterAllocator
     };
 
     // Active allocation for the current code position.
-    mozilla::Array<AllocatedRegister, MAX_REGISTERS> registers;
+    AllocatedRegister registers[MAX_REGISTERS];
     uint32_t registerCount;
 
     // Type indicating an index into registers.
@@ -75,12 +72,9 @@ class StupidAllocator : public RegisterAllocator
 
     void syncRegister(LInstruction *ins, RegisterIndex index);
     void evictRegister(LInstruction *ins, RegisterIndex index);
-    void loadRegister(LInstruction *ins, uint32_t vreg, RegisterIndex index, LDefinition::Type type);
+    void loadRegister(LInstruction *ins, uint32_t vreg, RegisterIndex index);
 
     RegisterIndex findExistingRegister(uint32_t vreg);
-
-    bool allocationRequiresRegister(const LAllocation *alloc, AnyRegister reg);
-    bool registerIsReserved(LInstruction *ins, AnyRegister reg);
 };
 
 } // namespace jit

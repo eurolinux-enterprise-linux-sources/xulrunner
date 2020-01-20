@@ -12,9 +12,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGStopElement::WrapNode(JSContext *aCx)
+SVGStopElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGStopElementBinding::Wrap(aCx, this);
+  return SVGStopElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::NumberInfo SVGStopElement::sNumberInfo =
@@ -23,7 +23,7 @@ nsSVGElement::NumberInfo SVGStopElement::sNumberInfo =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGStopElement::SVGStopElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGStopElement::SVGStopElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGStopElementBase(aNodeInfo)
 {
 }
@@ -35,10 +35,12 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGStopElement)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGStopElement::Offset()
 {
-  return mOffset.ToDOMAnimatedNumber(this);
+  nsCOMPtr<nsIDOMSVGAnimatedNumber> offset;
+  mOffset.ToDOMAnimatedNumber(getter_AddRefs(offset), this);
+  return offset.forget();
 }
 
 //----------------------------------------------------------------------

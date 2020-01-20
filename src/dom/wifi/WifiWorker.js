@@ -10,11 +10,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/systemlibs.js");
-Cu.import("resource://gre/modules/WifiCommand.jsm");
-Cu.import("resource://gre/modules/WifiNetUtil.jsm");
-Cu.import("resource://gre/modules/WifiP2pManager.jsm");
-Cu.import("resource://gre/modules/WifiP2pWorkerObserver.jsm");
 
 var DEBUG = false; // set to true to show debug messages.
 
@@ -28,7 +23,6 @@ const kMozSettingsChangedObserverTopic   = "mozsettings-changed";
 
 const MAX_RETRIES_ON_AUTHENTICATION_FAILURE = 2;
 const MAX_SUPPLICANT_LOOP_ITERATIONS = 4;
-const MAX_RETRIES_ON_DHCP_FAILURE = 2;
 
 // Settings DB path for wifi
 const SETTINGS_WIFI_ENABLED            = "wifi.enabled";
@@ -45,10 +39,6 @@ const SETTINGS_WIFI_DHCPSERVER_ENDIP   = "tethering.wifi.dhcpserver.endip";
 const SETTINGS_WIFI_DNS1               = "tethering.wifi.dns1";
 const SETTINGS_WIFI_DNS2               = "tethering.wifi.dns2";
 
-// Settings DB path for USB tethering.
-const SETTINGS_USB_DHCPSERVER_STARTIP  = "tethering.usb.dhcpserver.startip";
-const SETTINGS_USB_DHCPSERVER_ENDIP    = "tethering.usb.dhcpserver.endip";
-
 // Default value for WIFI tethering.
 const DEFAULT_WIFI_IP                  = "192.168.1.1";
 const DEFAULT_WIFI_PREFIX              = "24";
@@ -60,10 +50,6 @@ const DEFAULT_WIFI_SECURITY_PASSWORD   = "1234567890";
 const DEFAULT_DNS1                     = "8.8.8.8";
 const DEFAULT_DNS2                     = "8.8.4.4";
 
-// Default value for USB tethering.
-const DEFAULT_USB_DHCPSERVER_STARTIP   = "192.168.0.10";
-const DEFAULT_USB_DHCPSERVER_ENDIP     = "192.168.0.30";
-
 const WIFI_FIRMWARE_AP            = "AP";
 const WIFI_FIRMWARE_STATION       = "STA";
 const WIFI_SECURITY_TYPE_NONE     = "open";
@@ -73,22 +59,9 @@ const WIFI_SECURITY_TYPE_WPA2_PSK = "wpa2-psk";
 const NETWORK_INTERFACE_UP   = "up";
 const NETWORK_INTERFACE_DOWN = "down";
 
-const DEFAULT_WLAN_INTERFACE = "wlan0";
-
-const DRIVER_READY_WAIT = 2000;
-
-const SUPP_PROP = "init.svc.wpa_supplicant";
-const WPA_SUPPLICANT = "wpa_supplicant";
-const DHCP_PROP = "init.svc.dhcpcd";
-const DHCP = "dhcpcd";
-
 XPCOMUtils.defineLazyServiceGetter(this, "gNetworkManager",
                                    "@mozilla.org/network/manager;1",
                                    "nsINetworkManager");
-
-XPCOMUtils.defineLazyServiceGetter(this, "gNetworkService",
-                                   "@mozilla.org/network/service;1",
-                                   "nsINetworkService");
 
 XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
                                    "@mozilla.org/settingsService;1",
@@ -102,150 +75,206 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
 // command always succeeds and we do a string/boolean check for the
 // expected results).
 var WifiManager = (function() {
-  var manager = {};
-
   function getStartupPrefs() {
+    Cu.import("resource://gre/modules/systemlibs.js");
     return {
       sdkVersion: parseInt(libcutils.property_get("ro.build.version.sdk"), 10),
       unloadDriverEnabled: libcutils.property_get("ro.moz.wifi.unloaddriver") === "1",
-      schedScanRecovery: libcutils.property_get("ro.moz.wifi.sched_scan_recover") === "false" ? false : true,
-      driverDelay: libcutils.property_get("ro.moz.wifi.driverDelay"),
-      p2pSupported: libcutils.property_get("ro.moz.wifi.p2p_supported") === "1",
-      eapSimSupported: libcutils.property_get("ro.moz.wifi.eapsim_supported") === "1",
-      ifname: libcutils.property_get("wifi.interface")
+      schedScanRecovery: libcutils.property_get("ro.moz.wifi.sched_scan_recover") === "false" ? false : true
     };
   }
 
-  let {sdkVersion, unloadDriverEnabled, schedScanRecovery,
-       driverDelay, p2pSupported, eapSimSupported, ifname} = getStartupPrefs();
+  let {sdkVersion, unloadDriverEnabled, schedScanRecovery} = getStartupPrefs();
 
-  let capabilities = {
-    eapSim: eapSimSupported
-  };
+  var controlWorker = new ChromeWorker(WIFIWORKER_WORKER);
+  var eventWorker = new ChromeWorker(WIFIWORKER_WORKER);
 
-  let wifiListener = {
-    onWaitEvent: function(event, iface) {
-      if (manager.ifname === iface && handleEvent(event)) {
-        waitForEvent(iface);
-      } else if (p2pSupported) {
-        if (WifiP2pManager.INTERFACE_NAME === iface) {
-          // If the connection is closed, wifi.c::wifi_wait_for_event()
-          // will still return 'CTRL-EVENT-TERMINATING  - connection closed'
-          // rather than blocking. So when we see this special event string,
-          // just return immediately.
-          const TERMINATED_EVENT = 'CTRL-EVENT-TERMINATING  - connection closed';
-          if (-1 !== event.indexOf(TERMINATED_EVENT)) {
-            return;
-          }
-          p2pManager.handleEvent(event);
-          waitForEvent(iface);
-        }
-      }
-    },
-
-    onCommand: function(event, iface) {
-      onmessageresult(event, iface);
-    }
-  }
-
-  manager.ifname = ifname;
-  manager.connectToSupplicant = false;
-  // Emulator build runs to here.
-  // The debug() should only be used after WifiManager.
-  if (!ifname) {
-    manager.ifname = DEFAULT_WLAN_INTERFACE;
-  }
+  var manager = {};
   manager.schedScanRecovery = schedScanRecovery;
-  manager.driverDelay = driverDelay ? parseInt(driverDelay, 10) : DRIVER_READY_WAIT;
 
-  // Regular Wifi stuff.
-  var netUtil = WifiNetUtil(controlMessage);
-  var wifiCommand = WifiCommand(controlMessage, manager.ifname);
-
-  // Wifi P2P stuff
-  var p2pManager;
-  if (p2pSupported) {
-    let p2pCommand = WifiCommand(controlMessage, WifiP2pManager.INTERFACE_NAME);
-    p2pManager = WifiP2pManager(p2pCommand, netUtil);
-  }
-
-  let wifiService = Cc["@mozilla.org/wifi/service;1"];
-  if (wifiService) {
-    wifiService = wifiService.getService(Ci.nsIWifiProxyService);
-    let interfaces = [manager.ifname];
-    if (p2pSupported) {
-      interfaces.push(WifiP2pManager.INTERFACE_NAME);
-    }
-    wifiService.start(wifiListener, interfaces, interfaces.length);
-  } else {
-    debug("No wifi service component available!");
-  }
-
-  // Callbacks to invoke when a reply arrives from the wifi service.
+  // Callbacks to invoke when a reply arrives from the controlWorker.
   var controlCallbacks = Object.create(null);
   var idgen = 0;
 
   function controlMessage(obj, callback) {
     var id = idgen++;
     obj.id = id;
-    if (callback) {
+    if (callback)
       controlCallbacks[id] = callback;
-    }
-    wifiService.sendCommand(obj, obj.iface);
+    controlWorker.postMessage(obj);
   }
 
-  let onmessageresult = function(data, iface) {
+  function onerror(e) {
+    // It is very important to call preventDefault on the event here.
+    // If an exception is thrown on the worker, it bubbles out to the
+    // component that created it. If that component doesn't have an
+    // onerror handler, the worker will try to call the error reporter
+    // on the context it was created on. However, That doesn't work
+    // for component contexts and can result in crashes. This onerror
+    // handler has to make sure that it calls preventDefault on the
+    // incoming event.
+    e.preventDefault();
+
+    var worker = (this === controlWorker) ? "control" : "event";
+
+    debug("Got an error from the " + worker + " worker: " + e.filename +
+          ":" + e.lineno + ": " + e.message + "\n");
+  }
+
+  controlWorker.onerror = onerror;
+  eventWorker.onerror = onerror;
+
+  controlWorker.onmessage = function(e) {
+    var data = e.data;
     var id = data.id;
     var callback = controlCallbacks[id];
     if (callback) {
       callback(data);
       delete controlCallbacks[id];
     }
-  }
+  };
 
   // Polling the status worker
   var recvErrors = 0;
+  eventWorker.onmessage = function(e) {
+    // Process the event and tell the event worker to listen for more events.
+    if (handleEvent(e.data.event))
+      waitForEvent();
+  };
 
-  function waitForEvent(iface) {
-    wifiService.waitForEvent(iface);
+  function waitForEvent() {
+    eventWorker.postMessage({ cmd: "wait_for_event" });
   }
 
   // Commands to the control worker.
 
-  var driverLoaded = false;
+  function voidControlMessage(cmd, callback) {
+    controlMessage({ cmd: cmd }, function (data) {
+      callback(data.status);
+    });
+  }
 
+  var driverLoaded = false;
   function loadDriver(callback) {
     if (driverLoaded) {
       callback(0);
       return;
     }
 
-    wifiCommand.loadDriver(function (status) {
+    voidControlMessage("load_driver", function(status) {
       driverLoaded = (status >= 0);
       callback(status)
     });
   }
 
-  function unloadDriver(type, callback) {
+  function unloadDriver(callback) {
     if (!unloadDriverEnabled) {
       // Unloading drivers is generally unnecessary and
       // can trigger bugs in some drivers.
       // On properly written drivers, bringing the interface
       // down powers down the interface.
-      if (type === WIFI_FIRMWARE_STATION) {
-        notify("supplicantlost", { success: true });
-      }
       callback(0);
       return;
     }
 
-    wifiCommand.unloadDriver(function(status) {
+    voidControlMessage("unload_driver", function(status) {
       driverLoaded = (status < 0);
-      if (type === WIFI_FIRMWARE_STATION) {
-        notify("supplicantlost", { success: true });
-      }
       callback(status);
     });
+  }
+
+  function startSupplicant(callback) {
+    voidControlMessage("start_supplicant", callback);
+  }
+
+  function terminateSupplicant(callback) {
+    doBooleanCommand("TERMINATE", "OK", callback);
+  }
+
+  function stopSupplicant(callback) {
+    voidControlMessage("stop_supplicant", callback);
+  }
+
+  function connectToSupplicant(callback) {
+    voidControlMessage("connect_to_supplicant", callback);
+  }
+
+  function closeSupplicantConnection(callback) {
+    voidControlMessage("close_supplicant_connection", callback);
+  }
+
+  function doCommand(request, callback) {
+    controlMessage({ cmd: "command", request: request }, callback);
+  }
+
+  function doIntCommand(request, callback) {
+    doCommand(request, function(data) {
+      callback(data.status ? -1 : (data.reply|0));
+    });
+  }
+
+  function doBooleanCommand(request, expected, callback) {
+    doCommand(request, function(data) {
+      callback(data.status ? false : (data.reply == expected));
+    });
+  }
+
+  function doStringCommand(request, callback) {
+    doCommand(request, function(data) {
+      callback(data.status ? null : data.reply);
+    });
+  }
+
+  function listNetworksCommand(callback) {
+    doStringCommand("LIST_NETWORKS", callback);
+  }
+
+  function addNetworkCommand(callback) {
+    doIntCommand("ADD_NETWORK", callback);
+  }
+
+  function setNetworkVariableCommand(netId, name, value, callback) {
+    doBooleanCommand("SET_NETWORK " + netId + " " + name + " " + value, "OK", callback);
+  }
+
+  function getNetworkVariableCommand(netId, name, callback) {
+    doStringCommand("GET_NETWORK " + netId + " " + name, callback);
+  }
+
+  function removeNetworkCommand(netId, callback) {
+    doBooleanCommand("REMOVE_NETWORK " + netId, "OK", callback);
+  }
+
+  function enableNetworkCommand(netId, disableOthers, callback) {
+    doBooleanCommand((disableOthers ? "SELECT_NETWORK " : "ENABLE_NETWORK ") + netId, "OK", callback);
+  }
+
+  function disableNetworkCommand(netId, callback) {
+    doBooleanCommand("DISABLE_NETWORK " + netId, "OK", callback);
+  }
+
+  function statusCommand(callback) {
+    doStringCommand("STATUS", callback);
+  }
+
+  function pingCommand(callback) {
+    doBooleanCommand("PING", "PONG", callback);
+  }
+
+  function scanResultsCommand(callback) {
+    doStringCommand("SCAN_RESULTS", callback);
+  }
+
+  function disconnectCommand(callback) {
+    doBooleanCommand("DISCONNECT", "OK", callback);
+  }
+
+  function reconnectCommand(callback) {
+    doBooleanCommand("RECONNECT", "OK", callback);
+  }
+
+  function reassociateCommand(callback) {
+    doBooleanCommand("REASSOCIATE", "OK", callback);
   }
 
   // A note about background scanning:
@@ -267,20 +296,27 @@ var WifiManager = (function() {
     }
 
     manager.backgroundScanEnabled = doEnable;
-    wifiCommand.setBackgroundScan(manager.backgroundScanEnabled, callback);
+    doBooleanCommand("SET pno " + (manager.backgroundScanEnabled ? "1" : "0"),
+                     "OK",
+                     function(ok) {
+                       callback(true, ok);
+                     });
   }
 
   var scanModeActive = false;
 
-  function scan(forceActive, callback) {
+  function doSetScanModeCommand(setActive, callback) {
+    doBooleanCommand(setActive ? "DRIVER SCAN-ACTIVE" : "DRIVER SCAN-PASSIVE", "OK", callback);
+  }
+
+  function scanCommand(forceActive, callback) {
     if (forceActive && !scanModeActive) {
       // Note: we ignore errors from doSetScanMode.
-      wifiCommand.doSetScanMode(true, function(ignore) {
+      doSetScanModeCommand(true, function(ignore) {
         setBackgroundScan("OFF", function(turned, ignore) {
           reEnableBackgroundScan = turned;
-          manager.handlePreWifiScan();
-          wifiCommand.scan(function(ok) {
-            wifiCommand.doSetScanMode(false, function(ignore) {
+          doBooleanCommand("SCAN", "OK", function(ok) {
+            doSetScanModeCommand(false, function(ignore) {
               // The result of scanCommand is the result of the actual SCAN
               // request.
               callback(ok);
@@ -290,27 +326,30 @@ var WifiManager = (function() {
       });
       return;
     }
-    manager.handlePreWifiScan();
-    wifiCommand.scan(callback);
+    doBooleanCommand("SCAN", "OK", callback);
   }
 
   var debugEnabled = false;
+  function setLogLevel(level, callback) {
+    doBooleanCommand("LOG_LEVEL " + level, "OK", callback);
+  }
 
   function syncDebug() {
     if (debugEnabled !== DEBUG) {
       let wanted = DEBUG;
-      wifiCommand.setLogLevel(wanted ? "DEBUG" : "INFO", function(ok) {
+      setLogLevel(wanted ? "DEBUG" : "INFO", function(ok) {
         if (ok)
           debugEnabled = wanted;
       });
-      if (p2pSupported && p2pManager) {
-        p2pManager.setDebug(DEBUG);
-      }
     }
   }
 
+  function getLogLevel(callback) {
+    doStringCommand("LOG_LEVEL", callback);
+  }
+
   function getDebugEnabled(callback) {
-    wifiCommand.getLogLevel(function(level) {
+    getLogLevel(function(level) {
       if (level === null) {
         debug("Unable to get wpa_supplicant's log level");
         callback(false);
@@ -332,51 +371,249 @@ var WifiManager = (function() {
     });
   }
 
-  function setScanMode(setActive, callback) {
+  function setScanModeCommand(setActive, callback) {
     scanModeActive = setActive;
-    wifiCommand.doSetScanMode(setActive, callback);
+    doSetScanModeCommand(setActive, callback);
   }
 
-  var httpProxyConfig = Object.create(null);
-
-  /**
-   * Given a network, configure http proxy when using wifi.
-   * @param network A network object to update http proxy
-   * @param info Info should have following field:
-   *        - httpProxyHost ip address of http proxy.
-   *        - httpProxyPort port of http proxy, set 0 to use default port 8080.
-   * @param callback callback function.
-   */
-  function configureHttpProxy(network, info, callback) {
-    if (!network)
-      return;
-
-    let networkKey = getNetworkKey(network);
-
-    if (!info || info.httpProxyHost === "") {
-      delete httpProxyConfig[networkKey];
-    } else {
-      httpProxyConfig[networkKey] = network;
-      httpProxyConfig[networkKey].httpProxyHost = info.httpProxyHost;
-      httpProxyConfig[networkKey].httpProxyPort = info.httpProxyPort;
-    }
-
-    callback(true);
+  function wpsPbcCommand(callback) {
+    doBooleanCommand("WPS_PBC", "OK", callback);
   }
 
-  function getHttpProxyNetwork(network) {
-    if (!network)
-      return null;
-
-    let networkKey = getNetworkKey(network);
-    return ((networkKey in httpProxyConfig) ? httpProxyConfig : null);
+  function wpsPinCommand(pin, callback) {
+    doStringCommand("WPS_PIN any" + (pin === undefined ? "" : (" " + pin)),
+                    callback);
   }
 
-  function setHttpProxy(network) {
-    if (!network)
-      return;
+  function wpsCancelCommand(callback) {
+    doBooleanCommand("WPS_CANCEL", "OK", callback);
+  }
 
-    gNetworkService.setNetworkProxy(network);
+  function startDriverCommand(callback) {
+    doBooleanCommand("DRIVER START", "OK");
+  }
+
+  function stopDriverCommand(callback) {
+    doBooleanCommand("DRIVER STOP", "OK");
+  }
+
+  function startPacketFiltering(callback) {
+    doBooleanCommand("DRIVER RXFILTER-ADD 0", "OK", function(ok) {
+      ok && doBooleanCommand("DRIVER RXFILTER-ADD 1", "OK", function(ok) {
+        ok && doBooleanCommand("DRIVER RXFILTER-ADD 3", "OK", function(ok) {
+          ok && doBooleanCommand("DRIVER RXFILTER-START", "OK", callback)
+        });
+      });
+    });
+  }
+
+  function stopPacketFiltering(callback) {
+    doBooleanCommand("DRIVER RXFILTER-STOP", "OK", function(ok) {
+      ok && doBooleanCommand("DRIVER RXFILTER-REMOVE 3", "OK", function(ok) {
+        ok && doBooleanCommand("DRIVER RXFILTER-REMOVE 1", "OK", function(ok) {
+          ok && doBooleanCommand("DRIVER RXFILTER-REMOVE 0", "OK", callback)
+        });
+      });
+    });
+  }
+
+  function doGetRssiCommand(cmd, callback) {
+    doCommand(cmd, function(data) {
+      var rssi = -200;
+
+      if (!data.status) {
+        // If we are associating, the reply is "OK".
+        var reply = data.reply;
+        if (reply != "OK") {
+          // Format is: <SSID> rssi XX". SSID can contain spaces.
+          var offset = reply.lastIndexOf("rssi ");
+          if (offset !== -1)
+            rssi = reply.substr(offset + 5) | 0;
+        }
+      }
+      callback(rssi);
+    });
+  }
+
+  function getRssiCommand(callback) {
+    doGetRssiCommand("DRIVER RSSI", callback);
+  }
+
+  function getRssiApproxCommand(callback) {
+    doGetRssiCommand("DRIVER RSSI-APPROX", callback);
+  }
+
+  function getLinkSpeedCommand(callback) {
+    doStringCommand("DRIVER LINKSPEED", function(reply) {
+      if (reply)
+        reply = reply.split(" ")[1] | 0; // Format: LinkSpeed XX
+      callback(reply);
+    });
+  }
+
+  function getConnectionInfoGB(callback) {
+    var rval = {};
+    getRssiApproxCommand(function(rssi) {
+      rval.rssi = rssi;
+      getLinkSpeedCommand(function(linkspeed) {
+        rval.linkspeed = linkspeed;
+        callback(rval);
+      });
+    });
+  }
+
+  function getConnectionInfoICS(callback) {
+    doStringCommand("SIGNAL_POLL", function(reply) {
+      if (!reply) {
+        callback(null);
+        return;
+      }
+
+      let rval = {};
+      var lines = reply.split("\n");
+      for (let i = 0; i < lines.length; ++i) {
+        let [key, value] = lines[i].split("=");
+        switch (key.toUpperCase()) {
+          case "RSSI":
+            rval.rssi = value | 0;
+            break;
+          case "LINKSPEED":
+            rval.linkspeed = value | 0;
+            break;
+          default:
+            // Ignore.
+        }
+      }
+
+      callback(rval);
+    });
+  }
+
+  function getMacAddressCommand(callback) {
+    doStringCommand("DRIVER MACADDR", function(reply) {
+      if (reply)
+        reply = reply.split(" ")[2]; // Format: Macaddr = XX.XX.XX.XX.XX.XX
+      callback(reply);
+    });
+  }
+
+  function setPowerModeCommand(mode, callback) {
+    doBooleanCommand("DRIVER POWERMODE " + (mode === "AUTO" ? 0 : 1), "OK", callback);
+  }
+
+  function getPowerModeCommand(callback) {
+    doStringCommand("DRIVER GETPOWER", function(reply) {
+      if (reply)
+        reply = (reply.split()[2]|0); // Format: powermode = XX
+      callback(reply);
+    });
+  }
+
+  function setNumAllowedChannelsCommand(numChannels, callback) {
+    doBooleanCommand("DRIVER SCAN-CHANNELS " + numChannels, "OK", callback);
+  }
+
+  function getNumAllowedChannelsCommand(callback) {
+    doStringCommand("DRIVER SCAN-CHANNELS", function(reply) {
+      if (reply)
+        reply = (reply.split()[2]|0); // Format: Scan-Channels = X
+      callback(reply);
+    });
+  }
+
+  function setBluetoothCoexistenceModeCommand(mode, callback) {
+    doBooleanCommand("DRIVER BTCOEXMODE " + mode, "OK", callback);
+  }
+
+  function setBluetoothCoexistenceScanModeCommand(mode, callback) {
+    doBooleanCommand("DRIVER BTCOEXSCAN-" + (mode ? "START" : "STOP"), "OK", callback);
+  }
+
+  function saveConfigCommand(callback) {
+    // Make sure we never write out a value for AP_SCAN other than 1
+    doBooleanCommand("AP_SCAN 1", "OK", function(ok) {
+      doBooleanCommand("SAVE_CONFIG", "OK", callback);
+    });
+  }
+
+  function reloadConfigCommand(callback) {
+    doBooleanCommand("RECONFIGURE", "OK", callback);
+  }
+
+  function setScanResultHandlingCommand(mode, callback) {
+    doBooleanCommand("AP_SCAN " + mode, "OK", callback);
+  }
+
+  function addToBlacklistCommand(bssid, callback) {
+    doBooleanCommand("BLACKLIST " + bssid, "OK", callback);
+  }
+
+  function clearBlacklistCommand(callback) {
+    doBooleanCommand("BLACKLIST clear", "OK", callback);
+  }
+
+  function setSuspendOptimizationsCommand(enabled, callback) {
+    doBooleanCommand("DRIVER SETSUSPENDOPT " + (enabled ? 0 : 1), "OK", callback);
+  }
+
+  function getProperty(key, defaultValue, callback) {
+    controlMessage({ cmd: "property_get", key: key, defaultValue: defaultValue }, function(data) {
+      callback(data.status < 0 ? null : data.value);
+    });
+  }
+
+  function setProperty(key, value, callback) {
+    controlMessage({ cmd: "property_set", key: key, value: value }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function enableInterface(ifname, callback) {
+    controlMessage({ cmd: "ifc_enable", ifname: ifname }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function disableInterface(ifname, callback) {
+    controlMessage({ cmd: "ifc_disable", ifname: ifname }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function addHostRoute(ifname, route, callback) {
+    controlMessage({ cmd: "ifc_add_host_route", ifname: ifname, route: route }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function removeHostRoutes(ifname, callback) {
+    controlMessage({ cmd: "ifc_remove_host_routes", ifname: ifname }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function setDefaultRoute(ifname, route, callback) {
+    controlMessage({ cmd: "ifc_set_default_route", ifname: ifname, route: route }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function getDefaultRoute(ifname, callback) {
+    controlMessage({ cmd: "ifc_get_default_route", ifname: ifname }, function(data) {
+      callback(!data.route);
+    });
+  }
+
+  function removeDefaultRoute(ifname, callback) {
+    controlMessage({ cmd: "ifc_remove_default_route", ifname: ifname }, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function resetConnections(ifname, callback) {
+    controlMessage({ cmd: "ifc_reset_connections", ifname: ifname }, function(data) {
+      callback(!data.status);
+    });
   }
 
   var staticIpConfig = Object.create(null);
@@ -409,8 +646,8 @@ var WifiManager = (function() {
         // and routing table is changed but still cannot connect to network
         // so the workaround here is disable interface the enable again to
         // trigger network reconnect with static ip.
-        netUtil.disableInterface(manager.ifname, function (ok) {
-          netUtil.enableInterface(manager.ifname, function (ok) {
+        disableInterface(manager.ifname, function (ok) {
+          enableInterface(manager.ifname, function (ok) {
           });
         });
       }
@@ -418,6 +655,13 @@ var WifiManager = (function() {
   }
 
   var dhcpInfo = null;
+  function runDhcp(ifname) {
+    debug("Run Dhcp");
+    controlMessage({ cmd: "dhcp_do_request", ifname: ifname }, function(data) {
+      dhcpInfo = data.status ? null : data;
+      runIpConfig(ifname, dhcpInfo);
+    });
+  }
 
   function runStaticIp(ifname, key) {
     debug("Run static ip");
@@ -432,20 +676,55 @@ var WifiManager = (function() {
 
     // Stop dhcpd when use static IP
     if (dhcpInfo != null) {
-      netUtil.stopDhcp(manager.ifname, function() {});
+      stopDhcp(manager.ifname, function() {});
     }
 
     // Set ip, mask length, gateway, dns to network interface
-    netUtil.configureInterface( { ifname: ifname,
-                                  ipaddr: staticIpInfo.ipaddr,
-                                  mask: staticIpInfo.maskLength,
-                                  gateway: staticIpInfo.gateway,
-                                  dns1: staticIpInfo.dns1,
-                                  dns2: staticIpInfo.dns2 }, function (data) {
-      netUtil.runIpConfig(ifname, staticIpInfo, function(data) {
-        dhcpInfo = data.info;
-        notify("networkconnected", data);
-      });
+    configureInterface(ifname,
+                       staticIpInfo.ipaddr,
+                       staticIpInfo.maskLength,
+                       staticIpInfo.gateway,
+                       staticIpInfo.dns1,
+                       staticIpInfo.dns2, function (data) {
+      runIpConfig(ifname, staticIpInfo);
+    });
+  }
+
+  function stopDhcp(ifname, callback) {
+    controlMessage({ cmd: "dhcp_stop", ifname: ifname }, function(data) {
+      dhcpInfo = null;
+      notify("dhcplost");
+      callback(!data.status);
+    });
+  }
+
+  function releaseDhcpLease(ifname, callback) {
+    controlMessage({ cmd: "dhcp_release_lease", ifname: ifname }, function(data) {
+      dhcpInfo = null;
+      notify("dhcplost");
+      callback(!data.status);
+    });
+  }
+
+  function getDhcpError(callback) {
+    controlMessage({ cmd: "dhcp_get_errmsg" }, function(data) {
+      callback(data.error);
+    });
+  }
+
+  function configureInterface(ifname, ipaddr, mask, gateway, dns1, dns2, callback) {
+    controlMessage({ cmd: "ifc_configure", ifname: ifname,
+                     ipaddr: ipaddr, mask: mask, gateway: gateway,
+                     dns1: dns1, dns2: dns2}, function(data) {
+      callback(!data.status);
+    });
+  }
+
+  function runDhcpRenew(ifname, callback) {
+    controlMessage({ cmd: "dhcp_do_request", ifname: ifname }, function(data) {
+      if (!data.status)
+        dhcpInfo = data;
+      callback(data.status ? null : data);
     });
   }
 
@@ -483,19 +762,12 @@ var WifiManager = (function() {
          fields.state === "COMPLETED")) {
       setBackgroundScan("OFF", function() {});
     }
-
     fields.prevState = manager.state;
+    manager.state = fields.state;
+
     // Detect wpa_supplicant's loop iterations.
     manager.supplicantLoopDetection(fields.prevState, fields.state);
     notify("statechange", fields);
-
-    // Don't update state when and after disabling.
-    if (manager.state === "DISABLING" ||
-        manager.state === "UNINITIALIZED") {
-      return false;
-    }
-
-    manager.state = fields.state;
     return true;
   }
 
@@ -557,42 +829,33 @@ var WifiManager = (function() {
     if (ok === 0) {
       // Tell the event worker to start waiting for events.
       retryTimer = null;
-      connectTries = 0;
-      recvErrors = 0;
-      manager.connectToSupplicant = true;
       didConnectSupplicant(function(){});
       return;
     }
-    if (connectTries++ < 5) {
-      // Try again in 1 seconds.
+    if (connectTries++ < 3) {
+      // Try again in 5 seconds.
       if (!retryTimer)
         retryTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
 
       retryTimer.initWithCallback(function(timer) {
-        wifiCommand.connectToSupplicant(connectCallback);
-      }, 1000, Ci.nsITimer.TYPE_ONE_SHOT);
+        connectToSupplicant(connectCallback);
+      }, 5000, Ci.nsITimer.TYPE_ONE_SHOT);
       return;
     }
 
     retryTimer = null;
-    connectTries = 0;
     notify("supplicantlost", { success: false });
   }
 
   manager.connectionDropped = function(callback) {
     // Reset network interface when connection drop
-    netUtil.configureInterface( { ifname: manager.ifname,
-                                  ipaddr: 0,
-                                  mask: 0,
-                                  gateway: 0,
-                                  dns1: 0,
-                                  dns2: 0 }, function (data) {
+    configureInterface(manager.ifname, 0, 0, 0, 0, 0, function (data) {
     });
 
     // If we got disconnected, kill the DHCP client in preparation for
     // reconnection.
-    netUtil.resetConnections(manager.ifname, function() {
-      netUtil.stopDhcp(manager.ifname, function() {
+    resetConnections(manager.ifname, function() {
+      stopDhcp(manager.ifname, function() {
         callback();
       });
     });
@@ -600,7 +863,7 @@ var WifiManager = (function() {
 
   manager.start = function() {
     debug("detected SDK version " + sdkVersion);
-    wifiCommand.connectToSupplicant(connectCallback);
+    connectToSupplicant(connectCallback);
   }
 
   function onconnected() {
@@ -618,24 +881,37 @@ var WifiManager = (function() {
           runStaticIp(manager.ifname, key);
           return;
       }
-      netUtil.runDhcp(manager.ifname, function(data) {
-        dhcpInfo = data.info;
-        if (!dhcpInfo) {
-          if (++manager.dhcpFailuresCount >= MAX_RETRIES_ON_DHCP_FAILURE) {
-            manager.dhcpFailuresCount = 0;
-            notify("disconnected", {ssid: manager.connectionInfo.ssid});
-            return;
-          }
-          // NB: We have to call disconnect first. Otherwise, we only reauth with
-          // the existing AP and don't retrigger DHCP.
-          manager.disconnect(function() {
-            manager.reassociate(function(){});
-          });
+      runDhcp(manager.ifname);
+    });
+  }
+
+  function runIpConfig(name, data) {
+    if (!data) {
+      debug("IP config failed to run");
+      notify("networkconnected", { info: data });
+      return;
+    }
+
+    setProperty("net." + name + ".dns1", ipToString(data.dns1),
+                function(ok) {
+      if (!ok) {
+        debug("Unable to set net.<ifname>.dns1");
+        return;
+      }
+      setProperty("net." + name + ".dns2", ipToString(data.dns2),
+                  function(ok) {
+        if (!ok) {
+          debug("Unable to set net.<ifname>.dns2");
           return;
         }
-
-        manager.dhcpFailuresCount = 0;
-        notify("networkconnected", data);
+        setProperty("net." + name + ".gw", ipToString(data.gateway),
+                    function(ok) {
+          if (!ok) {
+            debug("Unable to set net.<ifname>.gw");
+            return;
+          }
+          notify("networkconnected", { info: data });
+        });
       });
     });
   }
@@ -734,25 +1010,22 @@ var WifiManager = (function() {
       return true;
     }
     if (eventData.indexOf("CTRL-EVENT-TERMINATING") === 0) {
-      // As long the monitor socket is not closed and we haven't seen too many
-      // recv errors yet, we will keep going for a bit longer.
-      if (event.indexOf("connection closed") === -1 &&
-          event.indexOf("recv error") !== -1 && ++recvErrors < 10)
+      // If the monitor socket is closed, we have already stopped the
+      // supplicant and we can stop waiting for more events and
+      // simply exit here (we don't have to notify about having lost
+      // the connection).
+      if (eventData.indexOf("connection closed") !== -1) {
+        notify("supplicantlost", { success: true });
+        return false;
+      }
+
+      // As long we haven't seen too many recv errors yet, we
+      // will keep going for a bit longer.
+      if (eventData.indexOf("recv error") !== -1 && ++recvErrors < 10)
         return true;
 
       notifyStateChange({ state: "DISCONNECTED", BSSID: null, id: -1 });
-
-      // If the supplicant is terminated as commanded, the supplicant lost
-      // notification will be sent after driver unloaded. In such case, the
-      // manager state will be "DISABLING" or "UNINITIALIZED".
-      // So if supplicant terminated with incorrect manager state, implying
-      // unexpected condition, we should notify supplicant lost here.
-      if (manager.state !== "DISABLING" && manager.state !== "UNINITIALIZED") {
-        notify("supplicantlost", { success: true });
-      }
-      wifiCommand.closeSupplicantConnection(function() {
-        manager.connectToSupplicant = false;
-      });
+      notify("supplicantlost", { success: true });
       return false;
     }
     if (eventData.indexOf("CTRL-EVENT-DISCONNECTED") === 0) {
@@ -799,7 +1072,6 @@ var WifiManager = (function() {
         reEnableBackgroundScan = false;
         setBackgroundScan("ON", function() {});
       }
-      manager.handlePostWifiScan();
       notify("scanresultsavailable");
       return true;
     }
@@ -819,51 +1091,63 @@ var WifiManager = (function() {
     return true;
   }
 
+  const SUPP_PROP = "init.svc.wpa_supplicant";
+  function killSupplicant(callback) {
+    // It is interesting to note that this function does exactly what
+    // wifi_stop_supplicant does. Unforunately, on the Galaxy S2, Samsung
+    // changed that function in a way that means that it doesn't recognize
+    // wpa_supplicant as already running. Therefore, we have to roll our own
+    // version here.
+    var count = 0;
+    var timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+    function tick() {
+      getProperty(SUPP_PROP, "stopped", function (result) {
+        if (result === null) {
+          callback();
+          return;
+        }
+        if (result === "stopped" || ++count >= 5) {
+          // Either we succeeded or ran out of time.
+          timer = null;
+          callback();
+          return;
+        }
+
+        // Else it's still running, continue waiting.
+        timer.initWithCallback(tick, 1000, Ci.nsITimer.TYPE_ONE_SHOT);
+      });
+    }
+
+    setProperty("ctl.stop", "wpa_supplicant", tick);
+  }
+
   function didConnectSupplicant(callback) {
-    waitForEvent(manager.ifname);
+    waitForEvent();
 
     // Load up the supplicant state.
     getDebugEnabled(function(ok) {
       syncDebug();
     });
-    wifiCommand.status(function(status) {
+    statusCommand(function(status) {
       parseStatus(status);
       notify("supplicantconnection");
       callback();
     });
-
-    if (p2pSupported) {
-      manager.enableP2p(function(success) {});
-    }
   }
 
   function prepareForStartup(callback) {
-    let status = libcutils.property_get(DHCP_PROP + "_" + manager.ifname);
-    if (status !== "running") {
-      tryStopSupplicant();
-      return;
-    }
     manager.connectionDropped(function() {
-      tryStopSupplicant();
-    });
-
-    // Ignore any errors and kill any currently-running supplicants. On some
-    // phones, stopSupplicant won't work for a supplicant that we didn't
-    // start, so we hand-roll it here.
-    function tryStopSupplicant () {
-      let status = libcutils.property_get(SUPP_PROP);
-      if (status !== "running") {
-        callback();
-        return;
-      }
+      // Ignore any errors and kill any currently-running supplicants. On some
+      // phones, stopSupplicant won't work for a supplicant that we didn't
+      // start, so we hand-roll it here.
       suppressEvents = true;
-      wifiCommand.killSupplicant(function() {
-        netUtil.disableInterface(manager.ifname, function (ok) {
+      killSupplicant(function() {
+        disableInterface(manager.ifname, function (ok) {
           suppressEvents = false;
           callback();
         });
       });
-    }
+    });
   }
 
   // Initial state.
@@ -874,8 +1158,8 @@ var WifiManager = (function() {
   manager.connectionInfo = { ssid: null, bssid: null, id: -1 };
   manager.authenticationFailuresCount = 0;
   manager.loopDetectionCount = 0;
-  manager.dhcpFailuresCount = 0;
 
+  const DRIVER_READY_WAIT = 2000;
   var waitForDriverReadyTimer = null;
   function cancelWaitForDriverReadyTimer() {
     if (waitForDriverReadyTimer) {
@@ -886,51 +1170,58 @@ var WifiManager = (function() {
   function createWaitForDriverReadyTimer(onTimeout) {
     waitForDriverReadyTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     waitForDriverReadyTimer.initWithCallback(onTimeout,
-                                             manager.driverDelay,
+                                             DRIVER_READY_WAIT,
                                              Ci.nsITimer.TYPE_ONE_SHOT);
   };
 
   // Public interface of the wifi service.
-  manager.setWifiEnabled = function(enabled, callback) {
-    if (enabled === manager.isWifiEnabled(manager.state)) {
+  manager.setWifiEnabled = function(enable, callback) {
+    if (enable === manager.enabled) {
       callback("no change");
       return;
     }
 
-    if (enabled) {
+    if (enable) {
       manager.state = "INITIALIZING";
-      // Register as network interface.
-      WifiNetworkInterface.name = manager.ifname;
-      if (!WifiNetworkInterface.registered) {
-        gNetworkManager.registerNetworkInterface(WifiNetworkInterface);
-        WifiNetworkInterface.registered = true;
-      }
-      WifiNetworkInterface.state = Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
-      WifiNetworkInterface.ips = [];
-      WifiNetworkInterface.prefixLengths = [];
-      WifiNetworkInterface.gateways = [];
-      WifiNetworkInterface.dnses = [];
-      Services.obs.notifyObservers(WifiNetworkInterface,
-                                   kNetworkInterfaceStateChangedTopic,
-                                   null);
-      prepareForStartup(function() {
-        loadDriver(function (status) {
-          if (status < 0) {
-            callback(status);
-            manager.state = "UNINITIALIZED";
-            return;
-          }
-          // This command is mandatory for Nexus 4. But some devices like
-          // Galaxy S2 don't support it. Continue to start wpa_supplicant
-          // even if we fail to set wifi operation mode to station.
-          gNetworkService.setWifiOperationMode(manager.ifname,
-                                               WIFI_FIRMWARE_STATION,
-                                               function (status) {
+      // Kill any existing connections if necessary.
+      getProperty("wifi.interface", "tiwlan0", function (ifname) {
+        if (!ifname) {
+          callback(-1);
+          manager.state = "UNINITIALIZED";
+          return;
+        }
+        manager.ifname = ifname;
 
-            function startSupplicantInternal() {
-              wifiCommand.startSupplicant(function (status) {
+        // Register as network interface.
+        WifiNetworkInterface.name = ifname;
+        if (!WifiNetworkInterface.registered) {
+          gNetworkManager.registerNetworkInterface(WifiNetworkInterface);
+          WifiNetworkInterface.registered = true;
+        }
+        WifiNetworkInterface.state = Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
+        WifiNetworkInterface.ip = null;
+        WifiNetworkInterface.netmask = null;
+        WifiNetworkInterface.broadcast = null;
+        WifiNetworkInterface.gateway = null;
+        WifiNetworkInterface.dns1 = null;
+        WifiNetworkInterface.dns2 = null;
+        Services.obs.notifyObservers(WifiNetworkInterface,
+                                     kNetworkInterfaceStateChangedTopic,
+                                     null);
+
+        prepareForStartup(function() {
+          loadDriver(function (status) {
+            if (status < 0) {
+              callback(status);
+              manager.state = "UNINITIALIZED";
+              return;
+            }
+
+            function doStartSupplicant() {
+              cancelWaitForDriverReadyTimer();
+              startSupplicant(function (status) {
                 if (status < 0) {
-                  unloadDriver(WIFI_FIRMWARE_STATION, function() {
+                  unloadDriver(function() {
                     callback(status);
                   });
                   manager.state = "UNINITIALIZED";
@@ -938,102 +1229,78 @@ var WifiManager = (function() {
                 }
 
                 manager.supplicantStarted = true;
-                netUtil.enableInterface(manager.ifname, function (ok) {
+                enableInterface(ifname, function (ok) {
                   callback(ok ? 0 : -1);
                 });
               });
             }
 
-            function doStartSupplicant() {
-              cancelWaitForDriverReadyTimer();
-
-              if (!manager.connectToSupplicant) {
-                startSupplicantInternal();
-                return;
-              }
-              wifiCommand.closeSupplicantConnection(function () {
-                manager.connectToSupplicant = false;
-                // closeSupplicantConnection() will trigger onsupplicantlost
-                // and set manager.state to "UNINITIALIZED", we have to
-                // restore it here.
-                manager.state = "INITIALIZING";
-                startSupplicantInternal();
-              });
-            }
             // Driver startup on certain platforms takes longer than it takes for us
             // to return from loadDriver, so wait 2 seconds before starting
             // the supplicant to give it a chance to start.
-            if (manager.driverDelay > 0) {
-              createWaitForDriverReadyTimer(doStartSupplicant);
-            } else {
-              doStartSupplicant();
-            }
-          });
+            createWaitForDriverReadyTimer(doStartSupplicant);
+         });
         });
       });
     } else {
-      manager.state = "DISABLING";
       // Note these following calls ignore errors. If we fail to kill the
       // supplicant gracefully, then we need to continue telling it to die
       // until it does.
-      let doDisableWifi = function() {
-        wifiCommand.terminateSupplicant(function (ok) {
-          manager.connectionDropped(function () {
-            wifiCommand.stopSupplicant(function (status) {
+      terminateSupplicant(function (ok) {
+        manager.connectionDropped(function () {
+          stopSupplicant(function (status) {
+            closeSupplicantConnection(function () {
               manager.state = "UNINITIALIZED";
-              netUtil.disableInterface(manager.ifname, function (ok) {
-                unloadDriver(WIFI_FIRMWARE_STATION, callback);
+              disableInterface(manager.ifname, function (ok) {
+                unloadDriver(callback);
               });
             });
           });
         });
-      }
-
-      if (p2pSupported) {
-        p2pManager.setEnabled(false, { onDisabled: doDisableWifi });
-      } else {
-        doDisableWifi();
-      }
+      });
     }
   }
 
   // Get wifi interface and load wifi driver when enable Ap mode.
   manager.setWifiApEnabled = function(enabled, configuration, callback) {
-    if (enabled === manager.isWifiTetheringEnabled(manager.tetheringState)) {
-      callback("no change");
-      return;
-    }
-
     if (enabled) {
       manager.tetheringState = "INITIALIZING";
-      loadDriver(function (status) {
-        if (status < 0) {
+      getProperty("wifi.interface", "tiwlan0", function (ifname) {
+        if (!ifname) {
           callback();
           manager.tetheringState = "UNINITIALIZED";
           return;
         }
-
-        function doStartWifiTethering() {
-          cancelWaitForDriverReadyTimer();
-          WifiNetworkInterface.name = manager.ifname;
-          gNetworkManager.setWifiTethering(enabled, WifiNetworkInterface,
-                                           configuration, function(result) {
-            if (result) {
-              manager.tetheringState = "UNINITIALIZED";
-            } else {
-              manager.tetheringState = "COMPLETED";
-            }
-            // Pop out current request.
+        manager.ifname = ifname;
+        loadDriver(function (status) {
+          if (status < 0) {
             callback();
-            // Should we fire a dom event if we fail to set wifi tethering  ?
-            debug("Enable Wifi tethering result: " + (result ? result : "successfully"));
-          });
-        }
+            manager.tetheringState = "UNINITIALIZED";
+            return;
+          }
 
-        // Driver startup on certain platforms takes longer than it takes
-        // for us to return from loadDriver, so wait 2 seconds before
-        // turning on Wifi tethering.
-        createWaitForDriverReadyTimer(doStartWifiTethering);
+          function doStartWifiTethering() {
+            cancelWaitForDriverReadyTimer();
+            WifiNetworkInterface.name = manager.ifname;
+            gNetworkManager.setWifiTethering(enabled, WifiNetworkInterface,
+                                             configuration, function(result) {
+              if (result) {
+                manager.tetheringState = "UNINITIALIZED";
+              } else {
+                manager.tetheringState = "COMPLETED";
+              }
+              // Pop out current request.
+              callback();
+              // Should we fire a dom event if we fail to set wifi tethering  ?
+              debug("Enable Wifi tethering result: " + (result ? result : "successfully"));
+            });
+          }
+
+          // Driver startup on certain platforms takes longer than it takes
+          // for us to return from loadDriver, so wait 2 seconds before
+          // turning on Wifi tethering.
+          createWaitForDriverReadyTimer(doStartWifiTethering);
+        });
       });
     } else {
       gNetworkManager.setWifiTethering(enabled, WifiNetworkInterface,
@@ -1041,7 +1308,7 @@ var WifiManager = (function() {
         // Should we fire a dom event if we fail to set wifi tethering  ?
         debug("Disable Wifi tethering result: " + (result ? result : "successfully"));
         // Unload wifi driver even if we fail to control wifi tethering.
-        unloadDriver(WIFI_FIRMWARE_AP, function(status) {
+        unloadDriver(function(status) {
           if (status < 0) {
             debug("Fail to unload wifi driver");
           }
@@ -1052,15 +1319,14 @@ var WifiManager = (function() {
     }
   }
 
-  manager.disconnect = wifiCommand.disconnect;
-  manager.reconnect = wifiCommand.reconnect;
-  manager.reassociate = wifiCommand.reassociate;
+  manager.disconnect = disconnectCommand;
+  manager.reconnect = reconnectCommand;
+  manager.reassociate = reassociateCommand;
 
   var networkConfigurationFields = [
     "ssid", "bssid", "psk", "wep_key0", "wep_key1", "wep_key2", "wep_key3",
     "wep_tx_keyidx", "priority", "key_mgmt", "scan_ssid", "disabled",
-    "identity", "password", "auth_alg", "phase1", "phase2", "eap", "pin",
-    "pcsc"
+    "identity", "password", "auth_alg", "phase1", "phase2", "eap"
   ];
 
   manager.getNetworkConfiguration = function(config, callback) {
@@ -1068,7 +1334,7 @@ var WifiManager = (function() {
     var done = 0;
     for (var n = 0; n < networkConfigurationFields.length; ++n) {
       let fieldName = networkConfigurationFields[n];
-      wifiCommand.getNetworkVariable(netId, fieldName, function(value) {
+      getNetworkVariableCommand(netId, fieldName, function(value) {
         if (value !== null)
           config[fieldName] = value;
         if (++done == networkConfigurationFields.length)
@@ -1092,7 +1358,7 @@ var WifiManager = (function() {
           config[fieldName] === '*') {
         ++done;
       } else {
-        wifiCommand.setNetworkVariable(netId, fieldName, config[fieldName], function(ok) {
+        setNetworkVariableCommand(netId, fieldName, config[fieldName], function(ok) {
           if (!ok)
             ++errors;
           if (++done == networkConfigurationFields.length)
@@ -1105,10 +1371,10 @@ var WifiManager = (function() {
       callback(false);
   }
   manager.getConfiguredNetworks = function(callback) {
-    wifiCommand.listNetworks(function (reply) {
+    listNetworksCommand(function (reply) {
       var networks = Object.create(null);
-      var lines = reply ? reply.split("\n") : 0;
-      if (lines.length <= 1) {
+      var lines = reply.split("\n");
+      if (lines.length === 1) {
         // We need to make sure we call the callback even if there are no
         // configured networks.
         callback(networks);
@@ -1138,7 +1404,7 @@ var WifiManager = (function() {
             if (++done == lines.length - 1) {
               if (errors) {
                 // If an error occured, delete the new netId.
-                wifiCommand.removeNetwork(netId, function() {
+                removeNetworkCommand(netId, function() {
                   callback(null);
                 });
               } else {
@@ -1150,11 +1416,11 @@ var WifiManager = (function() {
     });
   }
   manager.addNetwork = function(config, callback) {
-    wifiCommand.addNetwork(function (netId) {
+    addNetworkCommand(function (netId) {
       config.netId = netId;
       manager.setNetworkConfiguration(config, function (ok) {
         if (!ok) {
-          wifiCommand.removeNetwork(netId, function() { callback(false); });
+          removeNetworkCommand(netId, function() { callback(false); });
           return;
         }
 
@@ -1166,7 +1432,14 @@ var WifiManager = (function() {
     manager.setNetworkConfiguration(config, callback);
   }
   manager.removeNetwork = function(netId, callback) {
-    wifiCommand.removeNetwork(netId, callback);
+    removeNetworkCommand(netId, callback);
+  }
+
+  function ipToString(n) {
+    return String((n >>  0) & 0xFF) + "." +
+                 ((n >>  8) & 0xFF) + "." +
+                 ((n >> 16) & 0xFF) + "." +
+                 ((n >> 24) & 0xFF);
   }
 
   function stringToIp(string) {
@@ -1207,45 +1480,33 @@ var WifiManager = (function() {
   }
 
   manager.saveConfig = function(callback) {
-    wifiCommand.saveConfig(callback);
+    saveConfigCommand(callback);
   }
   manager.enableNetwork = function(netId, disableOthers, callback) {
-    if (p2pSupported) {
-      // We have to stop wifi direct scan before associating to an AP.
-      // Otherwise we will get a "REJECT" wpa supplicant event.
-      p2pManager.setScanEnabled(false, function(success) {});
-    }
-    wifiCommand.enableNetwork(netId, disableOthers, callback);
+    enableNetworkCommand(netId, disableOthers, callback);
   }
   manager.disableNetwork = function(netId, callback) {
-    wifiCommand.disableNetwork(netId, callback);
+    disableNetworkCommand(netId, callback);
   }
-  manager.getMacAddress = wifiCommand.getMacAddress;
-  manager.getScanResults = wifiCommand.scanResults;
+  manager.getMacAddress = getMacAddressCommand;
+  manager.getScanResults = scanResultsCommand;
   manager.setScanMode = function(mode, callback) {
-    setScanMode(mode === "active", callback); // Use our own version.
+    setScanModeCommand(mode === "active", callback);
   }
-  manager.setBackgroundScan = setBackgroundScan; // Use our own version.
-  manager.scan = scan; // Use our own version.
-  manager.wpsPbc = wifiCommand.wpsPbc;
-  manager.wpsPin = wifiCommand.wpsPin;
-  manager.wpsCancel = wifiCommand.wpsCancel;
-  manager.setPowerMode = (sdkVersion >= 16)
-                         ? wifiCommand.setPowerModeJB
-                         : wifiCommand.setPowerModeICS;
-  manager.getHttpProxyNetwork = getHttpProxyNetwork;
-  manager.setHttpProxy = setHttpProxy;
-  manager.configureHttpProxy = configureHttpProxy;
-  manager.setSuspendOptimizations = (sdkVersion >= 16)
-                                   ? wifiCommand.setSuspendOptimizationsJB
-                                   : wifiCommand.setSuspendOptimizationsICS;
+  manager.setBackgroundScan = setBackgroundScan;
+  manager.scan = scanCommand;
+  manager.wpsPbc = wpsPbcCommand;
+  manager.wpsPin = wpsPinCommand;
+  manager.wpsCancel = wpsCancelCommand;
+  manager.setPowerMode = setPowerModeCommand;
+  manager.setSuspendOptimizations = setSuspendOptimizationsCommand;
   manager.setStaticIpMode = setStaticIpMode;
-  manager.getRssiApprox = wifiCommand.getRssiApprox;
-  manager.getLinkSpeed = wifiCommand.getLinkSpeed;
+  manager.getRssiApprox = getRssiApproxCommand;
+  manager.getLinkSpeed = getLinkSpeedCommand;
   manager.getDhcpInfo = function() { return dhcpInfo; }
   manager.getConnectionInfo = (sdkVersion >= 15)
-                              ? wifiCommand.getConnectionInfoICS
-                              : wifiCommand.getConnectionInfoGB;
+                              ? getConnectionInfoICS
+                              : getConnectionInfoGB;
 
   manager.isHandShakeState = function(state) {
     switch (state) {
@@ -1268,26 +1529,6 @@ var WifiManager = (function() {
         return false;
     }
   }
-
-  manager.isWifiEnabled = function(state) {
-    switch (state) {
-      case "UNINITIALIZED":
-      case "DISABLING":
-        return false;
-      default:
-        return true;
-    }
-  }
-
-  manager.isWifiTetheringEnabled = function(state) {
-    switch (state) {
-      case "UNINITIALIZED":
-        return false;
-      default:
-        return true;
-    }
-  }
-
   manager.syncDebug = syncDebug;
   manager.stateOrdinal = function(state) {
     return supplicantStatesMap.indexOf(state);
@@ -1315,50 +1556,6 @@ var WifiManager = (function() {
     }
   }
 
-  manager.handlePreWifiScan = function() {
-    if (p2pSupported) {
-      // Before doing regular wifi scan, we have to disable wifi direct
-      // scan first. Otherwise we will never get the scan result.
-      p2pManager.blockScan();
-    }
-  };
-
-  manager.handlePostWifiScan = function() {
-    if (p2pSupported) {
-      // After regular wifi scanning, we should restore the restricted
-      // wifi direct scan.
-      p2pManager.unblockScan();
-    }
-  };
-
-  //
-  // Public APIs for P2P.
-  //
-
-  manager.p2pSupported = function() {
-    return p2pSupported;
-  };
-
-  manager.getP2pManager = function() {
-    return p2pManager;
-  };
-
-  manager.enableP2p = function(callback) {
-    p2pManager.setEnabled(true, {
-      onSupplicantConnected: function() {
-        waitForEvent(WifiP2pManager.INTERFACE_NAME);
-      },
-
-      onEnabled: function(success) {
-        callback(success);
-      }
-    });
-  };
-
-  manager.getCapabilities = function() {
-    return capabilities;
-  }
-
   return manager;
 })();
 
@@ -1369,29 +1566,29 @@ function getNetworkKey(network)
   var ssid = "",
       encryption = "OPEN";
 
-  if ("security" in network) {
+  if ("capabilities" in network) {
     // manager network object, represents an AP
     // object structure
     // {
     //   .ssid           : SSID of AP
-    //   .security[]     : "WPA-PSK" for WPA-PSK
+    //   .capabilities[] : "WPA-PSK" for WPA-PSK
     //                     "WPA-EAP" for WPA-EAP
     //                     "WEP" for WEP
     //                     "" for OPEN
     //   other keys
     // }
 
-    var security = network.security;
+    var capabilities = network.capabilities;
     ssid = network.ssid;
 
-    for (let j = 0; j < security.length; j++) {
-      if (security[j] === "WPA-PSK") {
+    for (let j = 0; j < capabilities.length; j++) {
+      if (capabilities[j] === "WPA-PSK") {
         encryption = "WPA-PSK";
         break;
-      } else if (security[j] === "WPA-EAP") {
+      } else if (capabilities[j] === "WPA-EAP") {
         encryption = "WPA-EAP";
         break;
-      } else if (security[j] === "WEP") {
+      } else if (capabilities[j] === "WEP") {
         encryption = "WEP";
         break;
       }
@@ -1443,16 +1640,6 @@ function getKeyManagement(flags) {
   return types;
 }
 
-function getCapabilities(flags) {
-  var types = [];
-  if (!flags)
-    return types;
-
-  if (/\[WPS/.test(flags))
-    types.push("WPS");
-  return types;
-}
-
 // These constants shamelessly ripped from WifiManager.java
 // strength is the value returned by scan_results. It is nominally in dB. We
 // transform it into a percentage for clients looking to simply show a
@@ -1475,14 +1662,12 @@ function calculateSignal(strength) {
   return Math.floor(((strength - MIN_RSSI) / (MAX_RSSI - MIN_RSSI)) * 100);
 }
 
-function Network(ssid, security, password, capabilities) {
+function Network(ssid, capabilities, password) {
   this.ssid = ssid;
-  this.security = security;
+  this.capabilities = capabilities;
 
   if (typeof password !== "undefined")
     this.password = password;
-  if (capabilities !== undefined)
-    this.capabilities = capabilities;
   // TODO connected here as well?
 
   this.__exposedProps__ = Network.api;
@@ -1490,7 +1675,6 @@ function Network(ssid, security, password, capabilities) {
 
 Network.api = {
   ssid: "r",
-  security: "r",
   capabilities: "r",
   known: "r",
 
@@ -1501,7 +1685,6 @@ Network.api = {
   wep: "rw",
   hidden: "rw",
   eap: "rw",
-  pin: "rw",
   phase1: "rw",
   phase2: "rw"
 };
@@ -1509,8 +1692,7 @@ Network.api = {
 // Note: We never use ScanResult.prototype, so the fact that it's unrelated to
 // Network.prototype is OK.
 function ScanResult(ssid, bssid, flags, signal) {
-  Network.call(this, ssid, getKeyManagement(flags), undefined,
-               getCapabilities(flags));
+  Network.call(this, ssid, getKeyManagement(flags));
   this.bssid = bssid;
   this.signalStrength = signal;
   this.relSignalStrength = calculateSignal(Number(signal));
@@ -1573,38 +1755,24 @@ let WifiNetworkInterface = {
 
   name: null,
 
-  ips: [],
+  // For now we do our own DHCP. In the future this should be handed off
+  // to the Network Manager.
+  dhcp: false,
 
-  prefixLengths: [],
+  ip: null,
 
-  dnses: [],
+  netmask: null,
 
-  gateways: [],
+  broadcast: null,
+
+  dns1: null,
+
+  dns2: null,
 
   httpProxyHost: null,
 
   httpProxyPort: null,
 
-  getAddresses: function (ips, prefixLengths) {
-    ips.value = this.ips.slice();
-    prefixLengths.value = this.prefixLengths.slice();
-
-    return this.ips.length;
-  },
-
-  getGateways: function (count) {
-    if (count) {
-      count.value = this.gateways.length;
-    }
-    return this.gateways.slice();
-  },
-
-  getDnses: function (count) {
-    if (count) {
-      count.value = this.dnses.length;
-    }
-    return this.dnses.slice();
-  }
 };
 
 function WifiScanResult() {}
@@ -1623,7 +1791,6 @@ function WifiWorker() {
                     "WifiManager:associate", "WifiManager:forget",
                     "WifiManager:wps", "WifiManager:getState",
                     "WifiManager:setPowerSavingMode",
-                    "WifiManager:setHttpProxy",
                     "WifiManager:setStaticIpMode",
                     "child-process-shutdown"];
 
@@ -1653,22 +1820,10 @@ function WifiWorker() {
 
   this.currentNetwork = null;
   this.ipAddress = "";
-  this.macAddress = null;
 
   this._lastConnectionInfo = null;
   this._connectionInfoTimer = null;
   this._reconnectOnDisconnect = false;
-
-  // Create p2pObserver and assign to p2pManager.
-  if (WifiManager.p2pSupported()) {
-    this._p2pObserver = WifiP2pWorkerObserver(WifiManager.getP2pManager());
-    WifiManager.getP2pManager().setObserver(this._p2pObserver);
-
-    // Add DOM message observerd by p2pObserver to the message listener as well.
-    this._p2pObserver.getObservedDOMMessages().forEach((function(msgName) {
-      this._mm.addMessageListener(msgName, this);
-    }).bind(this));
-  }
 
   // Users of instances of nsITimer should keep a reference to the timer until
   // it is no longer needed in order to assure the timer is fired.
@@ -1702,7 +1857,6 @@ function WifiWorker() {
     // wait for our next command) ensure that background scanning is on and
     // then try again.
     debug("Determined that scanning is stuck, turning on background scanning!");
-    WifiManager.handlePostWifiScan();
     WifiManager.disconnect(function(ok) {});
     self._turnOnBackgroundScan = true;
   }
@@ -1714,9 +1868,11 @@ function WifiWorker() {
   // self.configuredNetworks and prepares it for the DOM.
   netToDOM = function(net) {
     var ssid = dequote(net.ssid);
-    var security = (net.key_mgmt === "NONE" && net.wep_key0) ? ["WEP"] :
-                   (net.key_mgmt && net.key_mgmt !== "NONE") ? [net.key_mgmt] :
-                   [];
+    var capabilities = (net.key_mgmt === "NONE" && net.wep_key0)
+                       ? ["WEP"]
+                       : (net.key_mgmt && net.key_mgmt !== "NONE")
+                       ? [net.key_mgmt]
+                       : [];
     var password;
     if (("psk" in net && net.psk) ||
         ("password" in net && net.password) ||
@@ -1724,7 +1880,7 @@ function WifiWorker() {
       password = "*";
     }
 
-    var pub = new Network(ssid, security, password);
+    var pub = new Network(ssid, capabilities, password);
     if (net.identity)
       pub.identity = dequote(net.identity);
     if (net.netId)
@@ -1745,7 +1901,6 @@ function WifiWorker() {
     delete net.bssid;
     delete net.signalStrength;
     delete net.relSignalStrength;
-    delete net.security;
     delete net.capabilities;
 
     if (!configured)
@@ -1793,10 +1948,6 @@ function WifiWorker() {
       configured.auth_alg = net.auth_alg = "OPEN SHARED";
     }
 
-    if ("pin" in net) {
-      net.pin = quote(net.pin);
-    }
-
     if ("phase1" in net)
       net.phase1 = quote(net.phase1);
 
@@ -1823,17 +1974,19 @@ function WifiWorker() {
     });
 
     try {
-      self._allowWpaEap = WifiManager.getCapabilities().eapSim;
+      self._allowWpaEap = Services.prefs.getBoolPref("b2g.wifi.allow_unsafe_wpa_eap");
     } catch (e) {
       self._allowWpaEap = false;
     }
+
+    // Check if we need to dequeue requests first.
+    self._notifyAfterStateChange(true, true);
 
     // Notify everybody, even if they didn't ask us to come up.
     WifiManager.getMacAddress(function (mac) {
       self.macAddress = mac;
       debug("Got mac: " + mac);
       self._fireEvent("wifiUp", { macAddress: mac });
-      self.requestDone();
     });
 
     if (WifiManager.state === "SCANNING")
@@ -1845,9 +1998,11 @@ function WifiWorker() {
     WifiManager.state = "UNINITIALIZED";
     debug("Supplicant died!");
 
+    // Check if we need to dequeue requests first.
+    self._notifyAfterStateChange(this.success, false);
+
     // Notify everybody, even if they didn't ask us to come up.
     self._fireEvent("wifiDown", {});
-    self.requestDone();
   };
 
   WifiManager.onpasswordmaybeincorrect = function() {
@@ -1940,11 +2095,6 @@ function WifiWorker() {
           WifiManager.getNetworkConfiguration(self.currentNetwork, function(){});
         }
 
-        // Update http proxy when connected to network.
-        let netConnect = WifiManager.getHttpProxyNetwork(self.currentNetwork);
-        if (netConnect)
-          WifiManager.setHttpProxy(netConnect);
-
         // The full authentication process is completed, reset the count.
         WifiManager.authenticationFailuresCount = 0;
         WifiManager.loopDetectionCount = 0;
@@ -1956,36 +2106,7 @@ function WifiWorker() {
         self.currentNetwork.bssid = WifiManager.connectionInfo.bssid;
         break;
       case "DISCONNECTED":
-        // wpa_supplicant may give us a "DISCONNECTED" event even if
-        // we are already in "DISCONNECTED" state.
-        if ((WifiNetworkInterface.state ===
-             Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED) &&
-             (this.prevState === "INITIALIZING" ||
-              this.prevState === "DISCONNECTED" ||
-              this.prevState === "INTERFACE_DISABLED" ||
-              this.prevState === "INACTIVE" ||
-              this.prevState === "UNINITIALIZED")) {
-          return;
-        }
-
         self._fireEvent("ondisconnect", {});
-
-        // When disconnected, clear the http proxy setting if it exists.
-        // Temporarily set http proxy to empty and restore user setting after setHttpProxy.
-        let netDisconnect = WifiManager.getHttpProxyNetwork(self.currentNetwork);
-        if (netDisconnect) {
-          let prehttpProxyHostSetting = netDisconnect.httpProxyHost;
-          let prehttpProxyPortSetting = netDisconnect.httpProxyPort;
-
-          netDisconnect.httpProxyHost = "";
-          netDisconnect.httpProxyPort = 0;
-
-          WifiManager.setHttpProxy(netDisconnect);
-
-          netDisconnect.httpProxyHost = prehttpProxyHostSetting;
-          netDisconnect.httpProxyPort = prehttpProxyPortSetting;
-        }
-
         self.currentNetwork = null;
         self.ipAddress = "";
 
@@ -2007,10 +2128,12 @@ function WifiWorker() {
 
         WifiNetworkInterface.state =
           Ci.nsINetworkInterface.NETWORK_STATE_DISCONNECTED;
-        WifiNetworkInterface.ips = [];
-        WifiNetworkInterface.prefixLengths = [];
-        WifiNetworkInterface.gateways = [];
-        WifiNetworkInterface.dnses = [];
+        WifiNetworkInterface.ip = null;
+        WifiNetworkInterface.netmask = null;
+        WifiNetworkInterface.broadcast = null;
+        WifiNetworkInterface.gateway = null;
+        WifiNetworkInterface.dns1 = null;
+        WifiNetworkInterface.dns2 = null;
         Services.obs.notifyObservers(WifiNetworkInterface,
                                      kNetworkInterfaceStateChangedTopic,
                                      null);
@@ -2035,41 +2158,34 @@ function WifiWorker() {
   };
 
   WifiManager.onnetworkconnected = function() {
-    if (!this.info || !this.info.ipaddr_str) {
-      debug("Network information is invalid.");
-      return;
-    }
+    if (this.info) {
+      WifiNetworkInterface.state =
+        Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
+      WifiNetworkInterface.ip = this.info.ipaddr_str;
+      WifiNetworkInterface.netmask = this.info.mask_str;
+      WifiNetworkInterface.broadcast = this.info.broadcast_str;
+      WifiNetworkInterface.gateway = this.info.gateway_str;
+      WifiNetworkInterface.dns1 = this.info.dns1_str;
+      WifiNetworkInterface.dns2 = this.info.dns2_str;
+      Services.obs.notifyObservers(WifiNetworkInterface,
+                                   kNetworkInterfaceStateChangedTopic,
+                                   null);
 
-    let maskLength =
-      netHelpers.getMaskLength(netHelpers.stringToIP(this.info.mask_str));
-    if (!maskLength) {
-      maskLength = 32; // max prefix for IPv4.
-    }
-    WifiNetworkInterface.state =
-      Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED;
-    WifiNetworkInterface.ips = [this.info.ipaddr_str];
-    WifiNetworkInterface.prefixLengths = [maskLength];
-    WifiNetworkInterface.gateways = [this.info.gateway_str];
-    if (typeof this.info.dns1_str == "string" &&
-        this.info.dns1_str.length) {
-      WifiNetworkInterface.dnses.push(this.info.dns1_str);
-    }
-    if (typeof this.info.dns2_str == "string" &&
-        this.info.dns2_str.length) {
-      WifiNetworkInterface.dnses.push(this.info.dns2_str);
-    }
-    Services.obs.notifyObservers(WifiNetworkInterface,
-                                 kNetworkInterfaceStateChangedTopic,
-                                 null);
+      self.ipAddress = this.info.ipaddr_str;
 
-    self.ipAddress = this.info.ipaddr_str;
-
-    // We start the connection information timer when we associate, but
-    // don't have our IP address until here. Make sure that we fire a new
-    // connectionInformation event with the IP address the next time the
-    // timer fires.
-    self._lastConnectionInfo = null;
-    self._fireEvent("onconnect", { network: netToDOM(self.currentNetwork) });
+      // We start the connection information timer when we associate, but
+      // don't have our IP address until here. Make sure that we fire a new
+      // connectionInformation event with the IP address the next time the
+      // timer fires.
+      self._lastConnectionInfo = null;
+      self._fireEvent("onconnect", { network: netToDOM(self.currentNetwork) });
+    } else {
+      // NB: We have to call disconnect first. Otherwise, we only reauth with
+      // the existing AP and don't retrigger DHCP.
+      WifiManager.disconnect(function() {
+        WifiManager.reassociate(function(){});
+      });
+    }
   };
 
   WifiManager.onscanresultsavailable = function() {
@@ -2102,7 +2218,7 @@ function WifiWorker() {
       self.networksArray = [];
       for (let i = 1; i < lines.length; ++i) {
         // bssid / frequency / signal level / flags / ssid
-        var match = /([\S]+)\s+([\S]+)\s+([\S]+)\s+(\[[\S]+\])?\s(.*)/.exec(lines[i]);
+        var match = /([\S]+)\s+([\S]+)\s+([\S]+)\s+(\[[\S]+\])?\s+(.*)/.exec(lines[i]);
 
         if (match && match[5]) {
           let ssid = match[5],
@@ -2111,7 +2227,7 @@ function WifiWorker() {
               flags = match[4];
 
           // Skip ad-hoc networks which aren't supported (bug 811635).
-          if (flags && flags.indexOf("[IBSS]") >= 0)
+          if (flags.indexOf("[IBSS]") >= 0)
             continue;
 
           // If this is the first time that we've seen this SSID in the scan
@@ -2136,17 +2252,17 @@ function WifiWorker() {
               network.password = "*";
             }
           } else if (!self._allowWpaEap &&
-                     (eapIndex = network.security.indexOf("WPA-EAP")) >= 0) {
+                     (eapIndex = network.capabilities.indexOf("WPA-EAP")) >= 0) {
             // Don't offer to connect to WPA-EAP networks unless one has been
             // configured through other means (e.g. it was added directly to
             // wpa_supplicant.conf). Here, we have an unknown WPA-EAP network,
             // so we ignore it entirely if it only supports WPA-EAP, otherwise
             // we take EAP out of the list and offer the rest of the
-            // security.
-            if (network.security.length === 1)
+            // capabilities.
+            if (network.capabilities.length === 1)
               continue;
 
-            network.security.splice(eapIndex, 1);
+            network.capabilities.splice(eapIndex, 1);
           }
 
           self.networksArray.push(network);
@@ -2217,9 +2333,6 @@ function WifiWorker() {
   lock.get(SETTINGS_WIFI_DNS2, this);
   lock.get(SETTINGS_WIFI_TETHERING_ENABLED, this);
 
-  lock.get(SETTINGS_USB_DHCPSERVER_STARTIP, this);
-  lock.get(SETTINGS_USB_DHCPSERVER_ENDIP, this);
-
   this._wifiTetheringSettingsToRead = [SETTINGS_WIFI_SSID,
                                        SETTINGS_WIFI_SECURITY_TYPE,
                                        SETTINGS_WIFI_SECURITY_PASSWORD,
@@ -2229,9 +2342,8 @@ function WifiWorker() {
                                        SETTINGS_WIFI_DHCPSERVER_ENDIP,
                                        SETTINGS_WIFI_DNS1,
                                        SETTINGS_WIFI_DNS2,
-                                       SETTINGS_WIFI_TETHERING_ENABLED,
-                                       SETTINGS_USB_DHCPSERVER_STARTIP,
-                                       SETTINGS_USB_DHCPSERVER_ENDIP];
+                                       SETTINGS_WIFI_TETHERING_ENABLED];
+
 }
 
 function translateState(state) {
@@ -2289,9 +2401,6 @@ WifiWorker.prototype = {
     this.tetheringSettings[SETTINGS_WIFI_DHCPSERVER_ENDIP] = DEFAULT_WIFI_DHCPSERVER_ENDIP;
     this.tetheringSettings[SETTINGS_WIFI_DNS1] = DEFAULT_DNS1;
     this.tetheringSettings[SETTINGS_WIFI_DNS2] = DEFAULT_DNS2;
-
-    this.tetheringSettings[SETTINGS_USB_DHCPSERVER_STARTIP] = DEFAULT_USB_DHCPSERVER_STARTIP;
-    this.tetheringSettings[SETTINGS_USB_DHCPSERVER_ENDIP] = DEFAULT_USB_DHCPSERVER_ENDIP;
   },
 
   // Internal methods.
@@ -2386,10 +2495,8 @@ WifiWorker.prototype = {
       // Convert between netId-based and ssid-based indexing.
       for (let net in networks) {
         let network = networks[net];
-        delete networks[net];
-
         if (!network.ssid) {
-          WifiManager.removeNetwork(network.netId, function() {});
+          delete networks[net]; // TODO support these?
           continue;
         }
 
@@ -2397,11 +2504,8 @@ WifiWorker.prototype = {
           this._highestPriority = network.priority;
 
         let networkKey = getNetworkKey(network);
-        // Accept latest config of same network(same SSID and same security).
-        if (networks[networkKey]) {
-          WifiManager.removeNetwork(networks[networkKey].netId, function() {});
-        }
         networks[networkKey] = network;
+        delete networks[net];
       }
 
       this.configuredNetworks = networks;
@@ -2487,45 +2591,13 @@ WifiWorker.prototype = {
   },
 
   _sendMessage: function(message, success, data, msg) {
-    try {
-      msg.manager.sendAsyncMessage(message + (success ? ":OK" : ":NO"),
-                                   { data: data, rid: msg.rid, mid: msg.mid });
-    } catch (e) {
-      debug("sendAsyncMessage error : " + e);
-    }
-    this._splicePendingRequest(msg);
-  },
-
-  _domRequest: [],
-
-  _splicePendingRequest: function(msg) {
-    for (let i = 0; i < this._domRequest.length; i++) {
-      if (this._domRequest[i].msg === msg) {
-        this._domRequest.splice(i, 1);
-        return;
-      }
-    }
-  },
-
-  _clearPendingRequest: function() {
-    if (this._domRequest.length === 0) return;
-    this._domRequest.forEach((function(req) {
-      this._sendMessage(req.name + ":Return", false, "Wifi is disabled", req.msg);
-    }).bind(this));
+    msg.manager.sendAsyncMessage(message + (success ? ":OK" : ":NO"),
+                                 { data: data, rid: msg.rid, mid: msg.mid });
   },
 
   receiveMessage: function MessageManager_receiveMessage(aMessage) {
     let msg = aMessage.data || {};
     msg.manager = aMessage.target;
-
-    if (WifiManager.p2pSupported()) {
-      // If p2pObserver returns something truthy, return it!
-      // Otherwise, continue to do the rest of tasks.
-      var p2pRet = this._p2pObserver.onDOMMessage(aMessage);
-      if (p2pRet) {
-        return p2pRet;
-      }
-    }
 
     // Note: By the time we receive child-process-shutdown, the child process
     // has already forgotten its permissions so we do this before the
@@ -2535,21 +2607,12 @@ WifiWorker.prototype = {
       if ((i = this._domManagers.indexOf(msg.manager)) != -1) {
         this._domManagers.splice(i, 1);
       }
-      for (i = this._domRequest.length - 1; i >= 0; i--) {
-        if (this._domRequest[i].msg.manager === msg.manager) {
-          this._domRequest.splice(i, 1);
-        }
-      }
+
       return;
     }
 
     if (!aMessage.target.assertPermission("wifi-manage")) {
       return;
-    }
-
-    // We are interested in DOMRequests only.
-    if (aMessage.name != "WifiManager:getState") {
-      this._domRequest.push({name: aMessage.name, msg:msg});
     }
 
     switch (aMessage.name) {
@@ -2570,9 +2633,6 @@ WifiWorker.prototype = {
         break;
       case "WifiManager:setPowerSavingMode":
         this.setPowerSavingMode(msg);
-        break;
-      case "WifiManager:setHttpProxy":
-        this.setHttpProxy(msg);
         break;
       case "WifiManager:setStaticIpMode":
         this.setStaticIpMode(msg);
@@ -2633,7 +2693,7 @@ WifiWorker.prototype = {
     self.waitForScan(waitForScanCallback);
     doScan();
     function doScan() {
-      WifiManager.scan(true, (function (ok) {
+      WifiManager.scan(true, function (ok) {
         if (!ok) {
           if (!timer) {
             count = 0;
@@ -2642,7 +2702,7 @@ WifiWorker.prototype = {
 
           if (count++ >= 3) {
             timer = null;
-            self.wantScanResults.splice(self.wantScanResults.indexOf(waitForScanCallback), 1);
+            this.wantScanResults.splice(this.wantScanResults.indexOf(waitForScanCallback), 1);
             callback.onfailure();
             return;
           }
@@ -2651,7 +2711,7 @@ WifiWorker.prototype = {
           timer.initWithCallback(doScan, 10000, Ci.nsITimer.TYPE_ONE_SHOT);
           return;
         }
-      }).bind(this));
+      });
     }
 
     function waitForScanCallback(networks) {
@@ -2676,15 +2736,15 @@ WifiWorker.prototype = {
         if (id === "__exposedProps__") {
           continue;
         }
-        if (id === "security") {
+        if (id === "capabilities") {
           result[id] = 0;
-          var security = element[id];
-          for (let j = 0; j < security.length; j++) {
-            if (security[j] === "WPA-PSK") {
+          var capabilities = element[id];
+          for (let j = 0; j < capabilities.length; j++) {
+            if (capabilities[j] === "WPA-PSK") {
               result[id] |= Ci.nsIWifiScanResult.WPA_PSK;
-            } else if (security[j] === "WPA-EAP") {
+            } else if (capabilities[j] === "WPA-EAP") {
               result[id] |= Ci.nsIWifiScanResult.WPA_EAP;
-            } else if (security[j] === "WEP") {
+            } else if (capabilities[j] === "WEP") {
               result[id] |= Ci.nsIWifiScanResult.WEP;
             } else {
              result[id] = 0;
@@ -2720,9 +2780,59 @@ WifiWorker.prototype = {
     }).bind(this));
   },
 
+  _notifyAfterStateChange: function(success, newState) {
+    if (!this._stateRequests.length)
+      return;
+
+    // First, notify all of the requests that were trying to make this change.
+    let state = this._stateRequests[0].enabled;
+
+    // It is callback function's responsibility to handle the pending request.
+    // So we just return here.
+    if (this._stateRequests.length > 0
+        && ("callback" in this._stateRequests[0])) {
+      return;
+    }
+
+    // If the new state is not the same as state, then we weren't processing
+    // the first request (we were racing somehow) so don't notify.
+    if (!success || state === newState) {
+      do {
+        if (!("callback" in this._stateRequests[0])) {
+          this._stateRequests.shift();
+        }
+        // Don't remove more than one request if the previous one failed.
+      } while (success &&
+               this._stateRequests.length &&
+               !("callback" in this._stateRequests[0]) &&
+               this._stateRequests[0].enabled === state);
+    }
+    // If there were requests queued after this one, run them.
+    if (this._stateRequests.length > 0) {
+      let self = this;
+      this._callbackTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+      this._callbackTimer.initWithCallback(function(timer) {
+        if ("callback" in self._stateRequests[0]) {
+          self._stateRequests[0].callback.call(self, self._stateRequests[0].enabled);
+        } else {
+          WifiManager.setWifiEnabled(self._stateRequests[0].enabled,
+                                     self._setWifiEnabledCallback.bind(this));
+        }
+        timer = null;
+      }, 1000, Ci.nsITimer.TYPE_ONE_SHOT);
+    }
+  },
+
   _setWifiEnabledCallback: function(status) {
-    if (status !== 0) {
-      this.requestDone();
+    if (status === "no change") {
+      this._notifyAfterStateChange(true, this._stateRequests[0].enabled);
+      return;
+    }
+
+    if (status) {
+      // Don't call notifyAndContinue because we don't want to skip another
+      // attempt to turn wifi on or off if this one failed.
+      this._notifyAfterStateChange(false, this._stateRequests[0].enabled);
       return;
     }
 
@@ -2733,35 +2843,25 @@ WifiWorker.prototype = {
       WifiManager.start();
   },
 
-  setWifiEnabled: function(enabled, callback) {
-    // Reply error to pending requests.
-    if (!enabled) {
-      this._clearPendingRequest();
+  setWifiEnabled: function(msg) {
+    // There are two problems that we're trying to solve here:
+    //   - If we get multiple requests to turn on and off wifi before the
+    //     current request has finished, then we need to queue up the requests
+    //     and handle each on/off request in turn.
+    //   - Because we can't pass a callback to WifiManager.start, we need to
+    //     have a way to communicate with our onsupplicantconnection callback.
+    this._stateRequests.push(msg);
+    if (this._stateRequests.length === 1) {
+      if ("callback" in this._stateRequests[0]) {
+        this._stateRequests[0].callback.call(this, msg.enabled);
+      } else {
+        WifiManager.setWifiEnabled(msg.enabled, this._setWifiEnabledCallback.bind(this));
+      }
     }
-
-    WifiManager.setWifiEnabled(enabled, callback);
   },
 
-  // requestDone() must be called to before callback complete(or error)
-  // so next queue in the request quene can be executed.
-  queueRequest: function(data, callback) {
-    if (!callback) {
-        throw "Try to enqueue a request without callback";
-    }
-
-    let optimizeCommandList = ["setWifiEnabled", "setWifiApEnabled"];
-    if (optimizeCommandList.indexOf(data.command) != -1) {
-      this._stateRequests = this._stateRequests.filter(function(element) {
-        return element.data.command !== data.command;
-      });
-    }
-
-    this._stateRequests.push({
-      data: data,
-      callback: callback
-    });
-
-    this.nextRequest();
+  queueRequest: function(enabled, callback) {
+    this.setWifiEnabled({enabled: enabled, callback: callback});
   },
 
   getWifiTetheringParameters: function getWifiTetheringParameters(enable) {
@@ -2770,10 +2870,8 @@ WifiWorker.prototype = {
     let securityId;
     let interfaceIp;
     let prefix;
-    let wifiDhcpStartIp;
-    let wifiDhcpEndIp;
-    let usbDhcpStartIp;
-    let usbDhcpEndIp;
+    let dhcpStartIp;
+    let dhcpEndIp;
     let dns1;
     let dns2;
 
@@ -2782,10 +2880,8 @@ WifiWorker.prototype = {
     securityId = this.tetheringSettings[SETTINGS_WIFI_SECURITY_PASSWORD];
     interfaceIp = this.tetheringSettings[SETTINGS_WIFI_IP];
     prefix = this.tetheringSettings[SETTINGS_WIFI_PREFIX];
-    wifiDhcpStartIp = this.tetheringSettings[SETTINGS_WIFI_DHCPSERVER_STARTIP];
-    wifiDhcpEndIp = this.tetheringSettings[SETTINGS_WIFI_DHCPSERVER_ENDIP];
-    usbDhcpStartIp = this.tetheringSettings[SETTINGS_USB_DHCPSERVER_STARTIP];
-    usbDhcpEndIp = this.tetheringSettings[SETTINGS_USB_DHCPSERVER_ENDIP];
+    dhcpStartIp = this.tetheringSettings[SETTINGS_WIFI_DHCPSERVER_STARTIP];
+    dhcpEndIp = this.tetheringSettings[SETTINGS_WIFI_DHCPSERVER_ENDIP];
     dns1 = this.tetheringSettings[SETTINGS_WIFI_DNS1];
     dns2 = this.tetheringSettings[SETTINGS_WIFI_DNS2];
 
@@ -2807,8 +2903,7 @@ WifiWorker.prototype = {
     }
     // Using the default values here until application supports these settings.
     if (interfaceIp == "" || prefix == "" ||
-        wifiDhcpStartIp == "" || wifiDhcpEndIp == "" ||
-        usbDhcpStartIp == "" || usbDhcpEndIp == "") {
+        dhcpStartIp == "" || dhcpEndIp == "") {
       debug("Invalid subnet information.");
       return null;
     }
@@ -2819,10 +2914,8 @@ WifiWorker.prototype = {
       key: securityId,
       ip: interfaceIp,
       prefix: prefix,
-      wifiStartIp: wifiDhcpStartIp,
-      wifiEndIp: wifiDhcpEndIp,
-      usbStartIp: usbDhcpStartIp,
-      usbEndIp: usbDhcpEndIp,
+      startIp: dhcpStartIp,
+      endIp: dhcpEndIp,
       dns1: dns1,
       dns2: dns2,
       enable: enable,
@@ -2835,7 +2928,6 @@ WifiWorker.prototype = {
     let configuration = this.getWifiTetheringParameters(enabled);
 
     if (!configuration) {
-      this.requestDone();
       debug("Invalid Wifi Tethering configuration.");
       return;
     }
@@ -2847,16 +2939,12 @@ WifiWorker.prototype = {
     const MAX_PRIORITY = 9999;
     const message = "WifiManager:associate:Return";
     let network = msg.data;
-
-    let privnet = network;
-    let dontConnect = privnet.dontConnect;
-    delete privnet.dontConnect;
-
     if (!WifiManager.enabled) {
       this._sendMessage(message, false, "Wifi is disabled", msg);
       return;
     }
 
+    let privnet = network;
     let self = this;
     function networkReady() {
       // saveConfig now before we disable most of the other networks.
@@ -2875,15 +2963,10 @@ WifiWorker.prototype = {
         });
       }
 
-      var selectAndConnectOrReturn = dontConnect ?
-        function() {
-          self._sendMessage(message, true, "Wifi has been recorded", msg);
-        } : selectAndConnect;
-      if (self._highestPriority >= MAX_PRIORITY) {
-        self._reprioritizeNetworks(selectAndConnectOrReturn);
-      } else {
-        WifiManager.saveConfig(selectAndConnectOrReturn);
-      }
+      if (self._highestPriority >= MAX_PRIORITY)
+        self._reprioritizeNetworks(selectAndConnect);
+      else
+        WifiManager.saveConfig(selectAndConnect);
     }
 
     let ssid = privnet.ssid;
@@ -2978,14 +3061,14 @@ WifiWorker.prototype = {
     let self = this;
     let detail = msg.data;
     if (detail.method === "pbc") {
-      WifiManager.wpsPbc(WifiManager.ifname, function(ok) {
+      WifiManager.wpsPbc(function(ok) {
         if (ok)
           self._sendMessage(message, true, true, msg);
         else
           self._sendMessage(message, false, "WPS PBC failed", msg);
       });
     } else if (detail.method === "pin") {
-      WifiManager.wpsPin(detail, function(pin) {
+      WifiManager.wpsPin(detail.pin, function(pin) {
         if (pin)
           self._sendMessage(message, true, pin, msg);
         else
@@ -3023,33 +3106,13 @@ WifiWorker.prototype = {
     });
   },
 
-  setHttpProxy: function(msg) {
-    const message = "WifiManager:setHttpProxy:Return";
-    let self = this;
-    let network = msg.data.network;
-    let info = msg.data.info;
-
-    WifiManager.configureHttpProxy(network, info, function(ok) {
-      if (ok) {
-        // If configured network is current connected network
-        // need update http proxy immediately.
-        let setNetworkKey = getNetworkKey(network);
-        let curNetworkKey = self.currentNetwork ? getNetworkKey(self.currentNetwork) : null;
-        if (setNetworkKey === curNetworkKey)
-          WifiManager.setHttpProxy(network);
-
-        self._sendMessage(message, true, true, msg);
-      } else {
-        self._sendMessage(message, false, "Set http proxy failed", msg);
-      }
-    });
-  },
-
   setStaticIpMode: function(msg) {
     const message = "WifiManager:setStaticMode:Return";
     let self = this;
     let network = msg.data.network;
     let info = msg.data.info;
+
+    netFromDOM(network, null);
 
     // To compatiable with DHCP returned info structure, do translation here
     info.ipaddr_str = info.ipaddr;
@@ -3073,137 +3136,86 @@ WifiWorker.prototype = {
 
   shutdown: function() {
     debug("shutting down ...");
-    this.queueRequest({command: "setWifiEnabled", value: false}, function(data) {
-      this.setWifiEnabled(false, this._setWifiEnabledCallback.bind(this));
-    }.bind(this));
-  },
-
-  requestProcessing: false,   // Hold while dequeue and execution a request.
-                              // Released upon the request is fully executed,
-                              // i.e, mostly after callback is done.
-  requestDone: function requestDone() {
-    this.requestProcessing = false;
-    this.nextRequest();
+    this.setWifiEnabled({enabled: false});
   },
 
   nextRequest: function nextRequest() {
-    // No request to process
-    if (this._stateRequests.length === 0) {
+    if (this._stateRequests.length <= 0 ||
+        !("callback" in this._stateRequests[0])) {
       return;
     }
-
-    // Handling request, wait for it.
-    if (this.requestProcessing) {
-      return;
+    this._stateRequests.shift();
+    // Serve the pending requests.
+    if (this._stateRequests.length > 0) {
+      if ("callback" in this._stateRequests[0]) {
+        this._stateRequests[0].callback.call(this,
+                                             this._stateRequests[0].enabled);
+      } else {
+        WifiManager.setWifiEnabled(this._stateRequests[0].enabled,
+                                   this._setWifiEnabledCallback.bind(this));
+      }
     }
-
-    // Hold processing lock
-    this.requestProcessing = true;
-
-    // Find next valid request
-    let request = this._stateRequests.shift();
-
-    request.callback(request.data);
   },
 
   notifyTetheringOn: function notifyTetheringOn() {
     // It's really sad that we don't have an API to notify the wifi
     // hotspot status. Toggle settings to let gaia know that wifi hotspot
     // is enabled.
-    let self = this;
     this.tetheringSettings[SETTINGS_WIFI_TETHERING_ENABLED] = true;
-    this._oldWifiTetheringEnabledState = true;
     gSettingsService.createLock().set(
-      SETTINGS_WIFI_TETHERING_ENABLED,
-      true,
-      {
-        handle: function(aName, aResult) {
-          self.requestDone();
-        },
-        handleError: function(aErrorMessage) {
-          self.requestDone();
-        }
-      },
-      "fromInternalSetting");
+      SETTINGS_WIFI_TETHERING_ENABLED, true, null, "fromInternalSetting");
+    // Check for the next request.
+    this.nextRequest();
   },
 
   notifyTetheringOff: function notifyTetheringOff() {
     // It's really sad that we don't have an API to notify the wifi
     // hotspot status. Toggle settings to let gaia know that wifi hotspot
     // is disabled.
-    let self = this;
     this.tetheringSettings[SETTINGS_WIFI_TETHERING_ENABLED] = false;
-    this._oldWifiTetheringEnabledState = false;
     gSettingsService.createLock().set(
-      SETTINGS_WIFI_TETHERING_ENABLED,
-      false,
-      {
-        handle: function(aName, aResult) {
-          self.requestDone();
-        },
-        handleError: function(aErrorMessage) {
-          self.requestDone();
-        }
-      },
-      "fromInternalSetting");
+      SETTINGS_WIFI_TETHERING_ENABLED, false, null, "fromInternalSetting");
+    // Check for the next request.
+    this.nextRequest();
   },
 
   handleWifiEnabled: function(enabled) {
+    if (WifiManager.enabled === enabled) {
+      return;
+    }
     // Make sure Wifi hotspot is idle before switching to Wifi mode.
-    if (enabled) {
-      this.queueRequest({command: "setWifiApEnabled", value: false}, function(data) {
-        if (this.tetheringSettings[SETTINGS_WIFI_TETHERING_ENABLED] ||
-            WifiManager.isWifiTetheringEnabled(WifiManager.tetheringState)) {
-          this.disconnectedByWifi = true;
-          this.setWifiApEnabled(false, this.notifyTetheringOff.bind(this));
-        } else {
-          this.requestDone();
-        }
+    if (enabled && (this.tetheringSettings[SETTINGS_WIFI_TETHERING_ENABLED] ||
+         WifiManager.tetheringState != "UNINITIALIZED")) {
+      this.queueRequest(false, function(data) {
+        this.disconnectedByWifi = true;
+        this.setWifiApEnabled(false, this.notifyTetheringOff.bind(this));
       }.bind(this));
     }
+    this.setWifiEnabled({enabled: enabled});
 
-    this.queueRequest({command: "setWifiEnabled", value: enabled}, function(data) {
-      this.setWifiEnabled(enabled, this._setWifiEnabledCallback.bind(this));
-    }.bind(this));
-
-    if (!enabled) {
-      this.queueRequest({command: "setWifiApEnabled", value: true}, function(data) {
-        if (this.disconnectedByWifi) {
-          this.setWifiApEnabled(true, this.notifyTetheringOn.bind(this));
-        } else {
-          this.requestDone();
-        }
+    if (!enabled && this.disconnectedByWifi) {
+      this.queueRequest(true, function(data) {
         this.disconnectedByWifi = false;
+        this.setWifiApEnabled(true, this.notifyTetheringOn.bind(this));
       }.bind(this));
     }
   },
 
   handleWifiTetheringEnabled: function(enabled) {
     // Make sure Wifi is idle before switching to Wifi hotspot mode.
-    if (enabled) {
-      this.queueRequest({command: "setWifiEnabled", value: false}, function(data) {
-        if (WifiManager.isWifiEnabled(WifiManager.state)) {
-          this.disconnectedByWifiTethering = true;
-          this.setWifiEnabled(false, this._setWifiEnabledCallback.bind(this));
-        } else {
-          this.requestDone();
-        }
-      }.bind(this));
+    if (enabled && (WifiManager.enabled ||
+         WifiManager.state != "UNINITIALIZED")) {
+      this.disconnectedByWifiTethering = true;
+      this.setWifiEnabled({enabled: false});
     }
 
-    this.queueRequest({command: "setWifiApEnabled", value: enabled}, function(data) {
-      this.setWifiApEnabled(enabled, this.requestDone.bind(this));
+    this.queueRequest(enabled, function(data) {
+      this.setWifiApEnabled(data, this.nextRequest.bind(this));
     }.bind(this));
 
-    if (!enabled) {
-      this.queueRequest({command: "setWifiEnabled", value: true}, function(data) {
-        if (this.disconnectedByWifiTethering) {
-          this.setWifiEnabled(true, this._setWifiEnabledCallback.bind(this));
-        } else {
-          this.requestDone();
-        }
-        this.disconnectedByWifiTethering = false;
-      }.bind(this));
+    if (!enabled && this.disconnectedByWifiTethering) {
+      this.disconnectedByWifiTethering = false;
+      this.setWifiEnabled({enabled: true});
     }
   },
 
@@ -3250,8 +3262,6 @@ WifiWorker.prototype = {
       case SETTINGS_WIFI_DHCPSERVER_ENDIP:
       case SETTINGS_WIFI_DNS1:
       case SETTINGS_WIFI_DNS2:
-      case SETTINGS_USB_DHCPSERVER_STARTIP:
-      case SETTINGS_USB_DHCPSERVER_ENDIP:
         if (aResult !== null) {
           this.tetheringSettings[aName] = aResult;
         }
@@ -3278,7 +3288,6 @@ WifiWorker.prototype = {
           break;
         }
 
-        this._oldWifiTetheringEnabledState = this.tetheringSettings[SETTINGS_WIFI_TETHERING_ENABLED];
         this.handleWifiTetheringEnabled(aResult)
         break;
     };

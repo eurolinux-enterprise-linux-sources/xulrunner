@@ -52,7 +52,7 @@ nsDeviceContextSpecQt::~nsDeviceContextSpecQt()
     DO_PR_DEBUG_LOG(("nsDeviceContextSpecQt::~nsDeviceContextSpecQt()\n"));
 }
 
-NS_IMPL_ISUPPORTS(nsDeviceContextSpecQt,
+NS_IMPL_ISUPPORTS1(nsDeviceContextSpecQt,
         nsIDeviceContextSpec)
 
 NS_IMETHODIMP nsDeviceContextSpecQt::GetSurfaceForPrinter(
@@ -161,8 +161,8 @@ NS_IMETHODIMP nsDeviceContextSpecQt::GetPath(const char** aPath)
 }
 
 NS_IMETHODIMP nsDeviceContextSpecQt::BeginDocument(
-        const nsAString& aTitle,
-        char16_t* aPrintToFileName,
+        PRUnichar* aTitle,
+        PRUnichar* aPrintToFileName,
         int32_t aStartPage,
         int32_t aEndPage)
 {
@@ -214,7 +214,7 @@ nsPrinterEnumeratorQt::nsPrinterEnumeratorQt()
 {
 }
 
-NS_IMPL_ISUPPORTS(nsPrinterEnumeratorQt, nsIPrinterEnumerator)
+NS_IMPL_ISUPPORTS1(nsPrinterEnumeratorQt, nsIPrinterEnumerator)
 
 NS_IMETHODIMP nsPrinterEnumeratorQt::GetPrinterNameList(
         nsIStringEnumerator** aPrinterNameList)
@@ -232,21 +232,21 @@ NS_IMETHODIMP nsPrinterEnumeratorQt::GetPrinterNameList(
     for (int32_t i = 0; i < qprinters.size(); ++i) {
         printers->AppendElement(
                 nsDependentString(
-                    (const char16_t*)qprinters[i].printerName().constData()));
+                    (const PRUnichar*)qprinters[i].printerName().constData()));
     }
 
     return NS_NewAdoptingStringEnumerator(aPrinterNameList, printers);
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorQt::GetDefaultPrinterName(
-        char16_t** aDefaultPrinterName)
+        PRUnichar** aDefaultPrinterName)
 {
     DO_PR_DEBUG_LOG(("nsPrinterEnumeratorQt::GetDefaultPrinterName()\n"));
     NS_ENSURE_ARG_POINTER(aDefaultPrinterName);
 
     QString defprinter = QPrinterInfo::defaultPrinter().printerName();
     *aDefaultPrinterName = ToNewUnicode(nsDependentString(
-        (const char16_t*)defprinter.constData()));
+        (const PRUnichar*)defprinter.constData()));
 
     DO_PR_DEBUG_LOG(("GetDefaultPrinterName(): default printer='%s'.\n",
         NS_ConvertUTF16toUTF8(*aDefaultPrinterName).get()));
@@ -255,7 +255,7 @@ NS_IMETHODIMP nsPrinterEnumeratorQt::GetDefaultPrinterName(
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorQt::InitPrintSettingsFromPrinter(
-        const char16_t* aPrinterName,
+        const PRUnichar* aPrinterName,
         nsIPrintSettings* aPrintSettings)
 {
     DO_PR_DEBUG_LOG(("nsPrinterEnumeratorQt::InitPrintSettingsFromPrinter()"));
@@ -265,7 +265,7 @@ NS_IMETHODIMP nsPrinterEnumeratorQt::InitPrintSettingsFromPrinter(
 }
 
 NS_IMETHODIMP nsPrinterEnumeratorQt::DisplayPropertiesDlg(
-        const char16_t* aPrinter,
+        const PRUnichar* aPrinter,
         nsIPrintSettings* aPrintSettings)
 {
     return NS_ERROR_NOT_IMPLEMENTED;

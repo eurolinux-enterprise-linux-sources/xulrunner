@@ -13,12 +13,6 @@
 
 #include "jstypes.h"
 
-#ifdef _MSC_VER
-typedef int pid_t;
-#else
-#include <unistd.h>
-#endif
-
 /**
  * Start any profilers that are available and have been configured on for this
  * platform. This is NOT thread safe.
@@ -26,25 +20,25 @@ typedef int pid_t;
  * The profileName is used by some profilers to describe the current profiling
  * run. It may be used for part of the filename of the output, but the
  * specifics depend on the profiler. Many profilers will ignore it. Passing in
- * nullptr is legal; some profilers may use it to output to stdout or similar.
+ * NULL is legal; some profilers may use it to output to stdout or similar.
  *
  * Returns true if no profilers fail to start.
  */
-extern JS_PUBLIC_API(bool)
-JS_StartProfiling(const char *profileName, pid_t pid);
+extern JS_PUBLIC_API(JSBool)
+JS_StartProfiling(const char *profileName);
 
 /**
  * Stop any profilers that were previously started with JS_StartProfiling.
  * Returns true if no profilers fail to stop.
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API(JSBool)
 JS_StopProfiling(const char *profileName);
 
 /**
  * Write the current profile data to the given file, if applicable to whatever
  * profiler is being used.
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API(JSBool)
 JS_DumpProfile(const char *outfile, const char *profileName);
 
 /**
@@ -52,13 +46,13 @@ JS_DumpProfile(const char *outfile, const char *profileName);
  * whether any profilers failed to pause. (Profilers that do not support
  * pause/resume do not count.)
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API(JSBool)
 JS_PauseProfilers(const char *profileName);
 
 /**
  * Resume suspended profilers
  */
-extern JS_PUBLIC_API(bool)
+extern JS_PUBLIC_API(JSBool)
 JS_ResumeProfilers(const char *profileName);
 
 /**
@@ -71,23 +65,23 @@ JS_UnsafeGetLastProfilingError();
 
 #ifdef MOZ_CALLGRIND
 
-extern JS_FRIEND_API(bool)
+extern JS_FRIEND_API(JSBool)
 js_StopCallgrind();
 
-extern JS_FRIEND_API(bool)
+extern JS_FRIEND_API(JSBool)
 js_StartCallgrind();
 
-extern JS_FRIEND_API(bool)
+extern JS_FRIEND_API(JSBool)
 js_DumpCallgrind(const char *outfile);
 
 #endif /* MOZ_CALLGRIND */
 
 #ifdef __linux__
 
-extern JS_FRIEND_API(bool)
+extern JS_FRIEND_API(JSBool)
 js_StartPerf();
 
-extern JS_FRIEND_API(bool)
+extern JS_FRIEND_API(JSBool)
 js_StopPerf();
 
 #endif /* __linux__ */

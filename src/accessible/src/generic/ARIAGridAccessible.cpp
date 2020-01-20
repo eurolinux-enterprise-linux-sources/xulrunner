@@ -12,7 +12,6 @@
 #include "States.h"
 
 #include "nsIMutableArray.h"
-#include "nsIPersistentProperties2.h"
 #include "nsComponentManagerUtils.h"
 
 using namespace mozilla;
@@ -35,12 +34,12 @@ ARIAGridAccessible::
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED(ARIAGridAccessible,
-                            Accessible,
-                            nsIAccessibleTable)
+NS_IMPL_ISUPPORTS_INHERITED1(ARIAGridAccessible,
+                             Accessible,
+                             nsIAccessibleTable)
 
 ////////////////////////////////////////////////////////////////////////////////
-// Accessible
+//nsAccessNode
 
 void
 ARIAGridAccessible::Shutdown()
@@ -356,7 +355,7 @@ ARIAGridAccessible::SelectRow(uint32_t aRowIdx)
   AccIterator rowIter(this, filters::GetRow);
 
   Accessible* row = nullptr;
-  for (uint32_t rowIdx = 0; (row = rowIter.Next()); rowIdx++) {
+  for (int32_t rowIdx = 0; (row = rowIter.Next()); rowIdx++) {
     DebugOnly<nsresult> rv = SetARIASelected(row, rowIdx == aRowIdx);
     NS_ASSERTION(NS_SUCCEEDED(rv), "SetARIASelected() Shouldn't fail!");
   }
@@ -466,8 +465,8 @@ ARIAGridAccessible::SetARIASelected(Accessible* aAccessible,
     rv = content->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
                           NS_LITERAL_STRING("true"), aNotify);
   else
-    rv = content->SetAttr(kNameSpaceID_None, nsGkAtoms::aria_selected,
-                          NS_LITERAL_STRING("false"), aNotify);
+    rv = content->UnsetAttr(kNameSpaceID_None,
+                            nsGkAtoms::aria_selected, aNotify);
 
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -534,15 +533,14 @@ ARIAGridCellAccessible::
   ARIAGridCellAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc), xpcAccessibleTableCell(this)
 {
-  mGenericTypes |= eTableCell;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED(ARIAGridCellAccessible,
-                            HyperTextAccessible,
-                            nsIAccessibleTableCell)
+NS_IMPL_ISUPPORTS_INHERITED1(ARIAGridCellAccessible,
+                             HyperTextAccessible,
+                             nsIAccessibleTableCell)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIAccessibleTableCell

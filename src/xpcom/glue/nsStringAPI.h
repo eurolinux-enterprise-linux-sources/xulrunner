@@ -16,7 +16,6 @@
 #define nsStringAPI_h__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/Char16.h"
 
 #include "nsXPCOMStrings.h"
 #include "nsISupportsImpl.h"
@@ -33,7 +32,7 @@ CaseInsensitiveCompare(const char *a, const char *b,
 class nsAString
 {
 public:
-  typedef char16_t  char_type;
+  typedef PRUnichar  char_type;
   typedef nsAString  self_type;
   typedef uint32_t   size_type;
   typedef uint32_t   index_type;
@@ -116,12 +115,6 @@ public:
   {
     NS_StringSetData(*this, &aChar, 1);
   }
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  NS_HIDDEN_(void) Assign(char16ptr_t aData, size_type aLength = UINT32_MAX)
-  {
-    NS_StringSetData(*this, aData, aLength);
-  }
-#endif
 
   NS_HIDDEN_(void) AssignLiteral(const char *aStr);
   NS_HIDDEN_(void) AssignASCII(const char *aStr) { AssignLiteral(aStr); }
@@ -129,9 +122,6 @@ public:
   NS_HIDDEN_(self_type&) operator=(const self_type& aString) { Assign(aString);   return *this; }
   NS_HIDDEN_(self_type&) operator=(const char_type* aPtr)    { Assign(aPtr);      return *this; }
   NS_HIDDEN_(self_type&) operator=(char_type aChar)          { Assign(aChar);     return *this; }
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  NS_HIDDEN_(self_type&) operator=(char16ptr_t aPtr)         { Assign(aPtr);      return *this; }
-#endif
 
   NS_HIDDEN_(void) Replace( index_type cutStart, size_type cutLength, const char_type* data, size_type length = size_type(-1) )
   {
@@ -152,9 +142,6 @@ public:
 
   NS_HIDDEN_(void) Append( char_type c )                                                              { Replace(size_type(-1), 0, c); }
   NS_HIDDEN_(void) Append( const char_type* data, size_type length = size_type(-1) )                  { Replace(size_type(-1), 0, data, length); }
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  NS_HIDDEN_(void) Append( char16ptr_t data, size_type length = size_type(-1) )                       { Append(static_cast<const char16_t*>(data), length); }
-#endif
   NS_HIDDEN_(void) Append( const self_type& readable )                                                { Replace(size_type(-1), 0, readable); }
   NS_HIDDEN_(void) AppendLiteral( const char *aASCIIStr );
   NS_HIDDEN_(void) AppendASCII( const char *aASCIIStr )                                               { AppendLiteral(aASCIIStr); }
@@ -233,12 +220,6 @@ public:
   {
     return Equals(other);
   }
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  NS_HIDDEN_(bool) operator == (char16ptr_t other) const
-  {
-    return Equals(other);
-  }
-#endif
 
   NS_HIDDEN_(bool) operator >= (const self_type &other) const
   {
@@ -826,21 +807,15 @@ public:
   {
     NS_StringContainerInit2(*this, aData, aLength, 0);
   }
-
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  explicit
-  nsString(char16ptr_t aData, size_type aLength = UINT32_MAX)
-    : nsString(static_cast<const char16_t*>(aData), aLength) {}
-#endif
   
   ~nsString()
   {
     NS_StringContainerFinish(*this);
   }
 
-  char16ptr_t get() const
+  const char_type* get() const
   {
-    return char16ptr_t(BeginReading());
+    return BeginReading();
   }
 
   self_type& operator=(const self_type& aString)              { Assign(aString);   return *this; }
@@ -940,13 +915,6 @@ public:
   nsDependentString(const char_type* aData, size_type aLength = UINT32_MAX)
     : nsString(aData, aLength, NS_CSTRING_CONTAINER_INIT_DEPEND)
   {}
-
-#ifdef MOZ_USE_CHAR16_WRAPPER
-  explicit
-  nsDependentString(char16ptr_t aData, size_type aLength = UINT32_MAX)
-    : nsDependentString(static_cast<const char16_t*>(aData), aLength)
-  {}
-#endif
 
   void Rebind(const char_type* aData, size_type aLength = UINT32_MAX)
   {
@@ -1070,7 +1038,7 @@ public:
   }
 
   explicit
-  NS_ConvertUTF16toUTF8(const char16_t* aData, uint32_t aLength = UINT32_MAX)
+  NS_ConvertUTF16toUTF8(const PRUnichar* aData, uint32_t aLength = UINT32_MAX)
   {
     NS_UTF16ToCString(nsDependentString(aData, aLength),
                       NS_CSTRING_ENCODING_UTF8, *this);
@@ -1092,7 +1060,7 @@ public:
   }
 
   explicit
-  NS_LossyConvertUTF16toASCII(const char16_t* aData, uint32_t aLength = UINT32_MAX)
+  NS_LossyConvertUTF16toASCII(const PRUnichar* aData, uint32_t aLength = UINT32_MAX)
   {
     NS_UTF16ToCString(nsDependentString(aData, aLength),
                       NS_CSTRING_ENCODING_ASCII, *this);
@@ -1105,21 +1073,49 @@ private:
 
 /**
  * literal strings
+ *
+ * NOTE: HAVE_CPP_2BYTE_WCHAR_T may be automatically defined for some platforms
+ * in nscore.h.  On other platforms, it may be defined in xpcom-config.h.
+ * Under GCC, this define should only be set if compiling with -fshort-wchar.
  */
-static_assert(sizeof(char16_t) == 2, "size of char16_t must be 2");
-static_assert(char16_t(-1) > char16_t(0), "char16_t must be unsigned");
 
-#define NS_MULTILINE_LITERAL_STRING(s)          nsDependentString(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
-#define NS_MULTILINE_LITERAL_STRING_INIT(n,s)   n(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
-#define NS_NAMED_MULTILINE_LITERAL_STRING(n,s)  const nsDependentString n(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
-typedef nsDependentString nsLiteralString;
+#if defined(HAVE_CPP_CHAR16_T) || defined(HAVE_CPP_2BYTE_WCHAR_T)
+#if defined(HAVE_CPP_CHAR16_T)
+  MOZ_STATIC_ASSERT(sizeof(char16_t) == 2, "size of char16_t must be 2");
+  #define NS_LL(s)                                u##s
+#else
+  MOZ_STATIC_ASSERT(sizeof(wchar_t) == 2, "size of wchar_t must be 2");
+  #define NS_LL(s)                                L##s
+#endif
+  #define NS_MULTILINE_LITERAL_STRING(s)          nsDependentString(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
+  #define NS_MULTILINE_LITERAL_STRING_INIT(n,s)   n(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
+  #define NS_NAMED_MULTILINE_LITERAL_STRING(n,s)  const nsDependentString n(reinterpret_cast<const nsAString::char_type*>(s), uint32_t((sizeof(s)/2)-1))
+  typedef nsDependentString nsLiteralString;
+#else
+  #define NS_LL(s)                                s
+  #define NS_MULTILINE_LITERAL_STRING(s)          NS_ConvertASCIItoUTF16(s, uint32_t(sizeof(s)-1))
+  #define NS_MULTILINE_LITERAL_STRING_INIT(n,s)   n(s, uint32_t(sizeof(s)-1))
+  #define NS_NAMED_MULTILINE_LITERAL_STRING(n,s)  const NS_ConvertASCIItoUTF16 n(s, uint32_t(sizeof(s)-1))
+  typedef NS_ConvertASCIItoUTF16 nsLiteralString;
+#endif
 
-/* Check that char16_t is unsigned */
-static_assert(char16_t(-1) > char16_t(0), "char16_t is by definition an unsigned type");
+/* Check that PRUnichar is unsigned */
+MOZ_STATIC_ASSERT(PRUnichar(-1) > PRUnichar(0), "PRUnichar is by definition an unsigned type");
 
-#define NS_LITERAL_STRING(s)                      static_cast<const nsString&>(NS_MULTILINE_LITERAL_STRING(MOZ_UTF16(s)))
-#define NS_LITERAL_STRING_INIT(n,s)               NS_MULTILINE_LITERAL_STRING_INIT(n, MOZ_UTF16(s))
-#define NS_NAMED_LITERAL_STRING(n,s)              NS_NAMED_MULTILINE_LITERAL_STRING(n, MOZ_UTF16(s))
+/*
+ * Macro arguments used in concatenation or stringification won't be expanded.
+ * Therefore, in order for |NS_L(FOO)| to work as expected (which is to expand
+ * |FOO| before doing whatever |NS_L| needs to do to it) a helper macro needs
+ * to be inserted in between to allow the macro argument to expand.
+ * See "3.10.6 Separate Expansion of Macro Arguments" of the CPP manual for a
+ * more accurate and precise explanation.
+ */
+
+#define NS_L(s)                                   NS_LL(s)
+
+#define NS_LITERAL_STRING(s)                      static_cast<const nsString&>(NS_MULTILINE_LITERAL_STRING(NS_LL(s)))
+#define NS_LITERAL_STRING_INIT(n,s)               NS_MULTILINE_LITERAL_STRING_INIT(n, NS_LL(s))
+#define NS_NAMED_LITERAL_STRING(n,s)              NS_NAMED_MULTILINE_LITERAL_STRING(n, NS_LL(s))
 
 #define NS_LITERAL_CSTRING(s)                     static_cast<const nsDependentCString&>(nsDependentCString(s, uint32_t(sizeof(s)-1)))
 #define NS_LITERAL_CSTRING_INIT(n,s)              n(s, uint32_t(sizeof(s)-1))
@@ -1131,7 +1127,7 @@ typedef nsDependentCString nsLiteralCString;
 /**
  * getter_Copies support
  *
- *    NS_IMETHOD GetBlah(char16_t**);
+ *    NS_IMETHOD GetBlah(PRUnichar**);
  *
  *    void some_function()
  *    {
@@ -1144,7 +1140,7 @@ typedef nsDependentCString nsLiteralCString;
 class nsGetterCopies
 {
 public:
-  typedef char16_t char_type;
+  typedef PRUnichar char_type;
 
   nsGetterCopies(nsString& aStr)
     : mString(aStr), mData(nullptr)
@@ -1291,7 +1287,7 @@ private:
  * Various nsDependentC?Substring constructor functions
  */
 
-// char16_t
+// PRUnichar
 inline const nsDependentSubstring
 Substring( const nsAString& str, uint32_t startPos )
 {
@@ -1305,14 +1301,14 @@ Substring( const nsAString& str, uint32_t startPos, uint32_t length )
 }
 
 inline const nsDependentSubstring
-Substring( const char16_t* start, const char16_t* end )
+Substring( const PRUnichar* start, const PRUnichar* end )
 {
   NS_ABORT_IF_FALSE(uint32_t(end - start) == uintptr_t(end - start), "string too long");
   return nsDependentSubstring(start, uint32_t(end - start));
 }
 
 inline const nsDependentSubstring
-Substring( const char16_t* start, uint32_t length )
+Substring( const PRUnichar* start, uint32_t length )
 {
   return nsDependentSubstring(start, length);
 }
@@ -1440,7 +1436,7 @@ ToNewCString(const nsACString& aStr)
   return NS_CStringCloneData(aStr);
 }
 
-inline char16_t*
+inline PRUnichar*
 ToNewUnicode(const nsAString& aStr)
 {
   return NS_StringCloneData(aStr);

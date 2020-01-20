@@ -6,11 +6,12 @@
 #include "nsRadioVisitor.h"
 #include "nsAutoPtr.h"
 #include "mozilla/dom/HTMLInputElement.h"
+#include "nsEventStates.h"
 #include "nsIConstraintValidation.h"
 
 using namespace mozilla::dom;
 
-NS_IMPL_ISUPPORTS(nsRadioVisitor, nsIRadioVisitor)
+NS_IMPL_ISUPPORTS1(nsRadioVisitor, nsIRadioVisitor)
 
 bool
 nsRadioSetCheckedChangedVisitor::Visit(nsIFormControl* aRadio)

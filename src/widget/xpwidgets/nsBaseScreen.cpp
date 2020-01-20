@@ -9,7 +9,7 @@
 
 #include "nsBaseScreen.h"
 
-NS_IMPL_ISUPPORTS(nsBaseScreen, nsIScreen)
+NS_IMPL_ISUPPORTS1(nsBaseScreen, nsIScreen)
 
 nsBaseScreen::nsBaseScreen()
 {
@@ -67,12 +67,9 @@ void
 nsBaseScreen::CheckMinimumBrightness()
 {
   uint32_t brightness = nsIScreen::BRIGHTNESS_LEVELS;
-  for (int32_t i = nsIScreen::BRIGHTNESS_LEVELS - 1; i >=0; i--) {
-    if (mBrightnessLocks[i] > 0) {
+  for (uint32_t i = 0; i < nsIScreen::BRIGHTNESS_LEVELS; i++)
+    if (mBrightnessLocks[i] > 0)
       brightness = i;
-      break;
-    }
-  }
 
   ApplyMinimumBrightness(brightness);
 }

@@ -4,37 +4,17 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
-XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
+TEST_DIRS += ['tests']
 
 XPIDL_SOURCES += [
     'nsIIdentityCryptoService.idl',
 ]
 
-XPIDL_MODULE = 'identity'
+MODULE = 'identity'
 
-SOURCES += [
+CPP_SOURCES += [
     'IdentityCryptoService.cpp',
 ]
 
-JS_MODULES_PATH = 'modules/identity'
+LIBRARY_NAME = 'identity'
 
-EXTRA_JS_MODULES += [
-    'Identity.jsm',
-    'IdentityProvider.jsm',
-    'IdentityStore.jsm',
-    'IdentityUtils.jsm',
-    'jwcrypto.jsm',
-    'LogUtils.jsm',
-    'MinimalIdentity.jsm',
-    'RelyingParty.jsm',
-    'Sandbox.jsm',
-]
-
-EXTRA_PP_JS_MODULES += [
-    'FirefoxAccounts.jsm',
-]
-
-FAIL_ON_WARNINGS = True
-
-FINAL_LIBRARY = 'xul'

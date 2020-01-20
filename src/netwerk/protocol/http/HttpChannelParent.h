@@ -8,7 +8,6 @@
 #ifndef mozilla_net_HttpChannelParent_h
 #define mozilla_net_HttpChannelParent_h
 
-#include "ADivertableParentChannel.h"
 #include "nsHttp.h"
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/net/PHttpChannelParent.h"
@@ -18,7 +17,7 @@
 #include "nsIProgressEventSink.h"
 #include "nsHttpChannel.h"
 
-class nsICacheEntry;
+class nsICacheEntryDescriptor;
 class nsIAssociatedContentSecurity;
 
 namespace mozilla {
@@ -35,7 +34,6 @@ class HttpChannelParent : public PHttpChannelParent
                         , public nsIParentRedirectingChannel
                         , public nsIProgressEventSink
                         , public nsIInterfaceRequestor
-                        , public ADivertableParentChannel
 {
 public:
   NS_DECL_ISUPPORTS
@@ -53,19 +51,6 @@ public:
 
   bool Init(const HttpChannelCreationArgs& aOpenArgs);
 
-  // ADivertableParentChannel functions.
-  void DivertTo(nsIStreamListener *aListener) MOZ_OVERRIDE;
-  nsresult SuspendForDiversion() MOZ_OVERRIDE;
-
-  // Calls OnStartRequest for "DivertTo" listener, then notifies child channel
-  // that it should divert OnDataAvailable and OnStopRequest calls to this
-  // parent channel.
-  void StartDiversion();
-
-  // Handles calling OnStart/Stop if there are errors during diversion.
-  // Called asynchronously from FailDiversion.
-  void NotifyDiversionFailed(nsresult aErrorCode, bool aSkipResume = true);
-
 protected:
   // used to connect redirected-to channel in parent with just created
   // ChildChannel.  Used during redirects.
@@ -78,7 +63,7 @@ protected:
                    const OptionalURIParams&   internalRedirectUri,
                    const uint32_t&            loadFlags,
                    const RequestHeaderTuples& requestHeaders,
-                   const nsCString&           requestMethod,
+                   const nsHttpAtom&          requestMethod,
                    const OptionalInputStreamParams& uploadStream,
                    const bool&                uploadStreamHasHeaders,
                    const uint16_t&            priority,
@@ -90,40 +75,30 @@ protected:
                    const nsCString&           entityID,
                    const bool&                chooseApplicationCache,
                    const nsCString&           appCacheClientID,
-                   const bool&                allowSpdy,
-                   const OptionalFileDescriptorSet& aFds);
+                   const bool&                allowSpdy);
 
-  virtual bool RecvSetPriority(const uint16_t& priority) MOZ_OVERRIDE;
-  virtual bool RecvSetCacheTokenCachedCharset(const nsCString& charset) MOZ_OVERRIDE;
-  virtual bool RecvSuspend() MOZ_OVERRIDE;
-  virtual bool RecvResume() MOZ_OVERRIDE;
-  virtual bool RecvCancel(const nsresult& status) MOZ_OVERRIDE;
+  virtual bool RecvSetPriority(const uint16_t& priority);
+  virtual bool RecvSetCacheTokenCachedCharset(const nsCString& charset);
+  virtual bool RecvSuspend();
+  virtual bool RecvResume();
+  virtual bool RecvCancel(const nsresult& status);
   virtual bool RecvRedirect2Verify(const nsresult& result,
                                    const RequestHeaderTuples& changedHeaders,
-                                   const OptionalURIParams& apiRedirectUri) MOZ_OVERRIDE;
+                                   const OptionalURIParams&   apiRedirectUri);
   virtual bool RecvUpdateAssociatedContentSecurity(const int32_t& broken,
-                                                   const int32_t& no) MOZ_OVERRIDE;
-  virtual bool RecvDocumentChannelCleanup() MOZ_OVERRIDE;
-  virtual bool RecvMarkOfflineCacheEntryAsForeign() MOZ_OVERRIDE;
-  virtual bool RecvDivertOnDataAvailable(const nsCString& data,
-                                         const uint64_t& offset,
-                                         const uint32_t& count) MOZ_OVERRIDE;
-  virtual bool RecvDivertOnStopRequest(const nsresult& statusCode) MOZ_OVERRIDE;
-  virtual bool RecvDivertComplete() MOZ_OVERRIDE;
-  virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
+                                                   const int32_t& no);
+  virtual bool RecvDocumentChannelCleanup();
+  virtual bool RecvMarkOfflineCacheEntryAsForeign();
 
-  // Supporting function for ADivertableParentChannel.
-  nsresult ResumeForDiversion();
+  virtual void ActorDestroy(ActorDestroyReason why);
 
-  // Asynchronously calls NotifyDiversionFailed.
-  void FailDiversion(nsresult aErrorCode, bool aSkipResume = true);
-
-  friend class HttpChannelParentListener;
+protected:
+  friend class mozilla::net::HttpChannelParentListener;
   nsRefPtr<mozilla::dom::TabParent> mTabParent;
 
 private:
-  nsRefPtr<nsHttpChannel>       mChannel;
-  nsCOMPtr<nsICacheEntry>       mCacheEntry;
+  nsCOMPtr<nsIChannel>                    mChannel;
+  nsCOMPtr<nsICacheEntryDescriptor>       mCacheDescriptor;
   nsCOMPtr<nsIAssociatedContentSecurity>  mAssociatedContentSecurity;
   bool mIPCClosed;                // PHttpChannel actor has been Closed()
 
@@ -145,20 +120,6 @@ private:
   PBOverrideStatus mPBOverride;
 
   nsCOMPtr<nsILoadContext> mLoadContext;
-  nsRefPtr<nsHttpHandler>  mHttpHandler;
-
-  nsRefPtr<HttpChannelParentListener> mParentListener;
-  // Set to the canceled status value if the main channel was canceled.
-  nsresult mStatus;
-  // Once set, no OnStart/OnData/OnStop calls should be accepted; conversely, it
-  // must be set when RecvDivertOnData/~DivertOnStop/~DivertComplete are
-  // received from the child channel.
-  bool mDivertingFromChild;
-
-  // Set if OnStart|StopRequest was called during a diversion from the child.
-  bool mDivertedOnStartRequest;
-
-  bool mSuspendedForDiversion;
 };
 
 } // namespace net

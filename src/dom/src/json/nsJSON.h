@@ -6,6 +6,7 @@
 #ifndef nsJSON_h__
 #define nsJSON_h__
 
+#include "jsapi.h"
 #include "nsIJSON.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
@@ -26,17 +27,17 @@ public:
   virtual ~nsJSONWriter();
   nsresult SetCharset(const char *aCharset);
   nsCOMPtr<nsIOutputStream> mStream;
-  nsresult Write(const char16_t *aBuffer, uint32_t aLength);
+  nsresult Write(const PRUnichar *aBuffer, uint32_t aLength);
   nsString mOutputString;
   bool DidWrite();
   void FlushBuffer();
 
 protected:
-  char16_t *mBuffer;
+  PRUnichar *mBuffer;
   uint32_t mBufferCount;
   bool mDidWrite;
   nsresult WriteToStream(nsIOutputStream *aStream, nsIUnicodeEncoder *encoder,
-                         const char16_t *aBuffer, uint32_t aLength);
+                         const PRUnichar *aBuffer, uint32_t aLength);
 
   nsCOMPtr<nsIUnicodeEncoder> mEncoder;
 };
@@ -59,7 +60,7 @@ protected:
                           nsIInputStream* aStream,
                           int32_t aContentLength,
                           bool aNeedsConverter,
-                          JS::MutableHandle<JS::Value> aRetVal);
+                          JS::Value* aRetVal);
   nsCOMPtr<nsIURI> mURI;
 };
 
@@ -82,10 +83,10 @@ protected:
   JS::Value *mRootVal;
   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
   nsCString mSniffBuffer;
-  nsTArray<char16_t> mBufferedChars;
+  nsTArray<PRUnichar> mBufferedChars;
   nsresult ProcessBytes(const char* aBuffer, uint32_t aByteLength);
   nsresult ConsumeConverted(const char* aBuffer, uint32_t aByteLength);
-  nsresult Consume(const char16_t *data, uint32_t len);
+  nsresult Consume(const PRUnichar *data, uint32_t len);
 };
 
 #endif

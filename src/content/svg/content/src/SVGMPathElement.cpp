@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "mozilla/dom/SVGMPathElement.h"
 #include "nsDebug.h"
@@ -11,7 +11,6 @@
 #include "mozilla/dom/SVGPathElement.h"
 #include "nsContentUtils.h"
 #include "mozilla/dom/SVGMPathElementBinding.h"
-#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(MPath)
 
@@ -19,9 +18,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGMPathElement::WrapNode(JSContext *aCx)
+SVGMPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGMPathElementBinding::Wrap(aCx, this);
+  return SVGMPathElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::StringInfo SVGMPathElement::sStringInfo[1] =
@@ -30,8 +29,6 @@ nsSVGElement::StringInfo SVGMPathElement::sStringInfo[1] =
 };
 
 // Cycle collection magic -- based on nsSVGUseElement
-NS_IMPL_CYCLE_COLLECTION_CLASS(SVGMPathElement)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGMPathElement,
                                                 SVGMPathElementBase)
   tmp->UnlinkHrefTarget(false);
@@ -49,15 +46,25 @@ NS_IMPL_ADDREF_INHERITED(SVGMPathElement,SVGMPathElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGMPathElement,SVGMPathElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGMPathElement)
-  NS_INTERFACE_TABLE_INHERITED(SVGMPathElement, nsIDOMNode, nsIDOMElement,
-                               nsIDOMSVGElement,
-                               nsIMutationObserver)
+  NS_INTERFACE_TABLE_INHERITED4(SVGMPathElement, nsIDOMNode, nsIDOMElement,
+                                nsIDOMSVGElement,
+                                nsIMutationObserver)
 NS_INTERFACE_TABLE_TAIL_INHERITING(SVGMPathElementBase)
 
 // Constructor
-SVGMPathElement::SVGMPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+#ifdef _MSC_VER
+// Disable "warning C4355: 'this' : used in base member initializer list".
+// We can ignore that warning because we know that mHrefTarget's constructor 
+// doesn't dereference the pointer passed to it.
+#pragma warning(push)
+#pragma warning(disable:4355)
+#endif
+SVGMPathElement::SVGMPathElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGMPathElementBase(aNodeInfo),
-    mHrefTarget(MOZ_THIS_IN_INITIALIZER_LIST())
+    mHrefTarget(this)
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 {
 }
 

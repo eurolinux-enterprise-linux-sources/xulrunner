@@ -30,7 +30,7 @@ interface HTMLMediaElement : HTMLElement {
   readonly attribute unsigned short networkState;
   [SetterThrows]
            attribute DOMString preload;
-  [NewObject]
+  [Creator]
   readonly attribute TimeRanges buffered;
   void load();
   DOMString canPlayType(DOMString type);
@@ -47,8 +47,7 @@ interface HTMLMediaElement : HTMLElement {
   // playback state
   [SetterThrows]
            attribute double currentTime;
-  [Throws]
-  void fastSeek(double time);
+  // TODO: Bug 847375 - void fastSeek(double time);
   readonly attribute unrestricted double duration;
   // TODO: Bug 847376 - readonly attribute any startDate;
   readonly attribute boolean paused;
@@ -56,9 +55,9 @@ interface HTMLMediaElement : HTMLElement {
            attribute double defaultPlaybackRate;
   [SetterThrows]
            attribute double playbackRate;
-  [NewObject]
+  [Creator]
   readonly attribute TimeRanges played;
-  [NewObject]
+  [Creator]
   readonly attribute TimeRanges seekable;
   readonly attribute boolean ended;
   [SetterThrows]
@@ -89,7 +88,7 @@ interface HTMLMediaElement : HTMLElement {
   //readonly attribute AudioTrackList audioTracks;
   //readonly attribute VideoTrackList videoTracks;
   [Pref="media.webvtt.enabled"]
-  readonly attribute TextTrackList? textTracks;
+  readonly attribute TextTrackList textTracks;
   [Pref="media.webvtt.enabled"]
   TextTrack addTextTrack(TextTrackKind kind,
                          optional DOMString label = "",
@@ -102,17 +101,25 @@ partial interface HTMLMediaElement {
   attribute boolean mozPreservesPitch;
   readonly attribute boolean mozAutoplayEnabled;
 
-  // NB: for internal use with the video controls:
-  [Func="IsChromeOrXBL"] attribute boolean mozMediaStatisticsShowing;
-  [Func="IsChromeOrXBL"] attribute boolean mozAllowCasting;
-  [Func="IsChromeOrXBL"] attribute boolean mozIsCasting;
-
   // Mozilla extension: stream capture
   [Throws]
   MediaStream mozCaptureStream();
   [Throws]
   MediaStream mozCaptureStreamUntilEnded();
   readonly attribute boolean mozAudioCaptured;
+
+  // Mozilla extension: extra stream metadata information, used as part
+  // of MozAudioAvailable events and the mozWriteAudio() method.  The
+  // mozFrameBufferLength method allows for the size of the framebuffer
+  // used within MozAudioAvailable events to be changed.  The new size must
+  // be between 512 and 16384.  The default size, for a  media element with
+  // audio is (mozChannels * 1024).
+  [GetterThrows]
+  readonly attribute unsigned long mozChannels;
+  [GetterThrows]
+  readonly attribute unsigned long mozSampleRate;
+  [Throws]
+           attribute unsigned long mozFrameBufferLength;
 
   // Mozilla extension: return embedded metadata from the stream as a
   // JSObject with key:value pairs for each tag. This can be used by
@@ -126,9 +133,39 @@ partial interface HTMLMediaElement {
   readonly attribute double mozFragmentEnd;
 
   // Mozilla extension: an audio channel type for media elements.
-  // Read AudioChannel.webidl for more information about this attribute.
+  // An exception is thrown if the app tries to change the audio channel type
+  // without the permission (manifest file for B2G apps).
+  // The supported values are:
+  // * normal (default value)
+  //   Automatically paused if "notification" or higher priority channel
+  //   is played
+  //   Use case: normal applications
+  // * content
+  //   Automatically paused if "notification" or higher priority channel
+  //   is played. Also paused if another app starts using "content"
+  //   channel. Using this channel never affects applications using
+  //   the "normal" channel.
+  //   Use case: video/audio players
+  // * notification
+  //   Automatically paused if "alarm" or higher priority channel is played.
+  //   Use case: New email, incoming SMS
+  // * alarm
+  //   Automatically paused if "telephony" or higher priority channel is
+  //   played.
+  //   User case: Alarm clock, calendar alarms
+  // * telephony
+  //   Automatically paused if "ringer" or higher priority
+  //   channel is played.
+  //   Use case: dialer, voip
+  // * ringer
+  //   Automatically paused if "publicnotification" or higher priority
+  //   channel is played.
+  //   Use case: dialer, voip
+  // * publicnotification
+  //   Always plays in speaker, even when headphones are plugged in.
+  //   Use case: Camera shutter sound.
   [SetterThrows]
-  attribute AudioChannel mozAudioChannelType;
+  attribute DOMString mozAudioChannelType;
 
   // In addition the media element has this new events:
   // * onmozinterruptbegin - called when the media element is interrupted

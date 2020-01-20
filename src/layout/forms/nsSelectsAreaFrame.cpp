@@ -3,18 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsSelectsAreaFrame.h"
+#include "nsCOMPtr.h"
+#include "nsIDOMHTMLOptionElement.h"
 #include "nsIContent.h"
 #include "nsListControlFrame.h"
 #include "nsDisplayList.h"
 
 nsIFrame*
-NS_NewSelectsAreaFrame(nsIPresShell* aShell, nsStyleContext* aContext, nsFrameState aFlags)
+NS_NewSelectsAreaFrame(nsIPresShell* aShell, nsStyleContext* aContext, uint32_t aFlags)
 {
   nsSelectsAreaFrame* it = new (aShell) nsSelectsAreaFrame(aContext);
 
-  // We need NS_BLOCK_FLOAT_MGR to ensure that the options inside the select
-  // aren't expanded by right floats outside the select.
-  it->SetFlags(aFlags | NS_BLOCK_FLOAT_MGR);
+  if (it) {
+    // We need NS_BLOCK_FLOAT_MGR to ensure that the options inside the select
+    // aren't expanded by right floats outside the select.
+    it->SetFlags(aFlags | NS_BLOCK_FLOAT_MGR);
+  }
 
   return it;
 }
@@ -151,7 +155,7 @@ nsSelectsAreaFrame::BuildDisplayListInternal(nsDisplayListBuilder*   aBuilder,
   }
 }
 
-nsresult 
+NS_IMETHODIMP 
 nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext, 
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState, 
@@ -189,7 +193,7 @@ nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext,
     // comboboxes, we'll also need it if our height changed.  If we're going
     // to do a second pass, suppress scrollbar updates for this pass.
     if (newHeightOfARow != mHeightOfARow ||
-        (isInDropdownMode && (oldHeight != aDesiredSize.Height() ||
+        (isInDropdownMode && (oldHeight != aDesiredSize.height ||
                               oldHeight != GetSize().height))) {
       mHeightOfARow = newHeightOfARow;
       list->SetSuppressScrollbarUpdate(true);

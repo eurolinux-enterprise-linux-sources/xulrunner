@@ -4,6 +4,8 @@
 
 #include "nsINIParserImpl.h"
 
+#include "nsIFile.h"
+
 #include "nsINIParser.h"
 #include "nsStringEnumerator.h"
 #include "nsTArray.h"
@@ -24,9 +26,9 @@ private:
   nsINIParser mParser;
 };
 
-NS_IMPL_ISUPPORTS(nsINIParserFactory,
-                  nsIINIParserFactory,
-                  nsIFactory)
+NS_IMPL_ISUPPORTS2(nsINIParserFactory,
+                   nsIINIParserFactory,
+                   nsIFactory)
 
 NS_IMETHODIMP
 nsINIParserFactory::CreateINIParser(nsIFile* aINIFile,
@@ -34,7 +36,7 @@ nsINIParserFactory::CreateINIParser(nsIFile* aINIFile,
 {
   *aResult = nullptr;
 
-  nsRefPtr<nsINIParserImpl> p(new nsINIParserImpl());
+  nsCOMPtr<nsINIParserImpl> p(new nsINIParserImpl());
   if (!p)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -51,8 +53,7 @@ nsINIParserFactory::CreateInstance(nsISupports* aOuter,
                                    REFNSIID aIID,
                                    void **aResult)
 {
-  if (NS_WARN_IF(aOuter))
-    return NS_ERROR_NO_AGGREGATION;
+  NS_ENSURE_NO_AGGREGATION(aOuter);
 
   // We are our own singleton.
   return QueryInterface(aIID, aResult);
@@ -64,8 +65,8 @@ nsINIParserFactory::LockFactory(bool aLock)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(nsINIParserImpl,
-                  nsIINIParser)
+NS_IMPL_ISUPPORTS1(nsINIParserImpl,
+                   nsIINIParser)
 
 static bool
 SectionCB(const char* aSection, void *aClosure)

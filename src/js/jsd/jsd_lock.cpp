@@ -56,15 +56,14 @@ struct JSDStaticLock
 JS_BEGIN_MACRO                                                                \
     out = (void*) PR_GetCurrentThread();                                      \
     if(!out)                                                                  \
-        out = (void*) JS_AttachThread(PR_USER_THREAD, PR_PRIORITY_NORMAL,     \
-                                      nullptr);                               \
-    MOZ_ASSERT(out);                                                          \
+        out = (void*) JS_AttachThread(PR_USER_THREAD,PR_PRIORITY_NORMAL,NULL);\
+    JS_ASSERT(out);                                                           \
 JS_END_MACRO
 #else
 #define _CURRENT_THREAD(out)             \
 JS_BEGIN_MACRO                           \
     out = (void*) PR_GetCurrentThread(); \
-    MOZ_ASSERT(out);                     \
+    JS_ASSERT(out);                      \
 JS_END_MACRO
 #endif
 
@@ -72,10 +71,10 @@ JS_END_MACRO
 #define JSD_LOCK_SIG 0x10CC10CC
 void ASSERT_VALID_LOCK(JSDStaticLock* lock)
 {
-    MOZ_ASSERT(lock);
-    MOZ_ASSERT(lock->lock);
-    MOZ_ASSERT(lock->count >= 0);
-    MOZ_ASSERT(lock->sig == (uint16_t) JSD_LOCK_SIG);
+    JS_ASSERT(lock);
+    JS_ASSERT(lock->lock);
+    JS_ASSERT(lock->count >= 0);
+    JS_ASSERT(lock->sig == (uint16_t) JSD_LOCK_SIG);
 }    
 #else
 #define ASSERT_VALID_LOCK(x) ((void)0)
@@ -92,7 +91,7 @@ jsd_CreateLock()
         if(lock)
         {
             free(lock);
-            lock = nullptr;
+            lock = NULL;
         }
     }
 #ifdef DEBUG
@@ -111,13 +110,13 @@ jsd_Lock(JSDStaticLock* lock)
     if(lock->owner == me)
     {
         lock->count++;
-        MOZ_ASSERT(lock->count > 1);
+        JS_ASSERT(lock->count > 1);
     }
     else
     {
         PR_Lock(lock->lock);            /* this can block... */
-        MOZ_ASSERT(lock->owner == 0);
-        MOZ_ASSERT(lock->count == 0);
+        JS_ASSERT(lock->owner == 0);
+        JS_ASSERT(lock->count == 0);
         lock->count = 1;
         lock->owner = me;
     }
@@ -131,28 +130,28 @@ jsd_Unlock(JSDStaticLock* lock)
     _CURRENT_THREAD(me);
 
     /* it's an error to unlock a lock you don't own */
-    MOZ_ASSERT(lock->owner == me);
+    JS_ASSERT(lock->owner == me);
     if(lock->owner != me)
         return;
 
     if(--lock->count == 0)
     {
-        lock->owner = nullptr;
+        lock->owner = NULL;
         PR_Unlock(lock->lock);
     }
 }    
 
 #ifdef DEBUG
-bool
+JSBool
 jsd_IsLocked(JSDStaticLock* lock)
 {
     void* me;
     ASSERT_VALID_LOCK(lock);
     _CURRENT_THREAD(me);
     if (lock->owner != me)
-        return false;
-    MOZ_ASSERT(lock->count > 0);
-    return true;
+        return JS_FALSE;
+    JS_ASSERT(lock->count > 0);
+    return JS_TRUE;
 }    
 #endif /* DEBUG */
 
@@ -195,10 +194,10 @@ jsd_Unlock(void* lock)
 }    
 
 #ifdef DEBUG
-bool
+JSBool
 jsd_IsLocked(void* lock)
 {
-    return true;
+    return JS_TRUE;
 }    
 #endif /* DEBUG */
 

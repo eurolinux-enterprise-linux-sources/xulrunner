@@ -18,9 +18,7 @@ class nsIDOMRange;
 class nsISelection;
 class nsRange;
 namespace mozilla {
-namespace dom {
 class Selection;
-}
 }
 
 /***************************************************************************
@@ -30,15 +28,10 @@ class Selection;
  */
 
 // first a helper struct for saving/setting ranges
-struct nsRangeStore MOZ_FINAL
+struct nsRangeStore 
 {
   nsRangeStore();
-
-private:
-  // Private destructor, to discourage deletion outside of Release():
   ~nsRangeStore();
-
-public:
   nsresult StoreRange(nsIDOMRange *aRange);
   nsresult GetRange(nsRange** outRange);
 
@@ -61,7 +54,7 @@ class nsSelectionState
     void DoTraverse(nsCycleCollectionTraversalCallback &cb);
     void DoUnlink() { MakeEmpty(); }
   
-    void     SaveSelection(mozilla::dom::Selection *aSel);
+    void     SaveSelection(mozilla::Selection *aSel);
     nsresult RestoreSelection(nsISelection *aSel);
     bool     IsCollapsed();
     bool     IsEqual(nsSelectionState *aSelState);
@@ -109,9 +102,8 @@ class nsRangeUpdater
     nsresult DidRemoveContainer(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset, uint32_t aNodeOrigLen);
     nsresult WillInsertContainer();
     nsresult DidInsertContainer();
-    void WillMoveNode();
-    void DidMoveNode(nsINode* aOldParent, int32_t aOldOffset,
-                     nsINode* aNewParent, int32_t aNewOffset);
+    nsresult WillMoveNode();
+    nsresult DidMoveNode(nsIDOMNode *aOldParent, int32_t aOldOffset, nsIDOMNode *aNewParent, int32_t aNewOffset);
   protected:    
     nsTArray<nsRefPtr<nsRangeStore> > mArray;
     bool mLock;
@@ -250,25 +242,23 @@ class MOZ_STACK_CLASS nsAutoMoveNodeSelNotify
 {
   private:
     nsRangeUpdater &mRU;
-    nsINode* mOldParent;
-    nsINode* mNewParent;
+    nsIDOMNode *mOldParent;
+    nsIDOMNode *mNewParent;
     int32_t    mOldOffset;
     int32_t    mNewOffset;
 
   public:
     nsAutoMoveNodeSelNotify(nsRangeUpdater &aRangeUpdater, 
-                            nsINode* aOldParent,
+                            nsIDOMNode *aOldParent, 
                             int32_t aOldOffset, 
-                            nsINode* aNewParent,
-                            int32_t aNewOffset)
-      : mRU(aRangeUpdater)
-      , mOldParent(aOldParent)
-      , mNewParent(aNewParent)
-      , mOldOffset(aOldOffset)
-      , mNewOffset(aNewOffset)
+                            nsIDOMNode *aNewParent, 
+                            int32_t aNewOffset) :
+    mRU(aRangeUpdater)
+    ,mOldParent(aOldParent)
+    ,mNewParent(aNewParent)
+    ,mOldOffset(aOldOffset)
+    ,mNewOffset(aNewOffset)
     {
-      MOZ_ASSERT(aOldParent);
-      MOZ_ASSERT(aNewParent);
       mRU.WillMoveNode();
     }
     

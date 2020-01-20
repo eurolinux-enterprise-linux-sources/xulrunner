@@ -10,34 +10,59 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLElement MOZ_FINAL : public nsGenericHTMLElement
+class HTMLElement : public nsGenericHTMLElement,
+                    public nsIDOMHTMLElement
 {
 public:
-  HTMLElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  HTMLElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~HTMLElement();
 
-  NS_IMETHOD GetInnerHTML(nsAString& aInnerHTML) MOZ_OVERRIDE;
+  // nsISupports
+  NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  virtual void GetInnerHTML(nsAString& aInnerHTML,
+                            mozilla::ErrorResult& aError) MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo* aNodeInfo,
                          nsINode** aResult) const MOZ_OVERRIDE;
 
+  virtual nsIDOMNode* AsDOMNode() { return this; }
+
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 };
 
-HTMLElement::HTMLElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLElement::HTMLElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
+  SetIsDOMBinding();
 }
 
 HTMLElement::~HTMLElement()
 {
 }
 
+NS_IMPL_ADDREF_INHERITED(HTMLElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLElement, Element)
+
+NS_INTERFACE_MAP_BEGIN(HTMLElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+NS_ELEMENT_INTERFACE_MAP_END
+
 NS_IMPL_ELEMENT_CLONE(HTMLElement)
 
-NS_IMETHODIMP
-HTMLElement::GetInnerHTML(nsAString& aInnerHTML)
+void
+HTMLElement::GetInnerHTML(nsAString& aInnerHTML, ErrorResult& aError)
 {
   /**
    * nsGenericHTMLElement::GetInnerHTML escapes < and > characters (at least).
@@ -48,19 +73,17 @@ HTMLElement::GetInnerHTML(nsAString& aInnerHTML)
    */
   if (mNodeInfo->Equals(nsGkAtoms::xmp) ||
       mNodeInfo->Equals(nsGkAtoms::plaintext)) {
-    if (!nsContentUtils::GetNodeTextContent(this, false, aInnerHTML)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return NS_OK;
+    nsContentUtils::GetNodeTextContent(this, false, aInnerHTML);
+    return;
   }
 
-  return nsGenericHTMLElement::GetInnerHTML(aInnerHTML);
+  nsGenericHTMLElement::GetInnerHTML(aInnerHTML, aError);
 }
 
 JSObject*
-HTMLElement::WrapNode(JSContext *aCx)
+HTMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return dom::HTMLElementBinding::Wrap(aCx, this);
+  return dom::HTMLElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
@@ -69,7 +92,7 @@ HTMLElement::WrapNode(JSContext *aCx)
 // Here, we expand 'NS_IMPL_NS_NEW_HTML_ELEMENT()' by hand.
 // (Calling the macro directly (with no args) produces compiler warnings.)
 nsGenericHTMLElement*
-NS_NewHTMLElement(already_AddRefed<nsINodeInfo>&& aNodeInfo,
+NS_NewHTMLElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                   mozilla::dom::FromParser aFromParser)
 {
   return new mozilla::dom::HTMLElement(aNodeInfo);

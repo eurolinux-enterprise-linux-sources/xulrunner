@@ -3,12 +3,11 @@
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import StringIO
-import moznetwork
 import re
 import threading
 
 from Zeroconf import Zeroconf, ServiceBrowser
-from devicemanager import ZeroconfListener
+from devicemanager import ZeroconfListener, NetworkTools
 from devicemanagerADB import DeviceManagerADB
 from devicemanagerSUT import DeviceManagerSUT
 from devicemanager import DMError
@@ -101,20 +100,6 @@ class DroidMixin(object):
         self.launchApplication(appName, ".App", intent, url=url, extras=extras,
                                wait=wait, failIfRunning=failIfRunning)
 
-    def getInstalledApps(self):
-        """
-        Lists applications installed on this Android device
-
-        Returns a list of application names in the form [ 'org.mozilla.fennec', ... ]
-        """
-        output = self.shellCheckOutput(["pm", "list", "packages", "-f"])
-        apps = []
-        for line in output.splitlines():
-            # lines are of form: package:/system/app/qik-tmo.apk=com.qiktmobile.android
-            apps.append(line.split('=')[1])
-
-        return apps
-
 class DroidADB(DeviceManagerADB, DroidMixin):
 
     def getTopActivity(self):
@@ -170,14 +155,17 @@ class DroidSUT(DeviceManagerSUT, DroidMixin):
 
 def DroidConnectByHWID(hwid, timeout=30, **kwargs):
     """Try to connect to the given device by waiting for it to show up using mDNS with the given timeout."""
-    zc = Zeroconf(moznetwork.get_ip())
+    nt = NetworkTools()
+    local_ip = nt.getLanIp()
+
+    zc = Zeroconf(local_ip)
 
     evt = threading.Event()
     listener = ZeroconfListener(hwid, evt)
     sb = ServiceBrowser(zc, "_sutagent._tcp.local.", listener)
     foundIP = None
     if evt.wait(timeout):
-        # we found the hwid
+        # we found the hwid 
         foundIP = listener.ip
     sb.cancel()
     zc.close()

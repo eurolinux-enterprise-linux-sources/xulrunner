@@ -10,35 +10,39 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
+#include "EnableWebAudioCheck.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "AudioContext.h"
-#include "js/TypeDecls.h"
-#include "mozilla/MemoryReporting.h"
+#include "AudioSegment.h"
+#include "AudioNodeEngine.h"
+
+struct JSContext;
+class JSObject;
 
 namespace mozilla {
 
 class ErrorResult;
-class ThreadSharedFloatArrayBufferList;
 
 namespace dom {
-
-class AudioContext;
 
 /**
  * An AudioBuffer keeps its data either in the mJSChannels objects, which
  * are Float32Arrays, or in mSharedChannels if the mJSChannels objects have
  * been neutered.
  */
-class AudioBuffer MOZ_FINAL : public nsWrapperCache
+class AudioBuffer MOZ_FINAL : public nsWrapperCache,
+                              public EnableWebAudioCheck
 {
 public:
-  static already_AddRefed<AudioBuffer>
-  Create(AudioContext* aContext, uint32_t aNumberOfChannels,
-         uint32_t aLength, float aSampleRate,
-         JSContext* aJSContext, ErrorResult& aRv);
+  AudioBuffer(AudioContext* aContext, uint32_t aLength,
+              float aSampleRate);
+  ~AudioBuffer();
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  // This function needs to be called in order to allocate
+  // all of the channels.  It is fallible!
+  bool InitializeBuffers(uint32_t aNumberOfChannels,
+                         JSContext* aJSContext);
 
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(AudioBuffer)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(AudioBuffer)
@@ -48,7 +52,8 @@ public:
     return mContext;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   float SampleRate() const
   {
@@ -74,15 +79,8 @@ public:
    * If mSharedChannels is non-null, copies its contents to
    * new Float32Arrays in mJSChannels. Returns a Float32Array.
    */
-  void GetChannelData(JSContext* aJSContext, uint32_t aChannel,
-                      JS::MutableHandle<JSObject*> aRetval,
-                      ErrorResult& aRv);
-
-  void CopyFromChannel(const Float32Array& aDestination, uint32_t aChannelNumber,
-                       uint32_t aStartInChannel, ErrorResult& aRv);
-  void CopyToChannel(JSContext* aJSContext, const Float32Array& aSource,
-                     uint32_t aChannelNumber, uint32_t aStartInChannel,
-                     ErrorResult& aRv);
+  JSObject* GetChannelData(JSContext* aJSContext, uint32_t aChannel,
+                           ErrorResult& aRv);
 
   /**
    * Returns a ThreadSharedFloatArrayBufferList containing the sample data.
@@ -98,17 +96,15 @@ public:
                              uint32_t aChannel,
                              float* aContents);
 
-protected:
-  AudioBuffer(AudioContext* aContext, uint32_t aNumberOfChannels,
-              uint32_t aLength, float aSampleRate);
-  ~AudioBuffer();
+  void MixToMono(JSContext* aJSContext);
 
+protected:
   bool RestoreJSChannelData(JSContext* aJSContext);
   void ClearJSChannels();
 
   nsRefPtr<AudioContext> mContext;
   // Float32Arrays
-  nsAutoTArray<JS::Heap<JSObject*>, 2> mJSChannels;
+  AutoFallibleTArray<JS::Heap<JSObject*>, 2> mJSChannels;
 
   // mSharedChannels aggregates the data from mJSChannels. This is non-null
   // if and only if the mJSChannels are neutered.

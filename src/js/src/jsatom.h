@@ -9,14 +9,15 @@
 
 #include "mozilla/HashFunctions.h"
 
+#include <stddef.h>
 #include "jsalloc.h"
+#include "jsapi.h"
+#include "jsprvtd.h"
+#include "jspubtd.h"
 
 #include "gc/Barrier.h"
-#include "gc/Rooting.h"
+#include "js/HashTable.h"
 #include "vm/CommonPropertyNames.h"
-
-class JSAtom;
-class JSAutoByteString;
 
 struct JSIdArray {
     int length;
@@ -27,7 +28,7 @@ namespace js {
 
 JS_STATIC_ASSERT(sizeof(HashNumber) == 4);
 
-static MOZ_ALWAYS_INLINE js::HashNumber
+static JS_ALWAYS_INLINE js::HashNumber
 HashId(jsid id)
 {
     return mozilla::HashGeneric(JSID_BITS(id));
@@ -44,12 +45,26 @@ struct JsidHasher
     }
 };
 
+} /* namespace js */
+
 /*
  * Return a printable, lossless char[] representation of a string-type atom.
  * The lifetime of the result matches the lifetime of bytes.
  */
 extern const char *
-AtomToPrintableString(ExclusiveContext *cx, JSAtom *atom, JSAutoByteString *bytes);
+js_AtomToPrintableString(JSContext *cx, JSAtom *atom, JSAutoByteString *bytes);
+
+namespace js {
+
+/* Compute a hash function from chars/length. */
+inline uint32_t
+HashChars(const jschar *chars, size_t length)
+{
+    uint32_t h = 0;
+    for (; length; chars++, length--)
+        h = JS_ROTATE_LEFT32(h, 4) ^ *chars;
+    return h;
+}
 
 class AtomStateEntry
 {
@@ -89,19 +104,12 @@ struct AtomHasher
         size_t          length;
         const JSAtom    *atom; /* Optional. */
 
-        HashNumber hash;
-
-        Lookup(const jschar *chars, size_t length)
-          : chars(chars), length(length), atom(nullptr)
-        {
-            hash = mozilla::HashString(chars, length);
-        }
+        Lookup(const jschar *chars, size_t length) : chars(chars), length(length), atom(NULL) {}
         inline Lookup(const JSAtom *atom);
     };
 
-    static HashNumber hash(const Lookup &l) { return l.hash; }
+    static HashNumber hash(const Lookup &l) { return HashChars(l.chars, l.length); }
     static inline bool match(const AtomStateEntry &entry, const Lookup &lookup);
-    static void rekey(AtomStateEntry &k, const AtomStateEntry& newKey) { k = newKey; }
 };
 
 typedef HashSet<AtomStateEntry, AtomHasher, SystemAllocPolicy> AtomSet;
@@ -114,7 +122,7 @@ extern bool
 AtomIsInterned(JSContext *cx, JSAtom *atom);
 
 /* Well-known predefined C strings. */
-#define DECLARE_PROTO_STR(name,code,init,clasp) extern const char js_##name##_str[];
+#define DECLARE_PROTO_STR(name,code,init) extern const char js_##name##_str[];
 JS_FOR_EACH_PROTOTYPE(DECLARE_PROTO_STR)
 #undef DECLARE_PROTO_STR
 
@@ -127,7 +135,6 @@ extern const char js_break_str[];
 extern const char js_case_str[];
 extern const char js_catch_str[];
 extern const char js_class_str[];
-extern const char js_close_str[];
 extern const char js_const_str[];
 extern const char js_continue_str[];
 extern const char js_debugger_str[];
@@ -146,12 +153,12 @@ extern const char js_import_str[];
 extern const char js_in_str[];
 extern const char js_instanceof_str[];
 extern const char js_interface_str[];
+extern const char js_let_str[];
 extern const char js_new_str[];
 extern const char js_package_str[];
 extern const char js_private_str[];
 extern const char js_protected_str[];
 extern const char js_public_str[];
-extern const char js_send_str[];
 extern const char js_setter_str[];
 extern const char js_static_str[];
 extern const char js_super_str[];
@@ -162,10 +169,30 @@ extern const char js_typeof_str[];
 extern const char js_void_str[];
 extern const char js_while_str[];
 extern const char js_with_str[];
+extern const char js_yield_str[];
+#if JS_HAS_GENERATORS
+extern const char   js_close_str[];
+extern const char   js_send_str[];
+#endif
 
 namespace js {
 
 extern const char * const TypeStrings[];
+
+/*
+ * Initialize atom state. Return true on success, false on failure to allocate
+ * memory. The caller must zero rt->atomState before calling this function and
+ * only call it after js_InitGC successfully returns.
+ */
+extern JSBool
+InitAtoms(JSRuntime *rt);
+
+/*
+ * Free and clear atom state including any interned string atoms. This
+ * function must be called before js_FinishGC.
+ */
+extern void
+FinishAtoms(JSRuntime *rt);
 
 /*
  * Atom tracing and garbage collection hooks.
@@ -174,7 +201,13 @@ extern void
 MarkAtoms(JSTracer *trc);
 
 extern void
-MarkPermanentAtoms(JSTracer *trc);
+SweepAtoms(JSRuntime *rt);
+
+extern bool
+InitCommonNames(JSContext *cx);
+
+extern void
+FinishCommonNames(JSRuntime *rt);
 
 /* N.B. must correspond to boolean tagging behavior. */
 enum InternBehavior
@@ -184,27 +217,21 @@ enum InternBehavior
 };
 
 extern JSAtom *
-Atomize(ExclusiveContext *cx, const char *bytes, size_t length,
+Atomize(JSContext *cx, const char *bytes, size_t length,
         js::InternBehavior ib = js::DoNotInternAtom);
-
-extern JSAtom *
-AtomizeChars(ExclusiveContext *cx, const jschar *chars, size_t length,
-             js::InternBehavior ib = js::DoNotInternAtom);
-
-extern JSAtom *
-AtomizeString(ExclusiveContext *cx, JSString *str, js::InternBehavior ib = js::DoNotInternAtom);
 
 template <AllowGC allowGC>
 extern JSAtom *
-ToAtom(ExclusiveContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v);
+AtomizeChars(JSContext *cx, const jschar *chars, size_t length,
+             js::InternBehavior ib = js::DoNotInternAtom);
 
-enum XDRMode {
-    XDR_ENCODE,
-    XDR_DECODE
-};
+template <AllowGC allowGC>
+extern JSAtom *
+AtomizeString(JSContext *cx, JSString *str, js::InternBehavior ib = js::DoNotInternAtom);
 
-template <XDRMode mode>
-class XDRState;
+template <AllowGC allowGC>
+extern JSAtom *
+ToAtom(JSContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v);
 
 template<XDRMode mode>
 bool

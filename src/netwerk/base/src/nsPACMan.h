@@ -11,20 +11,19 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIChannelEventSink.h"
 #include "ProxyAutoConfig.h"
+#include "nsICancelable.h"
 #include "nsThreadUtils.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/LinkedList.h"
+#include "nsIThread.h"
 #include "nsAutoPtr.h"
+#include "nsISystemProxySettings.h"
 #include "mozilla/TimeStamp.h"
-#include "prlog.h"
 
 class nsPACMan;
-class nsISystemProxySettings;
-class nsIThread;
-class WaitForThreadShutdown;
 
 /**
  * This class defines a callback interface used by AsyncGetProxyForURI.
@@ -84,7 +83,7 @@ class nsPACMan MOZ_FINAL : public nsIStreamLoaderObserver
                          , public nsIChannelEventSink
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
 
   nsPACMan();
 
@@ -165,7 +164,6 @@ private:
   friend class PendingPACQuery;
   friend class PACLoadComplete;
   friend class ExecutePACThreadAction;
-  friend class WaitForThreadShutdown;
 
   ~nsPACMan();
 
@@ -224,11 +222,5 @@ private:
 
   bool                         mInProgress;
 };
-
-namespace mozilla {
-namespace net {
-PRLogModuleInfo* GetProxyLog();
-}
-}
 
 #endif  // nsPACMan_h__

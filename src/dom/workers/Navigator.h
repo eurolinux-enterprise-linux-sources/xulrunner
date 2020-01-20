@@ -7,97 +7,20 @@
 #define mozilla_dom_workers_navigator_h__
 
 #include "Workers.h"
-#include "nsString.h"
-#include "nsWrapperCache.h"
+
+#include "jspubtd.h"
 
 BEGIN_WORKERS_NAMESPACE
 
-class WorkerNavigator MOZ_FINAL : public nsWrapperCache
-{
-  nsString mAppName;
-  nsString mAppVersion;
-  nsString mPlatform;
-  nsString mUserAgent;
-  bool mOnline;
+namespace navigator {
 
-  WorkerNavigator(const nsAString& aAppName,
-                  const nsAString& aAppVersion,
-                  const nsAString& aPlatform,
-                  const nsAString& aUserAgent,
-                  bool aOnline)
-    : mAppName(aAppName)
-    , mAppVersion(aAppVersion)
-    , mPlatform(aPlatform)
-    , mUserAgent(aUserAgent)
-    , mOnline(aOnline)
-  {
-    MOZ_COUNT_CTOR(WorkerNavigator);
-    SetIsDOMBinding();
-  }
+bool
+InitClass(JSContext* aCx, JSObject* aGlobal);
 
-public:
+JSObject*
+Create(JSContext* aCx);
 
-  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WorkerNavigator)
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WorkerNavigator)
-
-  static already_AddRefed<WorkerNavigator>
-  Create(bool aOnLine);
-
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  nsISupports* GetParentObject() const {
-    return nullptr;
-  }
-
-  ~WorkerNavigator()
-  {
-    MOZ_COUNT_DTOR(WorkerNavigator);
-  }
-
-  void GetAppCodeName(nsString& aAppCodeName) const
-  {
-    aAppCodeName.AssignLiteral("Mozilla");
-  }
-  void GetAppName(nsString& aAppName) const
-  {
-    aAppName = mAppName;
-  }
-
-  void GetAppVersion(nsString& aAppVersion) const
-  {
-    aAppVersion = mAppVersion;
-  }
-
-  void GetPlatform(nsString& aPlatform) const
-  {
-    aPlatform = mPlatform;
-  }
-  void GetProduct(nsString& aProduct) const
-  {
-    aProduct.AssignLiteral("Gecko");
-  }
-  bool TaintEnabled() const
-  {
-    return false;
-  }
-
-  void GetUserAgent(nsString& aUserAgent) const
-  {
-    aUserAgent = mUserAgent;
-  }
-
-  bool OnLine() const
-  {
-    return mOnline;
-  }
-
-  // Worker thread only!
-  void SetOnLine(bool aOnline)
-  {
-    mOnline = aOnline;
-  }
-};
+} // namespace navigator
 
 END_WORKERS_NAMESPACE
 

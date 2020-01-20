@@ -11,52 +11,35 @@
 
 #include "nsIObserver.h"
 
+#include "jsapi.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/dom/BindingDeclarations.h"
+#include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
+#include "nsCOMPtr.h"
 #include "nsHashKeys.h"
+#include "nsStringGlue.h"
 #include "nsTArray.h"
 
-class nsIRunnable;
 class nsIThread;
 class nsITimer;
 class nsPIDOMWindow;
 
 BEGIN_WORKERS_NAMESPACE
 
-class SharedWorker;
 class WorkerPrivate;
 
 class RuntimeService MOZ_FINAL : public nsIObserver
 {
-public:
-  class WorkerThread;
-
-private:
-  struct SharedWorkerInfo
-  {
-    WorkerPrivate* mWorkerPrivate;
-    nsCString mScriptSpec;
-    nsCString mName;
-
-    SharedWorkerInfo(WorkerPrivate* aWorkerPrivate,
-                     const nsACString& aScriptSpec,
-                     const nsACString& aName)
-    : mWorkerPrivate(aWorkerPrivate), mScriptSpec(aScriptSpec), mName(aName)
-    { }
-  };
-
   struct WorkerDomainInfo
   {
     nsCString mDomain;
     nsTArray<WorkerPrivate*> mActiveWorkers;
     nsTArray<WorkerPrivate*> mQueuedWorkers;
-    nsClassHashtable<nsCStringHashKey, SharedWorkerInfo> mSharedWorkerInfos;
     uint32_t mChildWorkerCount;
 
-    WorkerDomainInfo()
-    : mActiveWorkers(1), mChildWorkerCount(0)
-    { }
+    WorkerDomainInfo() : mActiveWorkers(1), mChildWorkerCount(0) { }
 
     uint32_t
     ActiveWorkerCount() const
@@ -67,18 +50,8 @@ private:
 
   struct IdleThreadInfo
   {
-    nsRefPtr<WorkerThread> mThread;
+    nsCOMPtr<nsIThread> mThread;
     mozilla::TimeStamp mExpirationTime;
-  };
-
-  struct MatchSharedWorkerInfo
-  {
-    WorkerPrivate* mWorkerPrivate;
-    SharedWorkerInfo* mSharedWorkerInfo;
-
-    MatchSharedWorkerInfo(WorkerPrivate* aWorkerPrivate)
-    : mWorkerPrivate(aWorkerPrivate), mSharedWorkerInfo(nullptr)
-    { }
   };
 
   mozilla::Mutex mMutex;
@@ -90,17 +63,18 @@ private:
   nsTArray<IdleThreadInfo> mIdleThreadArray;
 
   // *Not* protected by mMutex.
-  nsClassHashtable<nsPtrHashKey<nsPIDOMWindow>,
-                   nsTArray<WorkerPrivate*> > mWindowMap;
+  nsClassHashtable<nsPtrHashKey<nsPIDOMWindow>, nsTArray<WorkerPrivate*> > mWindowMap;
 
   // Only used on the main thread.
   nsCOMPtr<nsITimer> mIdleThreadTimer;
 
+  nsCString mDetectorName;
+  nsCString mSystemCharset;
+
   static JSSettings sDefaultJSSettings;
-  static bool sDefaultPreferences[WORKERPREF_COUNT];
 
 public:
-  struct NavigatorProperties
+  struct NavigatorStrings
   {
     nsString mAppName;
     nsString mAppVersion;
@@ -109,12 +83,12 @@ public:
   };
 
 private:
-  NavigatorProperties mNavigatorProperties;
+  NavigatorStrings mNavigatorStrings;
 
   // True when the observer service holds a reference to this object.
   bool mObserved;
   bool mShuttingDown;
-  bool mNavigatorPropertiesLoaded;
+  bool mNavigatorStringsLoaded;
 
 public:
   NS_DECL_ISUPPORTS
@@ -133,31 +107,34 @@ public:
   UnregisterWorker(JSContext* aCx, WorkerPrivate* aWorkerPrivate);
 
   void
-  CancelWorkersForWindow(nsPIDOMWindow* aWindow);
+  CancelWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow);
 
   void
-  SuspendWorkersForWindow(nsPIDOMWindow* aWindow);
+  SuspendWorkersForWindow(JSContext* aCx, nsPIDOMWindow* aWindow);
 
   void
-  ResumeWorkersForWindow(nsPIDOMWindow* aWindow);
+  ResumeWorkersForWindow(nsIScriptContext* aCx, nsPIDOMWindow* aWindow);
 
-  nsresult
-  CreateSharedWorker(const GlobalObject& aGlobal,
-                     const nsAString& aScriptURL,
-                     const nsACString& aName,
-                     SharedWorker** aSharedWorker);
-
-  void
-  ForgetSharedWorker(WorkerPrivate* aWorkerPrivate);
-
-  const NavigatorProperties&
-  GetNavigatorProperties() const
+  const nsACString&
+  GetDetectorName() const
   {
-    return mNavigatorProperties;
+    return mDetectorName;
+  }
+
+  const nsACString&
+  GetSystemCharset() const
+  {
+    return mSystemCharset;
+  }
+
+  const NavigatorStrings&
+  GetNavigatorStrings() const
+  {
+    return mNavigatorStrings;
   }
 
   void
-  NoteIdleThread(WorkerThread* aThread);
+  NoteIdleThread(nsIThread* aThread);
 
   static void
   GetDefaultJSSettings(JSSettings& aSettings)
@@ -167,29 +144,15 @@ public:
   }
 
   static void
-  GetDefaultPreferences(bool aPreferences[WORKERPREF_COUNT])
+  SetDefaultJSContextOptions(uint32_t aContentOptions, uint32_t aChromeOptions)
   {
     AssertIsOnMainThread();
-    memcpy(aPreferences, sDefaultPreferences, WORKERPREF_COUNT * sizeof(bool));
-  }
-
-  static void
-  SetDefaultRuntimeAndContextOptions(
-                                    const JS::RuntimeOptions& aRuntimeOptions,
-                                    const JS::ContextOptions& aContentCxOptions,
-                                    const JS::ContextOptions& aChromeCxOptions)
-  {
-    AssertIsOnMainThread();
-    sDefaultJSSettings.runtimeOptions = aRuntimeOptions;
-    sDefaultJSSettings.content.contextOptions = aContentCxOptions;
-    sDefaultJSSettings.chrome.contextOptions = aChromeCxOptions;
+    sDefaultJSSettings.content.options = aContentOptions;
+    sDefaultJSSettings.chrome.options = aChromeOptions;
   }
 
   void
-  UpdateAllWorkerRuntimeAndContextOptions();
-
-  void
-  UpdateAllWorkerPreference(WorkerPreference aPref, bool aValue);
+  UpdateAllWorkerJSContextOptions();
 
   static void
   SetDefaultJSGCSettings(JSGCParamKey aKey, uint32_t aValue)
@@ -226,14 +189,18 @@ public:
   UpdateAllWorkerGCZeal();
 #endif
 
+  static void
+  SetDefaultJITHardening(bool aJITHardening)
+  {
+    AssertIsOnMainThread();
+    sDefaultJSSettings.jitHardening = aJITHardening;
+  }
+
+  void
+  UpdateAllWorkerJITHardening(bool aJITHardening);
+
   void
   GarbageCollectAllWorkers(bool aShrinking);
-
-  void
-  CycleCollectAllWorkers();
-
-  void
-  SendOfflineStatusChangeEventToAllWorkers(bool aIsOffline);
 
 private:
   RuntimeService();
@@ -243,25 +210,12 @@ private:
   Init();
 
   void
-  Shutdown();
-
-  void
   Cleanup();
 
   static PLDHashOperator
   AddAllTopLevelWorkersToArray(const nsACString& aKey,
                                WorkerDomainInfo* aData,
                                void* aUserArg);
-
-  static PLDHashOperator
-  RemoveSharedWorkerFromWindowMap(nsPIDOMWindow* aKey,
-                                  nsAutoPtr<nsTArray<WorkerPrivate*> >& aData,
-                                  void* aUserArg);
-
-  static PLDHashOperator
-  FindSharedWorkerInfo(const nsACString& aKey,
-                       SharedWorkerInfo* aData,
-                       void* aUserArg);
 
   void
   GetWorkersForWindow(nsPIDOMWindow* aWindow,
@@ -272,12 +226,6 @@ private:
 
   static void
   ShutdownIdleThreads(nsITimer* aTimer, void* aClosure);
-
-  static void
-  WorkerPrefChanged(const char* aPrefName, void* aClosure);
-
-  static void
-  JSVersionChanged(const char* aPrefName, void* aClosure);
 };
 
 END_WORKERS_NAMESPACE

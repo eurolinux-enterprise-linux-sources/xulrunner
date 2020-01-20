@@ -6,7 +6,6 @@
 #define mozilla_system_volumecommand_h__
 
 #include "nsString.h"
-#include "nsISupportsImpl.h"
 #include "mozilla/RefPtr.h"
 #include <algorithm>
 #include <vold/ResponseCode.h>
@@ -33,15 +32,13 @@ class VolumeCommand;
 *
 ***************************************************************************/
 
-class VolumeResponseCallback
+class VolumeResponseCallback : public RefCounted<VolumeResponseCallback>
 {
-protected:
-  virtual ~VolumeResponseCallback() {}
-
 public:
-  NS_INLINE_DECL_REFCOUNTING(VolumeResponseCallback)
   VolumeResponseCallback()
     : mResponseCode(0), mPending(false) {}
+
+  virtual ~VolumeResponseCallback() {}
 
   bool Done() const
   {
@@ -72,13 +69,7 @@ private:
                       nsACString& aResponseStr)
   {
     mResponseCode = aResponseCode;
-#if ANDROID_VERSION >= 17
-    // There's a sequence number here that we don't care about
-    // We expect it to be 0. See VolumeCommand::SetCmd
-    mResponseStr = Substring(aResponseStr, 2);
-#else
     mResponseStr = aResponseStr;
-#endif
     if (mResponseCode >= ResponseCode::CommandOkay) {
       // This is a final response.
       mPending = false;
@@ -108,14 +99,9 @@ private:
 *
 ***************************************************************************/
 
-class VolumeCommand
+class VolumeCommand : public RefCounted<VolumeCommand>
 {
-protected:
-  virtual ~VolumeCommand() {}
-
 public:
-  NS_INLINE_DECL_REFCOUNTING(VolumeCommand)
-
   VolumeCommand(VolumeResponseCallback* aCallback)
     : mBytesConsumed(0),
       mCallback(aCallback)
@@ -130,15 +116,11 @@ public:
     SetCmd(aCommand);
   }
 
+  virtual ~VolumeCommand() {}
+
   void SetCmd(const nsACString& aCommand)
   {
-    mCmd.Truncate();
-#if ANDROID_VERSION >= 17
-    // JB requires a sequence number at the beginning of messages.
-    // It doesn't matter what we use, so we use 0.
-    mCmd = "0 ";
-#endif
-    mCmd.Append(aCommand);
+    mCmd = aCommand;
     // Add a null character. We want this to be included in the length since
     // vold uses it to determine the end of the command.
     mCmd.Append('\0');

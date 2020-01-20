@@ -6,34 +6,30 @@
 #ifndef MOZILLA_GFX_GLMANAGER_H
 #define MOZILLA_GFX_GLMANAGER_H
 
-#include "mozilla/gfx/Types.h"          // for SurfaceFormat
-#include "OGLShaderProgram.h"
+#include "LayerManagerOGL.h"
 
 namespace mozilla {
 namespace gl {
 class GLContext;
 }
-
 namespace layers {
-
-class LayerManagerComposite;
 
 /**
  * Minimal interface to allow widgets to draw using OpenGL. Abstracts
- * CompositorOGL. Call CreateGLManager with a LayerManagerComposite
- * backed by a CompositorOGL.
+ * LayerManagerOGL and CompositorOGL. Call CreateGLManager with either a
+ * LayerManagerOGL or a LayerManagerComposite backed by a CompositorOGL.
  */
 class GLManager
 {
 public:
-  static GLManager* CreateGLManager(LayerManagerComposite* aManager);
+  static GLManager* CreateGLManager(LayerManager* aManager);
 
   virtual ~GLManager() {}
 
   virtual gl::GLContext* gl() const = 0;
-  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) = 0;
-  virtual const gfx::Matrix4x4& GetProjMatrix() const = 0;
+  virtual ShaderProgramOGL* GetProgram(gl::ShaderProgramType aType) = 0;
   virtual void BindAndDrawQuad(ShaderProgramOGL *aProg) = 0;
+
 };
 
 }

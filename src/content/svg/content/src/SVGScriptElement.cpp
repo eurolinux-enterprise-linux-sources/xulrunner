@@ -16,9 +16,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGScriptElement::WrapNode(JSContext *aCx)
+SVGScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGScriptElementBinding::Wrap(aCx, this);
+  return SVGScriptElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::StringInfo SVGScriptElement::sStringInfo[1] =
@@ -29,16 +29,16 @@ nsSVGElement::StringInfo SVGScriptElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED(SVGScriptElement, SVGScriptElementBase,
-                            nsIDOMNode, nsIDOMElement,
-                            nsIDOMSVGElement,
-                            nsIScriptLoaderObserver,
-                            nsIScriptElement, nsIMutationObserver)
+NS_IMPL_ISUPPORTS_INHERITED6(SVGScriptElement, SVGScriptElementBase,
+                             nsIDOMNode, nsIDOMElement,
+                             nsIDOMSVGElement,
+                             nsIScriptLoaderObserver,
+                             nsIScriptElement, nsIMutationObserver)
 
 //----------------------------------------------------------------------
 // Implementation
 
-SVGScriptElement::SVGScriptElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
+SVGScriptElement::SVGScriptElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                                    FromParser aFromParser)
   : SVGScriptElementBase(aNodeInfo)
   , nsScriptElement(aFromParser)
@@ -54,8 +54,8 @@ SVGScriptElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 {
   *aResult = nullptr;
 
-  already_AddRefed<nsINodeInfo> ni = nsCOMPtr<nsINodeInfo>(aNodeInfo).forget();
-  SVGScriptElement* it = new SVGScriptElement(ni, NOT_FROM_PARSER);
+  nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
+  SVGScriptElement* it = new SVGScriptElement(ni.forget(), NOT_FROM_PARSER);
 
   nsCOMPtr<nsINode> kungFuDeathGrip = it;
   nsresult rv1 = it->Init();
@@ -116,9 +116,7 @@ SVGScriptElement::GetScriptType(nsAString& type)
 void
 SVGScriptElement::GetScriptText(nsAString& text)
 {
-  if (!nsContentUtils::GetNodeTextContent(this, false, text)) {
-    NS_RUNTIMEABORT("OOM");
-  }
+  nsContentUtils::GetNodeTextContent(this, false, text);
 }
 
 void

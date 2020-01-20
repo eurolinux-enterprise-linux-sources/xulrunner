@@ -27,13 +27,13 @@ static const char kMemoryPressureNotification[] = "memory-pressure";
 
 nsHyphenationManager *nsHyphenationManager::sInstance = nullptr;
 
-NS_IMPL_ISUPPORTS(nsHyphenationManager::MemoryPressureObserver,
-                  nsIObserver)
+NS_IMPL_ISUPPORTS1(nsHyphenationManager::MemoryPressureObserver,
+                   nsIObserver)
 
 NS_IMETHODIMP
 nsHyphenationManager::MemoryPressureObserver::Observe(nsISupports *aSubject,
                                                       const char *aTopic,
-                                                      const char16_t *aData)
+                                                      const PRUnichar *aData)
 {
   if (!nsCRT::strcmp(aTopic, kMemoryPressureNotification)) {
     // We don't call Instance() here, as we don't want to create a hyphenation
@@ -66,11 +66,13 @@ void
 nsHyphenationManager::Shutdown()
 {
   delete sInstance;
-  sInstance = nullptr;
 }
 
 nsHyphenationManager::nsHyphenationManager()
 {
+  mHyphAliases.Init();
+  mPatternFiles.Init();
+  mHyphenators.Init();
   LoadPatternList();
   LoadAliases();
 }

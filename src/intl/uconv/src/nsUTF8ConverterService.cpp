@@ -5,13 +5,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsString.h"
+#include "nsIUnicodeEncoder.h"
 #include "nsICharsetConverterManager.h"
+#include "nsReadableUtils.h"
+#include "nsIServiceManager.h"
 #include "nsUTF8ConverterService.h"
 #include "nsEscape.h"
 #include "nsAutoPtr.h"
-#include "nsServiceManagerUtils.h"
 
-NS_IMPL_ISUPPORTS(nsUTF8ConverterService, nsIUTF8ConverterService)
+NS_IMPL_ISUPPORTS1(nsUTF8ConverterService, nsIUTF8ConverterService)
 
 static nsresult 
 ToUTF8(const nsACString &aString, const char *aCharset,
@@ -40,7 +42,7 @@ ToUTF8(const nsACString &aString, const char *aCharset,
   rv = unicodeDecoder->GetMaxLength(inStr.get(), srcLen, &dstLen);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsAutoArrayPtr<char16_t> ustr(new char16_t[dstLen]);
+  nsAutoArrayPtr<PRUnichar> ustr(new PRUnichar[dstLen]);
   NS_ENSURE_TRUE(ustr, NS_ERROR_OUT_OF_MEMORY);
 
   rv = unicodeDecoder->Convert(inStr.get(), &srcLen, ustr, &dstLen);

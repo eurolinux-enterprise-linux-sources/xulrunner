@@ -8,6 +8,7 @@
 #ifndef _ESCAPE_H_
 #define _ESCAPE_H_
 
+#include "prtypes.h"
 #include "nscore.h"
 #include "nsError.h"
 #include "nsString.h"
@@ -51,8 +52,8 @@ int32_t nsUnescapeCount (char * str);
 char *
 nsEscapeHTML(const char * string);
 
-char16_t *
-nsEscapeHTML2(const char16_t *aSourceBuffer,
+PRUnichar *
+nsEscapeHTML2(const PRUnichar *aSourceBuffer,
               int32_t aSourceBufferLen = -1);
  /*
   * Escape problem char's for HTML display 

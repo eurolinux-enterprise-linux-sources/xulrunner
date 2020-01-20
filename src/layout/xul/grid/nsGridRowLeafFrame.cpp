@@ -23,6 +23,10 @@ NS_NewGridRowLeafFrame(nsIPresShell* aPresShell,
                        nsStyleContext* aContext)
 {
   nsCOMPtr<nsBoxLayout> layout = NS_NewGridRowLeafLayout();
+  if (!layout) {
+    return nullptr;
+  }
+  
   return new (aPresShell) nsGridRowLeafFrame(aPresShell, aContext, false,
                                              layout);
 }
@@ -33,7 +37,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsGridRowLeafFrame)
  * Our border and padding could be affected by our columns or rows.
  * Let's go check it out.
  */
-nsresult
+NS_IMETHODIMP
 nsGridRowLeafFrame::GetBorderAndPadding(nsMargin& aBorderAndPadding)
 {
   // if our columns have made our padding larger add it in.

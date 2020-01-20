@@ -11,20 +11,17 @@
 #include <jni.h>
 #include "nsIRunnable.h"
 #include "gfxPlatform.h"
+#include "gfx3DMatrix.h"
 #include "GLDefs.h"
 
-namespace mozilla {
-namespace gfx {
-class Matrix4x4;
-}
-}
+class gfxASurface;
 
 /**
  * This class is a wrapper around Android's SurfaceTexture class.
  * Usage is pretty much exactly like the Java class, so see
  * the Android documentation for details.
  */
-class nsSurfaceTexture MOZ_FINAL {
+class nsSurfaceTexture {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsSurfaceTexture)
 
 public:
@@ -34,6 +31,8 @@ public:
   // Returns with reasonable certainty whether or not we'll
   // be able to create and use a SurfaceTexture
   static bool Check();
+  
+  ~nsSurfaceTexture();
 
   // This is an ANativeWindow. Use AndroidBridge::LockWindow and
   // friends for manipulating it.
@@ -42,7 +41,7 @@ public:
   // This attaches the updated data to the TEXTURE_EXTERNAL target
   void UpdateTexImage();
 
-  bool GetTransformMatrix(mozilla::gfx::Matrix4x4& aMatrix);
+  bool GetTransformMatrix(gfx3DMatrix& aMatrix);
   int ID() { return mID; }
 
   // The callback is guaranteed to be called on the main thread even
@@ -54,9 +53,6 @@ public:
   void NotifyFrameAvailable();
 private:
   nsSurfaceTexture();
-
-  // Private destructor, to discourage deletion outside of Release():
-  ~nsSurfaceTexture();
 
   bool Init(GLuint aTexture);
 

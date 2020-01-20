@@ -7,7 +7,9 @@
 
 #include "mozilla/dom/RectBinding.h"
 #include "nsROCSSPrimitiveValue.h"
+#include "nsContentUtils.h"
 #include "nsDOMCSSRect.h"
+#include "nsDOMClassInfoID.h"
 
 using namespace mozilla;
 
@@ -24,9 +26,13 @@ nsDOMCSSRect::~nsDOMCSSRect(void)
 {
 }
 
+DOMCI_DATA(CSSRect, nsDOMCSSRect)
+
+// QueryInterface implementation for nsCSSRect
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMCSSRect)
   NS_INTERFACE_MAP_ENTRY(nsIDOMRect)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSRect)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END
 
@@ -36,9 +42,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMCSSRect)
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_4(nsDOMCSSRect, mTop, mBottom, mLeft, mRight)
  
 JSObject*
-nsDOMCSSRect::WrapObject(JSContext* cx)
+nsDOMCSSRect::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
 {
- return dom::RectBinding::Wrap(cx, this);
+ return dom::RectBinding::Wrap(cx, scope, this);
 }
 
 NS_IMETHODIMP

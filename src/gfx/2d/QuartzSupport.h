@@ -14,7 +14,6 @@
 #include "gfxTypes.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/gfx/MacIOSurface.h"
-#include "nsError.h"
 
 // Get the system color space.
 CGColorSpaceRef CreateSystemColorSpace();
@@ -27,7 +26,6 @@ enum AllowOfflineRendererEnum { ALLOW_OFFLINE_RENDERER, DISALLOW_OFFLINE_RENDERE
 
 class nsCARenderer : public mozilla::RefCounted<nsCARenderer> {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(nsCARenderer)
   nsCARenderer() : mCARenderer(nullptr), mWrapperCALayer(nullptr), mFBOTexture(0),
                    mOpenGLContext(nullptr), mCGImage(nullptr), mCGData(nullptr),
                    mIOSurface(nullptr), mFBO(0), mIOTexture(0),
@@ -88,11 +86,20 @@ private:
   mozilla::RefPtr<MacIOSurface> mIOSurface;
   uint32_t                  mFBO;
   uint32_t                  mIOTexture;
-  int                       mUnsupportedWidth;
-  int                       mUnsupportedHeight;
+  uint32_t                  mUnsupportedWidth;
+  uint32_t                  mUnsupportedHeight;
   AllowOfflineRendererEnum  mAllowOfflineRenderer;
   double                    mContentsScaleFactor;
 };
+
+enum CGContextType {
+  CG_CONTEXT_TYPE_UNKNOWN = 0,
+  // These are found by inspection, it's possible they could be changed
+  CG_CONTEXT_TYPE_BITMAP = 4,
+  CG_CONTEXT_TYPE_IOSURFACE = 8
+};
+
+CGContextType GetContextType(CGContextRef ref);
 
 #endif // XP_MACOSX
 #endif // nsCoreAnimationSupport_h__

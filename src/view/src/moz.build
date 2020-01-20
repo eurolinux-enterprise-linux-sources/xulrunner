@@ -4,18 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# nsViewManager.cpp cannot be built in unified mode because it uses PL_ARENA_CONST_ALIGN_MASK.
-SOURCES += [
+MODULE = 'view'
+
+CPP_SOURCES += [
     'nsView.cpp',
     'nsViewManager.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'gkview_s'
 
-MSVC_ENABLE_PGO = True
-
-FINAL_LIBRARY = 'gklayout'
-
-if CONFIG['GNU_CC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    # Work around bug 986928
-    CXXFLAGS += ['-Wno-error=format']

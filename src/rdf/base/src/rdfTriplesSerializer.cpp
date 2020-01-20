@@ -32,7 +32,7 @@ protected:
     nsIOutputStream* mOut;
 };
 
-NS_IMPL_ISUPPORTS(TriplesVisitor, rdfITripleVisitor)
+NS_IMPL_ISUPPORTS1(TriplesVisitor, rdfITripleVisitor)
 
 nsresult
 TriplesVisitor::writeResource(nsIRDFResource *aResource)
@@ -74,7 +74,7 @@ TriplesVisitor::Visit(nsIRDFNode *aSubject, nsIRDFResource *aPredicate,
     if (res) {
         rv = writeResource(res);
     } else if ((lit = do_QueryInterface(aObject)) != nullptr) {
-        const char16_t *value;
+        const PRUnichar *value;
         lit->GetValueConst(&value);
         nsAutoCString object;
         object.AppendLiteral("\"");
@@ -124,7 +124,7 @@ NS_NewTriplesSerializer(rdfISerializer** aResult)
     return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(rdfTriplesSerializer, rdfISerializer)
+NS_IMPL_ISUPPORTS1(rdfTriplesSerializer, rdfISerializer)
 
 rdfTriplesSerializer::rdfTriplesSerializer()
 {

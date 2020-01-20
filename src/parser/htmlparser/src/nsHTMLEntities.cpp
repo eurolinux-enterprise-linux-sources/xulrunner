@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "nsHTMLEntities.h"
 
@@ -11,6 +11,7 @@
 
 #include "nsString.h"
 #include "nsCRT.h"
+#include "prtypes.h"
 #include "pldhash.h"
 
 using namespace mozilla;
@@ -91,15 +92,13 @@ nsHTMLEntities::AddRefTable(void)
   if (!gTableRefCnt) {
     if (!PL_DHashTableInit(&gEntityToUnicode, &EntityToUnicodeOps,
                            nullptr, sizeof(EntityNodeEntry),
-                           uint32_t(NS_HTML_ENTITY_COUNT / 0.75),
-                           fallible_t())) {
+                           uint32_t(NS_HTML_ENTITY_COUNT / 0.75))) {
       gEntityToUnicode.ops = nullptr;
       return NS_ERROR_OUT_OF_MEMORY;
     }
     if (!PL_DHashTableInit(&gUnicodeToEntity, &UnicodeToEntityOps,
                            nullptr, sizeof(EntityNodeEntry),
-                           uint32_t(NS_HTML_ENTITY_COUNT / 0.75),
-                           fallible_t())) {
+                           uint32_t(NS_HTML_ENTITY_COUNT / 0.75))) {
       PL_DHashTableFinish(&gEntityToUnicode);
       gEntityToUnicode.ops = gUnicodeToEntity.ops = nullptr;
       return NS_ERROR_OUT_OF_MEMORY;

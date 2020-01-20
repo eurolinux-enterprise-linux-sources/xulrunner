@@ -7,11 +7,10 @@
 #ifndef mozilla_dom_TextTrackCueList_h
 #define mozilla_dom_TextTrackCueList_h
 
-#include "nsTArray.h"
+#include "mozilla/dom/TextTrackCue.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
-#include "mozilla/ErrorResult.h"
 
 namespace mozilla {
 namespace dom {
@@ -28,7 +27,8 @@ public:
   // TextTrackCueList WebIDL
   TextTrackCueList(nsISupports* aParent);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   nsISupports* GetParentObject() const
   {
@@ -40,25 +40,18 @@ public:
     return mList.Length();
   }
 
+  // Time is in seconds.
+  void Update(double aTime);
+
   TextTrackCue* IndexedGetter(uint32_t aIndex, bool& aFound);
-  TextTrackCue* operator[](uint32_t aIndex);
   TextTrackCue* GetCueById(const nsAString& aId);
 
-  // Adds a cue to mList by performing an insertion sort on mList.
-  // We expect most files to already be sorted, so an insertion sort starting
-  // from the end of the current array should be more efficient than a general
-  // sort step after all cues are loaded.
-  void AddCue(TextTrackCue& aCue);
-  void RemoveCue(TextTrackCue& aCue, ErrorResult& aRv);
-  void RemoveCueAt(uint32_t aIndex);
-  void RemoveAll();
-  void GetArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
+  void AddCue(TextTrackCue& cue);
+  void RemoveCue(TextTrackCue& cue);
 
 private:
   nsCOMPtr<nsISupports> mParent;
 
-  // A sorted list of TextTrackCues sorted by earliest start time. If the start
-  // times are equal then it will be sorted by end time, earliest first.
   nsTArray< nsRefPtr<TextTrackCue> > mList;
 };
 

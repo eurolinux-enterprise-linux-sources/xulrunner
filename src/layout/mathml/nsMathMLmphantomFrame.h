@@ -7,6 +7,7 @@
 #define nsMathMLmphantomFrame_h___
 
 #include "mozilla/Attributes.h"
+#include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -30,12 +31,6 @@ public:
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
-
-  bool
-  IsMrowLike() MOZ_OVERRIDE {
-    return mFrames.FirstChild() != mFrames.LastChild() ||
-           !mFrames.FirstChild();
-  }
 
 protected:
   nsMathMLmphantomFrame(nsStyleContext* aContext)

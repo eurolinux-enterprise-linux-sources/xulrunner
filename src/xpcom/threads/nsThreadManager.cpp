@@ -10,10 +10,7 @@
 #include "nsIClassInfoImpl.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
-#ifdef MOZ_CANARY
-#include <fcntl.h>
-#include <unistd.h>
-#endif
+#include "nsCycleCollectorUtils.h"
 
 using namespace mozilla;
 
@@ -43,41 +40,30 @@ AppendAndRemoveThread(PRThread *key, nsRefPtr<nsThread> &thread, void *arg)
 }
 
 // statically allocated instance
-NS_IMETHODIMP_(MozExternalRefCountType) nsThreadManager::AddRef() { return 2; }
-NS_IMETHODIMP_(MozExternalRefCountType) nsThreadManager::Release() { return 1; }
-NS_IMPL_CLASSINFO(nsThreadManager, nullptr,
+NS_IMETHODIMP_(nsrefcnt) nsThreadManager::AddRef() { return 2; }
+NS_IMETHODIMP_(nsrefcnt) nsThreadManager::Release() { return 1; }
+NS_IMPL_CLASSINFO(nsThreadManager, NULL,
                   nsIClassInfo::THREADSAFE | nsIClassInfo::SINGLETON,
                   NS_THREADMANAGER_CID)
-NS_IMPL_QUERY_INTERFACE_CI(nsThreadManager, nsIThreadManager)
-NS_IMPL_CI_INTERFACE_GETTER(nsThreadManager, nsIThreadManager)
+NS_IMPL_QUERY_INTERFACE1_CI(nsThreadManager, nsIThreadManager)
+NS_IMPL_CI_INTERFACE_GETTER1(nsThreadManager, nsIThreadManager)
 
 //-----------------------------------------------------------------------------
 
 nsresult
 nsThreadManager::Init()
 {
-  // Child processes need to initialize the thread manager before they
-  // initialize XPCOM in order to set up the crash reporter. This leads to
-  // situations where we get initialized twice.
-  if (mInitialized)
-    return NS_OK;
+  mThreadsByPRThread.Init();
 
   if (PR_NewThreadPrivateIndex(&mCurThreadIndex, ReleaseObject) == PR_FAILURE)
     return NS_ERROR_FAILURE;
 
   mLock = new Mutex("nsThreadManager.mLock");
 
-#ifdef MOZ_CANARY
-  const int flags = O_WRONLY | O_APPEND | O_CREAT | O_NONBLOCK;
-  const mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-  char* env_var_flag = getenv("MOZ_KILL_CANARIES");
-  sCanaryOutputFD = env_var_flag ? (env_var_flag[0] ?
-      open(env_var_flag, flags, mode) :
-      STDERR_FILENO) : 0;
-#endif
-
   // Setup "main" thread
   mMainThread = new nsThread(nsThread::MAIN_THREAD, 0);
+  if (!mMainThread)
+    return NS_ERROR_OUT_OF_MEMORY;
 
   nsresult rv = mMainThread->InitCurrentThread();
   if (NS_FAILED(rv)) {
@@ -221,8 +207,7 @@ nsThreadManager::NewThread(uint32_t creationFlags,
                            nsIThread **result)
 {
   // No new threads during Shutdown
-  if (NS_WARN_IF(!mInitialized))
-    return NS_ERROR_NOT_INITIALIZED;
+  NS_ENSURE_TRUE(mInitialized, NS_ERROR_NOT_INITIALIZED);
 
   nsThread *thr = new nsThread(nsThread::NOT_MAIN_THREAD, stackSize);
   if (!thr)
@@ -247,10 +232,8 @@ NS_IMETHODIMP
 nsThreadManager::GetThreadFromPRThread(PRThread *thread, nsIThread **result)
 {
   // Keep this functioning during Shutdown
-  if (NS_WARN_IF(!mMainThread))
-    return NS_ERROR_NOT_INITIALIZED;
-  if (NS_WARN_IF(!thread))
-    return NS_ERROR_INVALID_ARG;
+  NS_ENSURE_TRUE(mMainThread, NS_ERROR_NOT_INITIALIZED);
+  NS_ENSURE_ARG_POINTER(thread);
 
   nsRefPtr<nsThread> temp;
   {
@@ -266,8 +249,7 @@ NS_IMETHODIMP
 nsThreadManager::GetMainThread(nsIThread **result)
 {
   // Keep this functioning during Shutdown
-  if (NS_WARN_IF(!mMainThread))
-    return NS_ERROR_NOT_INITIALIZED;
+  NS_ENSURE_TRUE(mMainThread, NS_ERROR_NOT_INITIALIZED);
   NS_ADDREF(*result = mMainThread);
   return NS_OK;
 }
@@ -276,8 +258,7 @@ NS_IMETHODIMP
 nsThreadManager::GetCurrentThread(nsIThread **result)
 {
   // Keep this functioning during Shutdown
-  if (NS_WARN_IF(!mMainThread))
-    return NS_ERROR_NOT_INITIALIZED;
+  NS_ENSURE_TRUE(mMainThread, NS_ERROR_NOT_INITIALIZED);
   *result = GetCurrentThread();
   if (!*result)
     return NS_ERROR_OUT_OF_MEMORY;
@@ -291,6 +272,13 @@ nsThreadManager::GetIsMainThread(bool *result)
   // This method may be called post-Shutdown
 
   *result = (PR_GetCurrentThread() == mMainPRThread);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsThreadManager::GetIsCycleCollectorThread(bool *result)
+{
+  *result = bool(NS_IsCycleCollectorThread());
   return NS_OK;
 }
 

@@ -25,7 +25,6 @@
 #include "nsXULAppAPI.h"
 // Desktop
 #include "nsFilePicker.h" // needs to be included before other shobjidl.h includes
-#include "nsColorPicker.h"
 #include "nsNativeThemeWin.h"
 #include "nsWindow.h"
 // Content processes
@@ -56,9 +55,6 @@
 #include "nsPrintSession.h"
 #endif
 
-#include "mozilla/Module.h"
-
-using namespace mozilla;
 using namespace mozilla::widget;
 
 static nsresult
@@ -113,39 +109,18 @@ FilePickerConstructor(nsISupports *aOuter, REFNSIID aIID,
   }
   nsCOMPtr<nsIFilePicker> picker;
 
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
-#ifdef MOZ_METRO
-    picker = new nsMetroFilePicker;
-#else
-    NS_RUNTIMEABORT("build does not support metro.");
-#endif
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    picker = new nsFilePickerProxy();
   } else {
-    picker = new nsFilePicker;
-  }
-  return picker->QueryInterface(aIID, aResult);
-}
-
-static nsresult
-ColorPickerConstructor(nsISupports *aOuter, REFNSIID aIID,
-                       void **aResult)
-{
-  *aResult = nullptr;
-  if (aOuter != nullptr) {
-    return NS_ERROR_NO_AGGREGATION;
-  }
-  nsCOMPtr<nsIColorPicker> picker;
-
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+    if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
 #ifdef MOZ_METRO
-    // TODO
-    // picker = new nsMetroColorPicker;
-    NS_ERROR("metro color picker isn't implemented currently");
-    return NS_ERROR_NO_INTERFACE;
+      picker = new nsMetroFilePicker;
 #else
-    NS_RUNTIMEABORT("build does not support metro.");
+      NS_RUNTIMEABORT("build does not support metro.");
 #endif
-  } else {
-    picker = new nsColorPicker;
+    } else {
+      picker = new nsFilePicker;
+    }
   }
   return picker->QueryInterface(aIID, aResult);
 }
@@ -185,7 +160,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(GfxInfo, Init)
 NS_DEFINE_NAMED_CID(NS_WINDOW_CID);
 NS_DEFINE_NAMED_CID(NS_CHILD_CID);
 NS_DEFINE_NAMED_CID(NS_FILEPICKER_CID);
-NS_DEFINE_NAMED_CID(NS_COLORPICKER_CID);
 NS_DEFINE_NAMED_CID(NS_APPSHELL_CID);
 NS_DEFINE_NAMED_CID(NS_SCREENMANAGER_CID);
 NS_DEFINE_NAMED_CID(NS_GFXINFO_CID);
@@ -216,56 +190,51 @@ NS_DEFINE_NAMED_CID(NS_DEVICE_CONTEXT_SPEC_CID);
 
 
 static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
-  { &kNS_WINDOW_CID, false, nullptr, WindowConstructor },
-  { &kNS_CHILD_CID, false, nullptr, ChildWindowConstructor },
-  { &kNS_FILEPICKER_CID, false, nullptr, FilePickerConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_COLORPICKER_CID, false, nullptr, ColorPickerConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_APPSHELL_CID, false, nullptr, nsAppShellConstructor },
-  { &kNS_SCREENMANAGER_CID, false, nullptr, nsScreenManagerWinConstructor },
-  { &kNS_GFXINFO_CID, false, nullptr, GfxInfoConstructor },
-  { &kNS_THEMERENDERER_CID, false, nullptr, NS_NewNativeTheme },
-  { &kNS_IDLE_SERVICE_CID, false, nullptr, nsIdleServiceWinConstructor },
-  { &kNS_CLIPBOARD_CID, false, nullptr, nsClipboardConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_CLIPBOARDHELPER_CID, false, nullptr, nsClipboardHelperConstructor },
-  { &kNS_SOUND_CID, false, nullptr, nsSoundConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_TRANSFERABLE_CID, false, nullptr, nsTransferableConstructor },
-  { &kNS_HTMLFORMATCONVERTER_CID, false, nullptr, nsHTMLFormatConverterConstructor },
-  { &kNS_WIN_TASKBAR_CID, false, nullptr, WinTaskbarConstructor },
-  { &kNS_WIN_JUMPLISTBUILDER_CID, false, nullptr, JumpListBuilderConstructor },
-  { &kNS_WIN_JUMPLISTITEM_CID, false, nullptr, JumpListItemConstructor },
-  { &kNS_WIN_JUMPLISTSEPARATOR_CID, false, nullptr, JumpListSeparatorConstructor },
-  { &kNS_WIN_JUMPLISTLINK_CID, false, nullptr, JumpListLinkConstructor },
-  { &kNS_WIN_JUMPLISTSHORTCUT_CID, false, nullptr, JumpListShortcutConstructor },
-  { &kNS_DRAGSERVICE_CID, false, nullptr, nsDragServiceConstructor, Module::MAIN_PROCESS_ONLY },
-  { &kNS_BIDIKEYBOARD_CID, false, nullptr, nsBidiKeyboardConstructor },
+  { &kNS_WINDOW_CID, false, NULL, WindowConstructor },
+  { &kNS_CHILD_CID, false, NULL, ChildWindowConstructor },
+  { &kNS_FILEPICKER_CID, false, NULL, FilePickerConstructor },
+  { &kNS_APPSHELL_CID, false, NULL, nsAppShellConstructor },
+  { &kNS_SCREENMANAGER_CID, false, NULL, nsScreenManagerWinConstructor },
+  { &kNS_GFXINFO_CID, false, NULL, GfxInfoConstructor },
+  { &kNS_THEMERENDERER_CID, false, NULL, NS_NewNativeTheme },
+  { &kNS_IDLE_SERVICE_CID, false, NULL, nsIdleServiceWinConstructor },
+  { &kNS_CLIPBOARD_CID, false, NULL, nsClipboardConstructor },
+  { &kNS_CLIPBOARDHELPER_CID, false, NULL, nsClipboardHelperConstructor },
+  { &kNS_SOUND_CID, false, NULL, nsSoundConstructor },
+  { &kNS_TRANSFERABLE_CID, false, NULL, nsTransferableConstructor },
+  { &kNS_HTMLFORMATCONVERTER_CID, false, NULL, nsHTMLFormatConverterConstructor },
+  { &kNS_WIN_TASKBAR_CID, false, NULL, WinTaskbarConstructor },
+  { &kNS_WIN_JUMPLISTBUILDER_CID, false, NULL, JumpListBuilderConstructor },
+  { &kNS_WIN_JUMPLISTITEM_CID, false, NULL, JumpListItemConstructor },
+  { &kNS_WIN_JUMPLISTSEPARATOR_CID, false, NULL, JumpListSeparatorConstructor },
+  { &kNS_WIN_JUMPLISTLINK_CID, false, NULL, JumpListLinkConstructor },
+  { &kNS_WIN_JUMPLISTSHORTCUT_CID, false, NULL, JumpListShortcutConstructor },
+  { &kNS_DRAGSERVICE_CID, false, NULL, nsDragServiceConstructor },
+  { &kNS_BIDIKEYBOARD_CID, false, NULL, nsBidiKeyboardConstructor },
 #ifdef MOZ_METRO
-  { &kNS_WIN_METROUTILS_CID, false, nullptr, nsWinMetroUtilsConstructor },
+  { &kNS_WIN_METROUTILS_CID, false, NULL, nsWinMetroUtilsConstructor },
 #endif
 #ifdef NS_PRINTING
-  { &kNS_PRINTSETTINGSSERVICE_CID, false, nullptr, nsPrintOptionsWinConstructor },
-  { &kNS_PRINTER_ENUMERATOR_CID, false, nullptr, nsPrinterEnumeratorWinConstructor,
-    Module::MAIN_PROCESS_ONLY },
-  { &kNS_PRINTSESSION_CID, false, nullptr, nsPrintSessionConstructor,
-    Module::MAIN_PROCESS_ONLY },
-  { &kNS_DEVICE_CONTEXT_SPEC_CID, false, nullptr, nsDeviceContextSpecWinConstructor,
-    Module::MAIN_PROCESS_ONLY },
+  { &kNS_PRINTSETTINGSSERVICE_CID, false, NULL, nsPrintOptionsWinConstructor },
+  { &kNS_PRINTER_ENUMERATOR_CID, false, NULL, nsPrinterEnumeratorWinConstructor },
+  { &kNS_PRINTSESSION_CID, false, NULL, nsPrintSessionConstructor },
+  { &kNS_DEVICE_CONTEXT_SPEC_CID, false, NULL, nsDeviceContextSpecWinConstructor },
 #endif
-  { nullptr }
+  { NULL }
 };
 
 static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widgets/window/win;1", &kNS_WINDOW_CID },
   { "@mozilla.org/widgets/child_window/win;1", &kNS_CHILD_CID },
-  { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID, Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID, Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID },
   { "@mozilla.org/widget/appshell/win;1", &kNS_APPSHELL_CID },
   { "@mozilla.org/gfx/screenmanager;1", &kNS_SCREENMANAGER_CID },
   { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID },
   { "@mozilla.org/chrome/chrome-native-theme;1", &kNS_THEMERENDERER_CID },
   { "@mozilla.org/widget/idleservice;1", &kNS_IDLE_SERVICE_CID },
-  { "@mozilla.org/widget/clipboard;1", &kNS_CLIPBOARD_CID, Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/widget/clipboard;1", &kNS_CLIPBOARD_CID },
   { "@mozilla.org/widget/clipboardhelper;1", &kNS_CLIPBOARDHELPER_CID },
-  { "@mozilla.org/sound;1", &kNS_SOUND_CID, Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/sound;1", &kNS_SOUND_CID },
   { "@mozilla.org/widget/transferable;1", &kNS_TRANSFERABLE_CID },
   { "@mozilla.org/widget/htmlformatconverter;1", &kNS_HTMLFORMATCONVERTER_CID },
   { "@mozilla.org/windows-taskbar;1", &kNS_WIN_TASKBAR_CID },
@@ -274,21 +243,18 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/windows-jumplistseparator;1", &kNS_WIN_JUMPLISTSEPARATOR_CID },
   { "@mozilla.org/windows-jumplistlink;1", &kNS_WIN_JUMPLISTLINK_CID },
   { "@mozilla.org/windows-jumplistshortcut;1", &kNS_WIN_JUMPLISTSHORTCUT_CID },
-  { "@mozilla.org/widget/dragservice;1", &kNS_DRAGSERVICE_CID, Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/widget/dragservice;1", &kNS_DRAGSERVICE_CID },
   { "@mozilla.org/widget/bidikeyboard;1", &kNS_BIDIKEYBOARD_CID },
 #ifdef MOZ_METRO
   { "@mozilla.org/windows-metroutils;1", &kNS_WIN_METROUTILS_CID },
 #endif
 #ifdef NS_PRINTING
   { "@mozilla.org/gfx/printsettings-service;1", &kNS_PRINTSETTINGSSERVICE_CID },
-  { "@mozilla.org/gfx/printerenumerator;1", &kNS_PRINTER_ENUMERATOR_CID,
-    Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/gfx/printsession;1", &kNS_PRINTSESSION_CID,
-    Module::MAIN_PROCESS_ONLY },
-  { "@mozilla.org/gfx/devicecontextspec;1", &kNS_DEVICE_CONTEXT_SPEC_CID,
-    Module::MAIN_PROCESS_ONLY },
+  { "@mozilla.org/gfx/printerenumerator;1", &kNS_PRINTER_ENUMERATOR_CID },
+  { "@mozilla.org/gfx/printsession;1", &kNS_PRINTSESSION_CID },
+  { "@mozilla.org/gfx/devicecontextspec;1", &kNS_DEVICE_CONTEXT_SPEC_CID },
 #endif
-  { nullptr }
+  { NULL }
 };
 
 static void
@@ -305,8 +271,8 @@ static const mozilla::Module kWidgetModule = {
   mozilla::Module::kVersion,
   kWidgetCIDs,
   kWidgetContracts,
-  nullptr,
-  nullptr,
+  NULL,
+  NULL,
   nsAppShellInit,
   nsWidgetWindowsModuleDtor
 };

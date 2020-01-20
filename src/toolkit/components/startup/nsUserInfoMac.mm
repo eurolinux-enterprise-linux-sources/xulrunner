@@ -11,12 +11,12 @@
 #import <Cocoa/Cocoa.h>
 #import <AddressBook/AddressBook.h>
 
-NS_IMPL_ISUPPORTS(nsUserInfo, nsIUserInfo)
+NS_IMPL_ISUPPORTS1(nsUserInfo, nsIUserInfo)
 
 nsUserInfo::nsUserInfo() {}
 
 NS_IMETHODIMP
-nsUserInfo::GetFullname(char16_t **aFullname)
+nsUserInfo::GetFullname(PRUnichar **aFullname)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT
   

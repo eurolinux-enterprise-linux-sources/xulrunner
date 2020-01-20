@@ -43,14 +43,14 @@ nsStyleContext::nsStyleContext(nsStyleContext* aParent,
     mRuleNode(aRuleNode),
     mAllocations(nullptr),
     mCachedResetData(nullptr),
-    mBits(((uint64_t)aPseudoType) << NS_STYLE_CONTEXT_TYPE_SHIFT),
+    mBits(((uint32_t)aPseudoType) << NS_STYLE_CONTEXT_TYPE_SHIFT),
     mRefCnt(0)
 {
   // This check has to be done "backward", because if it were written the
   // more natural way it wouldn't fail even when it needed to.
-  static_assert((UINT64_MAX >> NS_STYLE_CONTEXT_TYPE_SHIFT) >=
-                nsCSSPseudoElements::ePseudo_MAX,
-                "pseudo element bits no longer fit in a uint64_t");
+  MOZ_STATIC_ASSERT((UINT32_MAX >> NS_STYLE_CONTEXT_TYPE_SHIFT) >=
+                    nsCSSPseudoElements::ePseudo_MAX,
+                    "pseudo element bits no longer fit in a uint32_t");
   MOZ_ASSERT(aRuleNode);
 
   mNextSibling = this;
@@ -262,7 +262,7 @@ nsStyleContext::GetUniqueStyleData(const nsStyleStructID& aSID)
   }
 
   SetStyle(aSID, result);
-  mBits &= ~static_cast<uint64_t>(nsCachedStyleData::GetBitForSID(aSID));
+  mBits &= ~nsCachedStyleData::GetBitForSID(aSID);
 
   return result;
 }
@@ -338,23 +338,26 @@ nsStyleContext::ApplyStyleFixups(bool aSkipFlexItemStyleFixup)
   // here if needed, by changing the style data, so that other code
   // doesn't get confused by looking at the style data.
   if (!mParent) {
-    uint8_t displayVal = disp->mDisplay;
-    nsRuleNode::EnsureBlockDisplay(displayVal, true);
-    if (displayVal != disp->mDisplay) {
-      nsStyleDisplay *mutable_display =
-        static_cast<nsStyleDisplay*>(GetUniqueStyleData(eStyleStruct_Display));
-
+    if (disp->mDisplay != NS_STYLE_DISPLAY_NONE &&
+        disp->mDisplay != NS_STYLE_DISPLAY_BLOCK &&
+        disp->mDisplay != NS_STYLE_DISPLAY_TABLE) {
+      nsStyleDisplay *mutable_display = static_cast<nsStyleDisplay*>
+                                                   (GetUniqueStyleData(eStyleStruct_Display));
       // If we're in this code, then mOriginalDisplay doesn't matter
       // for purposes of the cascade (because this nsStyleDisplay
       // isn't living in the ruletree anyway), and for determining
       // hypothetical boxes it's better to have mOriginalDisplay
       // matching mDisplay here.
-      mutable_display->mOriginalDisplay = mutable_display->mDisplay =
-        displayVal;
+      if (mutable_display->mDisplay == NS_STYLE_DISPLAY_INLINE_TABLE)
+        mutable_display->mOriginalDisplay = mutable_display->mDisplay =
+          NS_STYLE_DISPLAY_TABLE;
+      else
+        mutable_display->mOriginalDisplay = mutable_display->mDisplay =
+          NS_STYLE_DISPLAY_BLOCK;
     }
   }
 
-  // Adjust the "display" values of flex and grid items (but not for raw text,
+  // Adjust the "display" values of flex items (but not for raw text,
   // placeholders, or table-parts). CSS3 Flexbox section 4 says:
   //   # The computed 'display' of a flex item is determined
   //   # by applying the table in CSS 2.1 Chapter 9.7.
@@ -362,9 +365,7 @@ nsStyleContext::ApplyStyleFixups(bool aSkipFlexItemStyleFixup)
   if (!aSkipFlexItemStyleFixup && mParent) {
     const nsStyleDisplay* parentDisp = mParent->StyleDisplay();
     if ((parentDisp->mDisplay == NS_STYLE_DISPLAY_FLEX ||
-         parentDisp->mDisplay == NS_STYLE_DISPLAY_INLINE_FLEX ||
-         parentDisp->mDisplay == NS_STYLE_DISPLAY_GRID ||
-         parentDisp->mDisplay == NS_STYLE_DISPLAY_INLINE_GRID) &&
+         parentDisp->mDisplay == NS_STYLE_DISPLAY_INLINE_FLEX) &&
         GetPseudo() != nsCSSAnonBoxes::mozNonElement) {
       uint8_t displayVal = disp->mDisplay;
       // Skip table parts.
@@ -400,7 +401,7 @@ nsStyleContext::ApplyStyleFixups(bool aSkipFlexItemStyleFixup)
     }
   }
 
-  // Compute User Interface style, to trigger loads of cursors
+  // Computer User Interface style, to trigger loads of cursors
   StyleUserInterface();
 }
 
@@ -439,19 +440,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // by font-size changing, so we don't need to worry about them like
   // we worry about 'inherit' values.)
   bool compare = mRuleNode != aOther->mRuleNode;
-
-  // If we had any change in variable values, then we'll need to examine
-  // all of the other style structs too, even if the new style context has
-  // the same rule node as the old one.
-  const nsStyleVariables* thisVariables = PeekStyleVariables();
-  if (thisVariables) {
-    const nsStyleVariables* otherVariables = aOther->StyleVariables();
-    if (thisVariables->mVariables != otherVariables->mVariables) {
-      compare = true;
-    }
-  }
-
-  DebugOnly<int> styleStructCount = 1;  // count Variables already
+  DebugOnly<int> styleStructCount = 0;
 
 #define DO_STRUCT_DIFFERENCE(struct_)                                         \
   PR_BEGIN_MACRO                                                              \
@@ -459,11 +448,8 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
     if (this##struct_) {                                                      \
       const nsStyle##struct_* other##struct_ = aOther->Style##struct_();      \
       nsChangeHint maxDifference = nsStyle##struct_::MaxDifference();         \
-      nsChangeHint maxDifferenceNeverInherited =                              \
-        nsStyle##struct_::MaxDifferenceNeverInherited();                      \
       if ((compare ||                                                         \
-           (NS_SubtractHint(maxDifference, maxDifferenceNeverInherited) &     \
-            aParentHintsNotHandledForDescendants)) &&                         \
+           (maxDifference & aParentHintsNotHandledForDescendants)) &&         \
           !NS_IsHintSubset(maxDifference, hint) &&                            \
           this##struct_ != other##struct_) {                                  \
         NS_ASSERTION(NS_IsHintSubset(                                         \
@@ -866,15 +852,3 @@ nsStyleContext::FreeAllocations(nsPresContext *aPresContext)
     shell->FreeMisc(alloc->mSize, alloc);
   }
 }
-
-#ifdef DEBUG
-/* static */ void
-nsStyleContext::AssertStyleStructMaxDifferenceValid()
-{
-#define STYLE_STRUCT(name, checkdata_cb)                                     \
-    MOZ_ASSERT(NS_IsHintSubset(nsStyle##name::MaxDifferenceNeverInherited(), \
-                               nsStyle##name::MaxDifference()));
-#include "nsStyleStructList.h"
-#undef STYLE_STRUCT
-}
-#endif

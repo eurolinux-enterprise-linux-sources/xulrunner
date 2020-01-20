@@ -2,10 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let Ci = Components.interfaces;
-let Cc = Components.classes;
-
-this.kXLinkNamespace = "http://www.w3.org/1999/xlink";
+const kXLinkNamespace = "http://www.w3.org/1999/xlink";
 
 dump("### ContextMenuHandler.js loaded\n");
 
@@ -105,8 +102,6 @@ var ContextMenuHandler = {
     if (Util.isTextInput(this._target)) {
       // select all text in the input control
       this._target.select();
-    } else if (Util.isEditableContent(this._target)) {
-      this._target.ownerDocument.execCommand("selectAll", false);
     } else {
       // select the entire document
       content.getSelection().selectAllChildren(content.document);
@@ -122,14 +117,6 @@ var ContextMenuHandler = {
         edit.editor.paste(Ci.nsIClipboard.kGlobalClipboard);
       } else {
         Util.dumpLn("error: target element does not support nsIDOMNSEditableElement");
-      }
-    } else if (Util.isEditableContent(this._target)) {
-      try {
-        this._target.ownerDocument.execCommand("paste",
-                                               false,
-                                               Ci.nsIClipboard.kGlobalClipboard);
-      } catch (ex) {
-        dump("ContextMenuHandler: exception pasting into contentEditable: " + ex.message + "\n");
       }
     }
     this.reset();
@@ -147,12 +134,6 @@ var ContextMenuHandler = {
       } else {
         Util.dumpLn("error: target element does not support nsIDOMNSEditableElement");
       }
-    } else if (Util.isEditableContent(this._target)) {
-      try {
-        this._target.ownerDocument.execCommand("cut", false);
-      } catch (ex) {
-        dump("ContextMenuHandler: exception cutting from contentEditable: " + ex.message + "\n");
-      }
     }
     this.reset();
   },
@@ -164,13 +145,6 @@ var ContextMenuHandler = {
         edit.editor.copy();
       } else {
         Util.dumpLn("error: target element does not support nsIDOMNSEditableElement");
-      }
-    } else if (Util.isEditableContent(this._target)) {
-      try {
-        this._target.ownerDocument.execCommand("copy", false);
-      } catch (ex) {
-        dump("ContextMenuHandler: exception copying from contentEditable: " +
-          ex.message + "\n");
       }
     } else {
       let selectionText = this._previousState.string;
@@ -214,13 +188,12 @@ var ContextMenuHandler = {
       contentDisposition: "",
       string: "",
     };
-    let uniqueStateTypes = new Set();
 
     // Do checks for nodes that never have children.
     if (popupNode.nodeType == Ci.nsIDOMNode.ELEMENT_NODE) {
       // See if the user clicked on an image.
       if (popupNode instanceof Ci.nsIImageLoadingContent && popupNode.currentURI) {
-        uniqueStateTypes.add("image");
+        state.types.push("image");
         state.label = state.mediaURL = popupNode.currentURI.spec;
         imageUrl = state.mediaURL;
         this._target = popupNode;
@@ -245,7 +218,6 @@ var ContextMenuHandler = {
 
     let elem = popupNode;
     let isText = false;
-    let isEditableText = false;
 
     while (elem) {
       if (elem.nodeType == Ci.nsIDOMNode.ELEMENT_NODE) {
@@ -258,7 +230,7 @@ var ContextMenuHandler = {
             continue;
           }
 
-          uniqueStateTypes.add("link");
+          state.types.push("link");
           state.label = state.linkURL = this._getLinkURL(elem);
           linkUrl = state.linkURL;
           state.linkTitle = popupNode.textContent || popupNode.title;
@@ -266,63 +238,49 @@ var ContextMenuHandler = {
           // mark as text so we can pickup on selection below
           isText = true;
           break;
-        }
-        // is the target contentEditable (not just inheriting contentEditable)
-        // or the entire document in designer mode.
-        else if (elem.contentEditable == "true" ||
-                 Util.isOwnerDocumentInDesignMode(elem)) {
-          this._target = elem;
-          isEditableText = true;
-          isText = true;
-          uniqueStateTypes.add("input-text");
-
-          if (elem.textContent.length) {
-            uniqueStateTypes.add("selectable");
-          } else {
-            uniqueStateTypes.add("input-empty");
-          }
-          break;
-        }
-        // is the target a text input
-        else if (Util.isTextInput(elem)) {
-          this._target = elem;
-          isEditableText = true;
-          uniqueStateTypes.add("input-text");
-
+        } else if (Util.isTextInput(elem)) {
           let selectionStart = elem.selectionStart;
           let selectionEnd = elem.selectionEnd;
+
+          state.types.push("input-text");
+          this._target = elem;
 
           // Don't include "copy" for password fields.
           if (!(elem instanceof Ci.nsIDOMHTMLInputElement) || elem.mozIsTextField(true)) {
             // If there is a selection add cut and copy
             if (selectionStart != selectionEnd) {
-              uniqueStateTypes.add("cut");
-              uniqueStateTypes.add("copy");
+              state.types.push("cut");
+              state.types.push("copy");
               state.string = elem.value.slice(selectionStart, selectionEnd);
             } else if (elem.value && elem.textLength) {
               // There is text and it is not selected so add selectable items
-              uniqueStateTypes.add("selectable");
+              state.types.push("selectable");
               state.string = elem.value;
             }
           }
 
           if (!elem.textLength) {
-            uniqueStateTypes.add("input-empty");
+            state.types.push("input-empty");
+          }
+
+          let flavors = ["text/unicode"];
+          let cb = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+          let hasData = cb.hasDataMatchingFlavors(flavors,
+                                                  flavors.length,
+                                                  Ci.nsIClipboard.kGlobalClipboard);
+          if (hasData && !elem.readOnly) {
+            state.types.push("paste");
           }
           break;
-        }
-        // is the target an element containing text content
-        else if (Util.isText(elem)) {
+        } else if (Util.isText(elem)) {
           isText = true;
-        }
-        // is the target a media element
-        else if (elem instanceof Ci.nsIDOMHTMLMediaElement ||
+        } else if (elem instanceof Ci.nsIDOMHTMLMediaElement ||
                    elem instanceof Ci.nsIDOMHTMLVideoElement) {
           state.label = state.mediaURL = (elem.currentSrc || elem.src);
-          uniqueStateTypes.add((elem.paused || elem.ended) ?
+          state.types.push((elem.paused || elem.ended) ?
             "media-paused" : "media-playing");
           if (elem instanceof Ci.nsIDOMHTMLVideoElement) {
-            uniqueStateTypes.add("video");
+            state.types.push("video");
           }
         }
       }
@@ -335,39 +293,22 @@ var ContextMenuHandler = {
       // If this is text and has a selection, we want to bring
       // up the copy option on the context menu.
       let selection = targetWindow.getSelection();
-      if (selection && this._tapInSelection(selection, aX, aY)) {
+      if (selection && selection.toString().length > 0) {
         state.string = targetWindow.getSelection().toString();
-        uniqueStateTypes.add("copy");
-        uniqueStateTypes.add("selected-text");
-        if (isEditableText) {
-          uniqueStateTypes.add("cut");
-        }
+        state.types.push("copy");
+        state.types.push("selected-text");
       } else {
         // Add general content text if this isn't anything specific
-        if (!(
-            uniqueStateTypes.has("image") ||
-            uniqueStateTypes.has("media") ||
-            uniqueStateTypes.has("video") ||
-            uniqueStateTypes.has("link") ||
-            uniqueStateTypes.has("input-text")
-        )) {
-          uniqueStateTypes.add("content-text");
+        if (state.types.indexOf("image") == -1 &&
+            state.types.indexOf("media") == -1 &&
+            state.types.indexOf("video") == -1 &&
+            state.types.indexOf("link") == -1 &&
+            state.types.indexOf("input-text") == -1) {
+          state.types.push("content-text");
         }
       }
     }
 
-    // Is paste applicable here?
-    if (isEditableText) {
-      let flavors = ["text/unicode"];
-      let cb = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
-      let hasData = cb.hasDataMatchingFlavors(flavors,
-                                              flavors.length,
-                                              Ci.nsIClipboard.kGlobalClipboard);
-      // add paste if there's data
-      if (hasData && !elem.readOnly) {
-        uniqueStateTypes.add("paste");
-      }
-    }
     // populate position and event source
     state.xPos = offsetX + aX;
     state.yPos = offsetY + aY;
@@ -375,26 +316,11 @@ var ContextMenuHandler = {
 
     for (let i = 0; i < this._types.length; i++)
       if (this._types[i].handler(state, popupNode))
-        uniqueStateTypes.add(this._types[i].name);
+        state.types.push(this._types[i].name);
 
-    state.types = [type for (type of uniqueStateTypes)];
     this._previousState = state;
 
     sendAsyncMessage("Content:ContextMenu", state);
-  },
-
-  _tapInSelection: function (aSelection, aX, aY) {
-    if (!aSelection || !aSelection.rangeCount) {
-      return false;
-    }
-    for (let idx = 0; idx < aSelection.rangeCount; idx++) {
-      let range = aSelection.getRangeAt(idx);
-      let rect = range.getBoundingClientRect();
-      if (Util.pointWithinDOMRect(aX, aY, rect)) {
-        return true;
-      }
-    }
-    return false;
   },
 
   _getLinkURL: function ch_getLinkURL(aLink) {
@@ -443,6 +369,5 @@ var ContextMenuHandler = {
     this._types = this._types.filter(function(type) type.name != aName);
   }
 };
-this.ContextMenuHandler = ContextMenuHandler;
 
 ContextMenuHandler.init();

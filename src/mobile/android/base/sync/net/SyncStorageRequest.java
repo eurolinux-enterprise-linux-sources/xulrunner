@@ -18,6 +18,7 @@ import ch.boye.httpclientandroidlib.HttpResponse;
 import ch.boye.httpclientandroidlib.client.ClientProtocolException;
 import ch.boye.httpclientandroidlib.client.methods.HttpRequestBase;
 import ch.boye.httpclientandroidlib.impl.client.DefaultHttpClient;
+import ch.boye.httpclientandroidlib.params.CoreProtocolPNames;
 
 public class SyncStorageRequest implements Resource {
   public static HashMap<String, String> SERVER_ERROR_MESSAGES;
@@ -77,21 +78,6 @@ public class SyncStorageRequest implements Resource {
     this.resource.delegate = this.resourceDelegate;
   }
 
-  @Override
-  public URI getURI() {
-    return this.resource.getURI();
-  }
-
-  @Override
-  public String getURIString() {
-    return this.resource.getURIString();
-  }
-
-  @Override
-  public String getHostname() {
-    return this.resource.getHostname();
-  }
-
   /**
    * A ResourceDelegate that mediates between Resource-level notifications and the SyncStorageRequest.
    */
@@ -106,12 +92,12 @@ public class SyncStorageRequest implements Resource {
 
     @Override
     public AuthHeaderProvider getAuthHeaderProvider() {
-      return request.delegate.getAuthHeaderProvider();
-    }
+      String credentials = request.delegate.credentials();
+      if (credentials == null) {
+        return null;
+      }
 
-    @Override
-    public String getUserAgent() {
-      return SyncConstants.USER_AGENT;
+      return new BasicAuthHeaderProvider(credentials);
     }
 
     @Override
@@ -150,6 +136,8 @@ public class SyncStorageRequest implements Resource {
 
     @Override
     public void addHeaders(HttpRequestBase request, DefaultHttpClient client) {
+      client.getParams().setParameter(CoreProtocolPNames.USER_AGENT, SyncConstants.SYNC_USER_AGENT);
+
       // Clients can use their delegate interface to specify X-If-Unmodified-Since.
       String ifUnmodifiedSince = this.request.delegate.ifUnmodifiedSince();
       if (ifUnmodifiedSince != null) {
@@ -175,22 +163,18 @@ public class SyncStorageRequest implements Resource {
     return new SyncStorageResourceDelegate(request);
   }
 
-  @Override
   public void get() {
     this.resource.get();
   }
 
-  @Override
   public void delete() {
     this.resource.delete();
   }
 
-  @Override
   public void post(HttpEntity body) {
     this.resource.post(body);
   }
 
-  @Override
   public void put(HttpEntity body) {
     this.resource.put(body);
   }

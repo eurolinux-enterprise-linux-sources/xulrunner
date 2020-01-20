@@ -3,29 +3,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsXPCOM.h"
 #include "nsMemoryImpl.h"
 #include "nsThreadUtils.h"
 
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
+#include "nsIServiceManager.h"
 #include "nsISimpleEnumerator.h"
 
+#include "prcvar.h"
+#include "pratom.h"
+
+#include "nsAlgorithm.h"
 #include "nsCOMPtr.h"
+#include "nsString.h"
 #include "mozilla/Services.h"
 
 #ifdef ANDROID
 #include <stdio.h>
-
-// Minimum memory threshold for a device to be considered
-// a low memory platform. This value has be in sync with
-// Java's equivalent threshold, defined in
-// mobile/android/base/util/HardwareUtils.java
 #define LOW_MEMORY_THRESHOLD_KB (384 * 1024)
 #endif
 
 static nsMemoryImpl sGlobalMemory;
 
-NS_IMPL_QUERY_INTERFACE(nsMemoryImpl, nsIMemory)
+NS_IMPL_QUERY_INTERFACE1(nsMemoryImpl, nsIMemory)
 
 NS_IMETHODIMP_(void*)
 nsMemoryImpl::Alloc(size_t size)
@@ -48,7 +50,7 @@ nsMemoryImpl::Free(void* ptr)
 NS_IMETHODIMP
 nsMemoryImpl::HeapMinimize(bool aImmediate)
 {
-    return FlushMemory(MOZ_UTF16("heap-minimize"), aImmediate);
+    return FlushMemory(NS_LITERAL_STRING("heap-minimize").get(), aImmediate);
 }
 
 NS_IMETHODIMP
@@ -74,7 +76,7 @@ nsMemoryImpl::IsLowMemoryPlatform(bool *result)
             return NS_OK;
         }
         uint64_t mem = 0;
-        int rv = fscanf(fd, "MemTotal: %llu kB", &mem);
+        int rv = fscanf(fd, "MemTotal: %lu kB", &mem);
         if (fclose(fd)) {
             return NS_OK;
         }
@@ -93,13 +95,12 @@ nsMemoryImpl::IsLowMemoryPlatform(bool *result)
 /*static*/ nsresult
 nsMemoryImpl::Create(nsISupports* outer, const nsIID& aIID, void **aResult)
 {
-    if (NS_WARN_IF(outer))
-        return NS_ERROR_NO_AGGREGATION;
+    NS_ENSURE_NO_AGGREGATION(outer);
     return sGlobalMemory.QueryInterface(aIID, aResult);
 }
 
 nsresult
-nsMemoryImpl::FlushMemory(const char16_t* aReason, bool aImmediate)
+nsMemoryImpl::FlushMemory(const PRUnichar* aReason, bool aImmediate)
 {
     nsresult rv = NS_OK;
 
@@ -113,7 +114,7 @@ nsMemoryImpl::FlushMemory(const char16_t* aReason, bool aImmediate)
         }
     }
 
-    bool lastVal = sIsFlushing.exchange(true);
+    int32_t lastVal = PR_ATOMIC_SET(&sIsFlushing, 1);
     if (lastVal)
         return NS_OK;
 
@@ -137,7 +138,7 @@ nsMemoryImpl::FlushMemory(const char16_t* aReason, bool aImmediate)
 }
 
 nsresult
-nsMemoryImpl::RunFlushers(const char16_t* aReason)
+nsMemoryImpl::RunFlushers(const PRUnichar* aReason)
 {
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (os) {
@@ -154,28 +155,26 @@ nsMemoryImpl::RunFlushers(const char16_t* aReason)
           nsCOMPtr<nsIObserver> observer;
           bool loop = true;
 
-          while (NS_SUCCEEDED(e->HasMoreElements(&loop)) && loop)
+          while (NS_SUCCEEDED(e->HasMoreElements(&loop)) && loop) 
           {
-              nsCOMPtr<nsISupports> supports;
-              e->GetNext(getter_AddRefs(supports));
+              e->GetNext(getter_AddRefs(observer));
 
-              if (!supports)
+              if (!observer)
                   continue;
 
-              observer = do_QueryInterface(supports);
               observer->Observe(observer, "memory-pressure", aReason);
           }
         }
     }
 
-    sIsFlushing = false;
+    sIsFlushing = 0;
     return NS_OK;
 }
 
 // XXX need NS_IMPL_STATIC_ADDREF/RELEASE
-NS_IMETHODIMP_(MozExternalRefCountType) nsMemoryImpl::FlushEvent::AddRef() { return 2; }
-NS_IMETHODIMP_(MozExternalRefCountType) nsMemoryImpl::FlushEvent::Release() { return 1; }
-NS_IMPL_QUERY_INTERFACE(nsMemoryImpl::FlushEvent, nsIRunnable)
+NS_IMETHODIMP_(nsrefcnt) nsMemoryImpl::FlushEvent::AddRef() { return 2; }
+NS_IMETHODIMP_(nsrefcnt) nsMemoryImpl::FlushEvent::Release() { return 1; }
+NS_IMPL_QUERY_INTERFACE1(nsMemoryImpl::FlushEvent, nsIRunnable)
 
 NS_IMETHODIMP
 nsMemoryImpl::FlushEvent::Run()
@@ -184,8 +183,8 @@ nsMemoryImpl::FlushEvent::Run()
     return NS_OK;
 }
 
-mozilla::Atomic<bool>
-nsMemoryImpl::sIsFlushing;
+int32_t
+nsMemoryImpl::sIsFlushing = 0;
 
 PRIntervalTime
 nsMemoryImpl::sLastFlushTime = 0;

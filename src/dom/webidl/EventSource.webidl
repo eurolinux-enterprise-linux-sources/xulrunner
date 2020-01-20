@@ -11,8 +11,7 @@
  * and create derivative works of this document.
  */
 
-[Constructor(DOMString url, optional EventSourceInit eventSourceInitDict),
- Func="mozilla::dom::EventSource::PrefEnabled"]
+[Constructor(DOMString url, optional EventSourceInit eventSourceInitDict), PrefControlled]
 interface EventSource : EventTarget {
   [Constant]
   readonly attribute DOMString url;
@@ -26,9 +25,12 @@ interface EventSource : EventTarget {
   readonly attribute unsigned short readyState;
 
   // networking
-  attribute EventHandler onopen;
-  attribute EventHandler onmessage;
-  attribute EventHandler onerror;
+  [SetterThrows]
+           attribute EventHandler onopen;
+  [SetterThrows]
+           attribute EventHandler onmessage;
+  [SetterThrows]
+           attribute EventHandler onerror;
   void close();
 };
 

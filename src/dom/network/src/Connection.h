@@ -6,12 +6,11 @@
 #ifndef mozilla_dom_network_Connection_h
 #define mozilla_dom_network_Connection_h
 
-#include "Types.h"
-#include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/Observer.h"
-#include "mozilla/dom/NetworkInformationBinding.h"
+#include "nsIDOMConnection.h"
+#include "nsDOMEventTargetHelper.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsINetworkProperties.h"
+#include "mozilla/Observer.h"
+#include "Types.h"
 
 namespace mozilla {
 
@@ -22,15 +21,15 @@ class NetworkInformation;
 namespace dom {
 namespace network {
 
-class Connection MOZ_FINAL : public DOMEventTargetHelper
-                           , public NetworkObserver
-                           , public nsINetworkProperties
+class Connection : public nsDOMEventTargetHelper
+                 , public nsIDOMMozConnection
+                 , public NetworkObserver
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSINETWORKPROPERTIES
+  NS_DECL_NSIDOMMOZCONNECTION
 
-  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(DOMEventTargetHelper)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
   Connection();
 
@@ -40,14 +39,6 @@ public:
   // For IObserver
   void Notify(const hal::NetworkInformation& aNetworkInfo);
 
-  // WebIDL
-
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  ConnectionType Type() const { return mType; }
-
-  IMPL_EVENT_HANDLER(typechange)
-
 private:
   /**
    * Update the connection information stored in the object using a
@@ -56,19 +47,17 @@ private:
   void UpdateFromNetworkInfo(const hal::NetworkInformation& aNetworkInfo);
 
   /**
-   * The type of current connection.
+   * If the connection is of a type that can be metered.
    */
-  ConnectionType mType;
+  bool mCanBeMetered;
 
   /**
-   * If the connection is WIFI
+   * The connection bandwidth.
    */
-  bool mIsWifi;
+  double mBandwidth;
 
-  /**
-   * DHCP Gateway information for IPV4, in network byte order. 0 if unassigned.
-   */
-  uint32_t mDHCPGateway;
+  static const char* sMeteredPrefName;
+  static const bool  sMeteredDefaultValue;
 };
 
 } // namespace network

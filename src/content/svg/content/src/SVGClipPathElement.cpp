@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "mozilla/dom/SVGClipPathElement.h"
 #include "mozilla/dom/SVGClipPathElementBinding.h"
@@ -15,9 +15,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGClipPathElement::WrapNode(JSContext *aCx)
+SVGClipPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGClipPathElementBinding::Wrap(aCx, this);
+  return SVGClipPathElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::EnumInfo SVGClipPathElement::sEnumInfo[1] =
@@ -31,15 +31,17 @@ nsSVGElement::EnumInfo SVGClipPathElement::sEnumInfo[1] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGClipPathElement::SVGClipPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGClipPathElement::SVGClipPathElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGClipPathElementBase(aNodeInfo)
 {
 }
 
-already_AddRefed<SVGAnimatedEnumeration>
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
 SVGClipPathElement::ClipPathUnits()
 {
-  return mEnumAttributes[CLIPPATHUNITS].ToDOMAnimatedEnum(this);
+  nsCOMPtr<nsIDOMSVGAnimatedEnumeration> unit;
+  mEnumAttributes[CLIPPATHUNITS].ToDOMAnimatedEnum(getter_AddRefs(unit), this);
+  return unit.forget();
 }
 
 nsSVGElement::EnumAttributesInfo

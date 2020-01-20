@@ -6,12 +6,9 @@
 #ifndef MOZILLA_GFX_BASERECT_H_
 #define MOZILLA_GFX_BASERECT_H_
 
-#include <algorithm>
 #include <cmath>
-
-#include "mozilla/Assertions.h"
-#include "mozilla/FloatingPoint.h"
-#include "mozilla/TypeTraits.h"
+#include <mozilla/Assertions.h>
+#include <algorithm>
 
 namespace mozilla {
 namespace gfx {
@@ -39,7 +36,7 @@ namespace gfx {
  * Do not use this class directly. Subclass it, pass that subclass as the
  * Sub parameter, and only use that subclass.
  */
-template <class T, class Sub, class Point, class SizeT, class MarginT>
+template <class T, class Sub, class Point, class SizeT, class Margin>
 struct BaseRect {
   T x, y, width, height;
 
@@ -62,11 +59,10 @@ struct BaseRect {
   // "Finite" means not inf and not NaN
   bool IsFinite() const
   {
-    typedef typename mozilla::Conditional<mozilla::IsSame<T, float>::value, float, double>::Type FloatType;
-    return (mozilla::IsFinite(FloatType(x)) &&
-            mozilla::IsFinite(FloatType(y)) &&
-            mozilla::IsFinite(FloatType(width)) &&
-            mozilla::IsFinite(FloatType(height)));
+    return (std::isfinite(x) &&
+            std::isfinite(y) &&
+            std::isfinite(width) &&
+            std::isfinite(height));
   }
 
   // Returns true if this rectangle contains the interior of aRect. Always
@@ -193,7 +189,7 @@ struct BaseRect {
     width += 2 * aDx;
     height += 2 * aDy;
   }
-  void Inflate(const MarginT& aMargin)
+  void Inflate(const Margin& aMargin)
   {
     x -= aMargin.left;
     y -= aMargin.top;
@@ -210,7 +206,7 @@ struct BaseRect {
     width = std::max(T(0), width - 2 * aDx);
     height = std::max(T(0), height - 2 * aDy);
   }
-  void Deflate(const MarginT& aMargin)
+  void Deflate(const Margin& aMargin)
   {
     x += aMargin.left;
     y += aMargin.top;
@@ -255,12 +251,12 @@ struct BaseRect {
   }
 
   // Find difference as a Margin
-  MarginT operator-(const Sub& aRect) const
+  Margin operator-(const Sub& aRect) const
   {
-    return MarginT(aRect.y - y,
-                   XMost() - aRect.XMost(),
-                   YMost() - aRect.YMost(),
-                   aRect.x - x);
+    return Margin(aRect.y - y,
+                  XMost() - aRect.XMost(),
+                  YMost() - aRect.YMost(),
+                  aRect.x - x);
   }
 
   // Helpers for accessing the vertices
@@ -444,18 +440,18 @@ struct BaseRect {
   }
 
   /**
-   * Clamp this rectangle to be inside aRect. The function returns a copy of
-   * this rect after it is forced inside the bounds of aRect. It will attempt to
-   * retain the size but will shrink the dimensions that don't fit.
+   * Clamp aRect to this rectangle. This returns aRect after it is forced
+   * inside the bounds of this rectangle. It will attempt to retain the size
+   * but will shrink the dimensions that don't fit.
    */
-  Sub ForceInside(const Sub& aRect) const
+  Sub ClampRect(const Sub& aRect) const
   {
     Sub rect(std::max(aRect.x, x),
              std::max(aRect.y, y),
              std::min(aRect.width, width),
              std::min(aRect.height, height));
-    rect.x = std::min(rect.XMost(), aRect.XMost()) - rect.width;
-    rect.y = std::min(rect.YMost(), aRect.YMost()) - rect.height;
+    rect.x = std::min(rect.XMost(), XMost()) - rect.width;
+    rect.y = std::min(rect.YMost(), YMost()) - rect.height;
     return rect;
   }
 

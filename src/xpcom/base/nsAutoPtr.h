@@ -6,10 +6,15 @@
 #ifndef nsAutoPtr_h___
 #define nsAutoPtr_h___
 
+  // Wrapping includes can speed up compiles (see "Large Scale C++ Software Design")
+#ifndef nsCOMPtr_h___
+  // For |already_AddRefed|, |NSCAP_Zero|,
+  // |NSCAP_DONT_PROVIDE_NONCONST_OPEQ|,
+  // |NSCAP_FEATURE_INLINE_STARTASSIGNMENT|
 #include "nsCOMPtr.h"
+#endif
 
 #include "nsCycleCollectionNoteChild.h"
-#include "mozilla/MemoryReporting.h"
 
 /*****************************************************************************/
 
@@ -86,19 +91,12 @@ class nsAutoPtr
         {
         }
 
-      // This constructor shouldn't exist; we should just use the &&
-      // constructor.
       nsAutoPtr( nsAutoPtr<T>& aSmartPtr )
             : mRawPtr( aSmartPtr.forget() )
           // Construct by transferring ownership from another smart pointer.
         {
         }
 
-      nsAutoPtr( nsAutoPtr<T>&& aSmartPtr )
-            : mRawPtr( aSmartPtr.forget() )
-          // Construct by transferring ownership from another smart pointer.
-        {
-        }
 
         // Assignment operators
 
@@ -595,18 +593,6 @@ class nsAutoArrayPtr
           return reinterpret_cast<T**>(&mRawPtr);
 #endif
         }
-
-      size_t
-      SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-        {
-          return aMallocSizeOf(mRawPtr);
-        }
-
-      size_t
-      SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-        {
-          return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
-        }
   };
 
 template <class T>
@@ -902,7 +888,7 @@ class nsRefPtr
         {
         }
 
-      nsRefPtr(const nsRefPtr<T>& aSmartPtr)
+      nsRefPtr( const nsRefPtr<T>& aSmartPtr )
             : mRawPtr(aSmartPtr.mRawPtr)
           // copy-constructor
         {
@@ -910,32 +896,18 @@ class nsRefPtr
             mRawPtr->AddRef();
         }
 
-      nsRefPtr(nsRefPtr<T>&& aRefPtr)
-            : mRawPtr(aRefPtr.mRawPtr)
-        {
-          aRefPtr.mRawPtr = nullptr;
-        }
-
-      // construct from a raw pointer (of the right type)
-
-      nsRefPtr(T* aRawPtr)
-        : mRawPtr(aRawPtr)
+      nsRefPtr( T* aRawPtr )
+            : mRawPtr(aRawPtr)
+          // construct from a raw pointer (of the right type)
         {
           if ( mRawPtr )
             mRawPtr->AddRef();
         }
 
       template <typename I>
-      nsRefPtr( already_AddRefed<I>& aSmartPtr )
-            : mRawPtr(aSmartPtr.take())
-          // construct from |already_AddRefed|
-        {
-        }
-
-      template <typename I>
-      nsRefPtr( already_AddRefed<I>&& aSmartPtr )
-            : mRawPtr(aSmartPtr.take())
-          // construct from |otherRefPtr.forget()|
+      nsRefPtr( const already_AddRefed<I>& aSmartPtr )
+            : mRawPtr(aSmartPtr.mRawPtr)
+          // construct from |dont_AddRef(expr)|
         {
         }
 
@@ -950,7 +922,7 @@ class nsRefPtr
         // Assignment operators
 
       nsRefPtr<T>&
-      operator=(const nsRefPtr<T>& rhs)
+      operator=( const nsRefPtr<T>& rhs )
           // copy assignment operator
         {
           assign_with_AddRef(rhs.mRawPtr);
@@ -967,19 +939,10 @@ class nsRefPtr
 
       template <typename I>
       nsRefPtr<T>&
-      operator=( already_AddRefed<I>& rhs )
-          // assign from |already_AddRefed|
+      operator=( const already_AddRefed<I>& rhs )
+          // assign from |dont_AddRef(expr)|
         {
-          assign_assuming_AddRef(rhs.take());
-          return *this;
-        }
-
-      template <typename I>
-      nsRefPtr<T>&
-      operator=( already_AddRefed<I>&& rhs )
-          // assign from |otherRefPtr.forget()|
-        {
-          assign_assuming_AddRef(rhs.take());
+          assign_assuming_AddRef(rhs.mRawPtr);
           return *this;
         }
 
@@ -992,14 +955,6 @@ class nsRefPtr
           assign_assuming_AddRef(static_cast<T*>(newRawPtr));
           return *this;
         }
-
-      nsRefPtr<T>&
-      operator=(nsRefPtr<T>&& aRefPtr)
-      {
-        assign_assuming_AddRef(aRefPtr.mRawPtr);
-        aRefPtr.mRawPtr = nullptr;
-        return *this;
-      }
 
         // Other pointer operators
 

@@ -3,22 +3,52 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
-#include "nsINetworkManager.idl"
 
-interface nsIDOMMozIccInfo;
 interface nsIDOMMozMobileConnectionInfo;
+interface nsIDOMMozMobileICCInfo;
 interface nsIMobileMessageCallback;
+interface nsIDOMMozSmsSegmentInfo;
 
-[scriptable, uuid(6e0f45b8-410e-11e3-8c8e-b715b2cd0128)]
-interface nsIRilNetworkInterface : nsINetworkInterface
+[scriptable, uuid(1e602d20-d066-4399-8997-daf36b3158ef)]
+interface nsIRILDataCallInfo : nsISupports
 {
-  readonly attribute unsigned long serviceId;
-  readonly attribute DOMString iccId;
+  /**
+   * Current data call state, one of the
+   * nsINetworkInterface::NETWORK_STATE_* constants.
+   */
+  readonly attribute unsigned long state;
+  readonly attribute AString cid;
+  readonly attribute AString apn;
+  readonly attribute AString ifname;
+  readonly attribute AString ip;
+  readonly attribute AString netmask;
+  readonly attribute AString broadcast;
+  readonly attribute AString gw;
+  readonly attribute jsval dns;
+};
 
-  /* The following attributes are for MMS proxy settings. */
-  readonly attribute DOMString mmsc;     // Empty string if not set.
-  readonly attribute DOMString mmsProxy; // Empty string if not set.
-  readonly attribute long      mmsPort;  // -1 if not set.
+[scriptable, uuid(5bcac053-c245-46f0-bb45-d0039bfb89f5)]
+interface nsIRILDataCallback : nsISupports
+{
+  /**
+   * Notified when a data call changes state.
+   *
+   * @param dataCall
+   *        A nsIRILDataCallInfo object.
+   */
+  void dataCallStateChanged(in nsIRILDataCallInfo dataCall);
+
+  /**
+   * Called when nsIRadioInterfaceLayer is asked to enumerate the current
+   * data call state.
+   *
+   * @param datacalls
+   *        Array of nsIRILDataCallInfo objects.
+   * @param length
+   *        Lenght of the aforementioned array.
+   */
+  void receiveDataCallList([array,size_is(length)] in nsIRILDataCallInfo dataCalls,
+                           in unsigned long length);
 };
 
 [scriptable, uuid(c0c5cb9f-6372-4b5a-b74c-baacc2da5e4f)]
@@ -29,7 +59,7 @@ interface nsIVoicemailInfo : nsISupports
   readonly attribute DOMString displayName;
 };
 
-[scriptable, uuid(95e1be50-c912-11e2-8b8b-0800200c9a66)]
+[scriptable, uuid(2f1c8055-322e-490a-b1e1-4ccd5d546b3c)]
 interface nsIRilContext : nsISupports
 {
   readonly attribute DOMString radioState;
@@ -42,23 +72,24 @@ interface nsIRilContext : nsISupports
 
   readonly attribute DOMString networkSelectionMode;
 
-  readonly attribute nsIDOMMozIccInfo iccInfo;
+  readonly attribute nsIDOMMozMobileICCInfo iccInfo;
 
   readonly attribute nsIDOMMozMobileConnectionInfo voice;
 
   readonly attribute nsIDOMMozMobileConnectionInfo data;
 };
 
-[scriptable, function, uuid(3bc96351-53b0-47a1-a888-c74c64b60f25)]
-interface nsIRilSendWorkerMessageCallback : nsISupports
+[scriptable, uuid(c1c9d1e6-fec6-4c99-880d-7a310d736e64)]
+interface nsIRadioInterfaceLayer : nsISupports
 {
-  boolean handleResponse(in jsval response);
-};
+  /**
+   * Activates or deactivates radio power.
+   */
+  void setRadioEnabled(in bool value);
 
-[scriptable, uuid(181d460e-220e-4274-8ba4-43f122eb518d)]
-interface nsIRadioInterface : nsISupports
-{
   readonly attribute nsIRilContext rilContext;
+
+  readonly attribute nsIVoicemailInfo voicemailInfo;
 
   /**
    * PDP APIs
@@ -66,33 +97,27 @@ interface nsIRadioInterface : nsISupports
   void setupDataCallByType(in DOMString apntype);
   void deactivateDataCallByType(in DOMString apntype);
   long getDataCallStateByType(in DOMString apntype);
+  void setupDataCall(in long radioTech,
+                     in DOMString apn,
+                     in DOMString user,
+                     in DOMString passwd,
+                     in long chappap,
+                     in DOMString pdptype);
+  void deactivateDataCall(in DOMString cid,
+                          in DOMString reason);
+  void getDataCallList();
+
+  void registerDataCallCallback(in nsIRILDataCallback callback);
+  void unregisterDataCallCallback(in nsIRILDataCallback callback);
 
   void updateRILNetworkInterface();
 
   /**
    * SMS-related functionality.
    */
-  void getSegmentInfoForText(in DOMString text,
-                             in nsIMobileMessageCallback request);
+  nsIDOMMozSmsSegmentInfo getSegmentInfoForText(in DOMString text);
 
   void sendSMS(in DOMString number,
                in DOMString message,
-               in boolean silent,
                in nsIMobileMessageCallback request);
-
-  void sendWorkerMessage(in DOMString type,
-              [optional] in jsval message,
-              [optional] in nsIRilSendWorkerMessageCallback callback);
-
-  void getSmscAddress(in nsIMobileMessageCallback request);
-};
-
-[scriptable, uuid(d035c32e-b491-11e3-9f9d-c716fab88bd6)]
-interface nsIRadioInterfaceLayer : nsISupports
-{
-  readonly attribute unsigned long numRadioInterfaces;
-
-  nsIRadioInterface getRadioInterface(in unsigned long clientId);
-
-  void setMicrophoneMuted(in boolean muted);
 };

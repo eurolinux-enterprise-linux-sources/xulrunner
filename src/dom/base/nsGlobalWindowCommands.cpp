@@ -6,13 +6,12 @@
 #include "nsGlobalWindowCommands.h"
 
 #include "nsIComponentManager.h"
-#include "nsIDOMElement.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsCRT.h"
 #include "nsString.h"
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Util.h"
 
 #include "nsIControllerCommandTable.h"
 #include "nsICommandParams.h"
@@ -26,9 +25,8 @@
 #include "nsIContentViewer.h"
 #include "nsFocusManager.h"
 #include "nsCopySupport.h"
-#include "nsIClipboard.h"
+#include "nsGUIEvent.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/BasicEvents.h"
 
 #include "nsIClipboardDragDropHooks.h"
 #include "nsIClipboardDragDropHookList.h"
@@ -132,7 +130,7 @@ public:
 #endif
 
 
-NS_IMPL_ISUPPORTS(nsSelectionCommandsBase, nsIControllerCommand)
+NS_IMPL_ISUPPORTS1(nsSelectionCommandsBase, nsIControllerCommand)
 
 /* boolean isCommandEnabled (in string aCommandName, in nsISupports aCommandContext); */
 NS_IMETHODIMP
@@ -245,8 +243,12 @@ nsSelectMoveScrollCommand::DoCommand(const char *aCommandName, nsISupports *aCom
     caretOn = Preferences::GetBool("accessibility.browsewithcaret");
     if (caretOn) {
       nsCOMPtr<nsIDocShell> docShell = piWindow->GetDocShell();
-      if (docShell && docShell->ItemType() == nsIDocShellTreeItem::typeChrome) {
-        caretOn = false;
+      if (docShell) {
+        int32_t itemType;
+        docShell->GetItemType(&itemType);
+        if (itemType == nsIDocShellTreeItem::typeChrome) {
+          caretOn = false;
+        }
       }
     }
   }
@@ -329,7 +331,7 @@ public:
   NS_DECL_NSICONTROLLERCOMMAND
 };
 
-NS_IMPL_ISUPPORTS(nsClipboardCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS1(nsClipboardCommand, nsIControllerCommand)
 
 nsresult
 nsClipboardCommand::IsCommandEnabled(const char* aCommandName, nsISupports *aContext, bool *outCmdEnabled)
@@ -363,7 +365,7 @@ nsClipboardCommand::DoCommand(const char *aCommandName, nsISupports *aContext)
   nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
 
-  nsCopySupport::FireClipboardEvent(NS_COPY, nsIClipboard::kGlobalClipboard, presShell, nullptr);
+  nsCopySupport::FireClipboardEvent(NS_COPY, presShell, nullptr);
   return NS_OK;
 }
 
@@ -403,7 +405,7 @@ protected:
 };
 
 
-NS_IMPL_ISUPPORTS(nsSelectionCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS1(nsSelectionCommand, nsIControllerCommand)
 
 
 /*---------------------------------------------------------------------------
@@ -634,7 +636,7 @@ protected:
      no params
 ----------------------------------------------------------------------------*/
 
-NS_IMPL_ISUPPORTS(nsWebNavigationBaseCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS1(nsWebNavigationBaseCommand, nsIControllerCommand)
 
 NS_IMETHODIMP
 nsWebNavigationBaseCommand::IsCommandEnabled(const char * aCommandName,
@@ -732,7 +734,7 @@ protected:
 };
 
 
-NS_IMPL_ISUPPORTS(nsClipboardDragDropHookCommand, nsIControllerCommand)
+NS_IMPL_ISUPPORTS1(nsClipboardDragDropHookCommand, nsIControllerCommand)
 
 NS_IMETHODIMP
 nsClipboardDragDropHookCommand::IsCommandEnabled(const char * aCommandName,

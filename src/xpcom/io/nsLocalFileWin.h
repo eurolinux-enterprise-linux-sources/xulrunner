@@ -15,7 +15,6 @@
 #include "nsILocalFileWin.h"
 #include "nsIHashable.h"
 #include "nsIClassInfoImpl.h"
-#include "prio.h"
 
 #include "mozilla/Attributes.h"
 
@@ -35,7 +34,7 @@ public:
     static nsresult nsLocalFileConstructor(nsISupports* outer, const nsIID& aIID, void* *aInstancePtr);
 
     // nsISupports interface
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     
     // nsIFile interface
     NS_DECL_NSIFILE
@@ -54,14 +53,6 @@ public:
     static void GlobalShutdown();
 
 private:
-    // CopyMove and CopySingleFile constants for |options| parameter:
-    enum CopyFileOption {
-      FollowSymlinks          = 1u << 0,
-      Move                    = 1u << 1,
-      SkipNtfsAclReset        = 1u << 2,
-      Rename                  = 1u << 3
-    };
-
     nsLocalFile(const nsLocalFile& other);
     ~nsLocalFile() {}
 
@@ -96,12 +87,13 @@ private:
     void EnsureShortPath();
     
     nsresult CopyMove(nsIFile *newParentDir, const nsAString &newName,
-                      uint32_t options);
+                      bool followSymlinks, bool move);
     nsresult CopySingleFile(nsIFile *source, nsIFile* dest,
                             const nsAString &newName,
-                            uint32_t options);
+                            bool followSymlinks, bool move,
+                            bool skipNtfsAclReset = false);
 
-    nsresult SetModDate(int64_t aLastModifiedTime, const wchar_t *filePath);
+    nsresult SetModDate(int64_t aLastModifiedTime, const PRUnichar *filePath);
     nsresult HasFileAttribute(DWORD fileAttrib, bool *_retval);
     nsresult AppendInternal(const nsAFlatString &node,
                             bool multipleComponents);

@@ -8,13 +8,15 @@
 #include "prefapi.h"
 #include "prefapi_private_data.h"
 #include "prefread.h"
-#include "MainThreadUtils.h"
 #include "nsReadableUtils.h"
 #include "nsCRT.h"
 
 #define PL_ARENA_CONST_ALIGN_MASK 3
 #include "plarena.h"
 
+#ifdef XP_OS2
+  #include <sys/types.h>
+#endif
 #ifdef _WIN32
   #include "windows.h"
 #endif /* _WIN32 */
@@ -24,12 +26,16 @@
 #include "plbase64.h"
 #include "prlog.h"
 #include "prprf.h"
-#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/PContent.h"
 #include "nsQuickSort.h"
 #include "nsString.h"
 #include "nsPrintfCString.h"
 #include "prlink.h"
+
+#ifdef XP_OS2
+#define INCL_DOS
+#include <os2.h>
+#endif
 
 using namespace mozilla;
 
@@ -69,7 +75,7 @@ PLDHashTable        gHashTable = { nullptr };
 static PLArenaPool  gPrefNameArena;
 bool                gDirty = false;
 
-static struct CallbackNode* gCallbacks = nullptr;
+static struct CallbackNode* gCallbacks = NULL;
 static bool         gIsAnyPrefLocked = false;
 // These are only used during the call to pref_DoCallback
 static bool         gCallbacksInProgress = false;
@@ -150,8 +156,8 @@ nsresult PREF_Init()
 {
     if (!gHashTable.ops) {
         if (!PL_DHashTableInit(&gHashTable, &pref_HashTableOps, nullptr,
-                               sizeof(PrefHashEntry), PREF_HASHTABLE_INITIAL_SIZE,
-                               fallible_t())) {
+                               sizeof(PrefHashEntry),
+                               PREF_HASHTABLE_INITIAL_SIZE)) {
             gHashTable.ops = nullptr;
             return NS_ERROR_OUT_OF_MEMORY;
         }
@@ -177,7 +183,7 @@ void PREF_Cleanup()
         free(node);
         node = next_node;
     }
-    gCallbacks = nullptr;
+    gCallbacks = NULL;
 
     PREF_CleanupPrefs();
 }
@@ -208,7 +214,7 @@ static void str_escape(const char * original, nsAFlatCString& aResult)
      */
     const char *p;
 
-    if (original == nullptr)
+    if (original == NULL)
         return;
 
     /* Paranoid worst case all slashes will free quickly */
@@ -245,12 +251,8 @@ static void str_escape(const char * original, nsAFlatCString& aResult)
 nsresult
 PREF_SetCharPref(const char *pref_name, const char *value, bool set_default)
 {
-    if ((uint32_t)strlen(value) > MAX_PREF_LENGTH) {
-        return NS_ERROR_ILLEGAL_VALUE;
-    }
-
     PrefValue pref;
-    pref.stringVal = (char*)value;
+    pref.stringVal = (char*) value;
 
     return pref_HashPref(pref_name, pref, PREF_STRING, set_default ? kPrefSetDefault : 0);
 }
@@ -290,7 +292,8 @@ SetPrefValue(const char* aPrefName, const dom::PrefValue& aValue,
         return PREF_SetBoolPref(aPrefName, aValue.get_bool(),
                                 setDefault);
     default:
-        MOZ_CRASH();
+        MOZ_NOT_REACHED();
+        return NS_ERROR_FAILURE;
     }
 }
 
@@ -422,7 +425,7 @@ GetPrefValueFromEntry(PrefHashEntry *aHashEntry, dom::PrefSetting* aPref,
         *settingValue = !!value->boolVal;
         return;
     default:
-        MOZ_CRASH();
+        MOZ_NOT_REACHED();
     }
 }
 
@@ -576,10 +579,6 @@ pref_DeleteItem(PLDHashTable *table, PLDHashEntryHdr *heh, uint32_t i, void *arg
 nsresult
 PREF_DeleteBranch(const char *branch_name)
 {
-#ifndef MOZ_B2G
-    MOZ_ASSERT(NS_IsMainThread());
-#endif
-
     int len = (int)strlen(branch_name);
 
     if (!gHashTable.ops)
@@ -647,10 +646,6 @@ pref_ClearUserPref(PLDHashTable *table, PLDHashEntryHdr *he, uint32_t,
 nsresult
 PREF_ClearAllUserPrefs()
 {
-#ifndef MOZ_B2G
-    MOZ_ASSERT(NS_IsMainThread());
-#endif
-
     if (!gHashTable.ops)
         return NS_ERROR_NOT_INITIALIZED;
 
@@ -706,34 +701,25 @@ static bool pref_ValueChanged(PrefValue oldValue, PrefValue newValue, PrefType t
     return changed;
 }
 
-/*
- * Overwrite the type and value of an existing preference. Caller must
- * ensure that they are not changing the type of a preference that has
- * a default value.
- */
-static void pref_SetValue(PrefValue* existingValue, uint16_t *existingFlags,
-                          PrefValue newValue, PrefType newType)
+static void pref_SetValue(PrefValue* oldValue, PrefValue newValue, PrefType type)
 {
-    if ((*existingFlags & PREF_STRING) && existingValue->stringVal) {
-        PL_strfree(existingValue->stringVal);
-    }
-    *existingFlags = (*existingFlags & ~PREF_VALUETYPE_MASK) | newType;
-    if (newType & PREF_STRING) {
-        PR_ASSERT(newValue.stringVal);
-        existingValue->stringVal = newValue.stringVal ? PL_strdup(newValue.stringVal) : nullptr;
-    }
-    else {
-        *existingValue = newValue;
+    switch (type & PREF_VALUETYPE_MASK)
+    {
+        case PREF_STRING:
+            PR_ASSERT(newValue.stringVal);
+            if (oldValue->stringVal)
+                PL_strfree(oldValue->stringVal);
+            oldValue->stringVal = newValue.stringVal ? PL_strdup(newValue.stringVal) : NULL;
+            break;
+
+        default:
+            *oldValue = newValue;
     }
     gDirty = true;
 }
 
 PrefHashEntry* pref_HashTableLookup(const void *key)
 {
-#ifndef MOZ_B2G
-    MOZ_ASSERT(NS_IsMainThread());
-#endif
-
     PrefHashEntry* result =
         static_cast<PrefHashEntry*>(PL_DHashTableOperate(&gHashTable, key, PL_DHASH_LOOKUP));
 
@@ -745,10 +731,6 @@ PrefHashEntry* pref_HashTableLookup(const void *key)
 
 nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t flags)
 {
-#ifndef MOZ_B2G
-    MOZ_ASSERT(NS_IsMainThread());
-#endif
-
     if (!gHashTable.ops)
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -757,7 +739,7 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
     if (!pref)
         return NS_ERROR_OUT_OF_MEMORY;
 
-    // new entry, better initialize
+    // new entry, better intialize
     if (!pref->key) {
 
         // initialize the pref entry
@@ -766,9 +748,10 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
         memset(&pref->defaultPref, 0, sizeof(pref->defaultPref));
         memset(&pref->userPref, 0, sizeof(pref->userPref));
     }
-    else if ((pref->flags & PREF_HAS_DEFAULT) && PREF_TYPE(pref) != type)
+    else if ((((PrefType)(pref->flags)) & PREF_VALUETYPE_MASK) !=
+                 (type & PREF_VALUETYPE_MASK))
     {
-        NS_WARNING(nsPrintfCString("Trying to overwrite value of default pref %s with the wrong type!", key).get());
+        NS_WARNING(nsPrintfCString("Trying to set pref %s to with the wrong type!", key).get());
         return NS_ERROR_UNEXPECTED;
     }
 
@@ -780,7 +763,7 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
             if (pref_ValueChanged(pref->defaultPref, value, type) ||
                 !(pref->flags & PREF_HAS_DEFAULT))
             {
-                pref_SetValue(&pref->defaultPref, &pref->flags, value, type);
+                pref_SetValue(&pref->defaultPref, value, type);
                 pref->flags |= PREF_HAS_DEFAULT;
                 if (!PREF_HAS_USER_VALUE(pref))
                     valueChanged = true;
@@ -791,23 +774,21 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
     {
         /* If new value is same as the default value, then un-set the user value.
            Otherwise, set the user value only if it has changed */
-        if ((pref->flags & PREF_HAS_DEFAULT) &&
-            !pref_ValueChanged(pref->defaultPref, value, type) &&
+        if (!pref_ValueChanged(pref->defaultPref, value, type) &&
+            (pref->flags & PREF_HAS_DEFAULT) &&
             !(flags & kPrefForceSet))
         {
             if (PREF_HAS_USER_VALUE(pref))
             {
-                /* XXX should we free a user-set string value if there is one? */
                 pref->flags &= ~PREF_USERSET;
                 if (!PREF_IS_LOCKED(pref))
                     valueChanged = true;
             }
         }
-        else if (!PREF_HAS_USER_VALUE(pref) ||
-                 PREF_TYPE(pref) != type ||
-                 pref_ValueChanged(pref->userPref, value, type) )
+        else if ( !PREF_HAS_USER_VALUE(pref) ||
+                   pref_ValueChanged(pref->userPref, value, type) )
         {
-            pref_SetValue(&pref->userPref, &pref->flags, value, type);
+            pref_SetValue(&pref->userPref, value, type);
             pref->flags |= PREF_USERSET;
             if (!PREF_IS_LOCKED(pref))
                 valueChanged = true;
@@ -826,7 +807,7 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
 }
 
 size_t
-pref_SizeOfPrivateData(MallocSizeOf aMallocSizeOf)
+pref_SizeOfPrivateData(nsMallocSizeOfFun aMallocSizeOf)
 {
     size_t n = PL_SizeOfArenaPoolExcludingPool(&gPrefNameArena, aMallocSizeOf);
     for (struct CallbackNode* node = gCallbacks; node; node = node->next) {
@@ -921,9 +902,9 @@ PREF_UnregisterCallback(const char *pref_node,
 {
     nsresult rv = NS_ERROR_FAILURE;
     struct CallbackNode* node = gCallbacks;
-    struct CallbackNode* prev_node = nullptr;
+    struct CallbackNode* prev_node = NULL;
 
-    while (node != nullptr)
+    while (node != NULL)
     {
         if ( node->func == callback &&
              node->data == instance_data &&
@@ -965,14 +946,16 @@ static nsresult pref_DoCallback(const char* changed_pref)
     // out the |func| pointer. We release them at the end of this function
     // if we haven't reentered.
 
-    for (node = gCallbacks; node != nullptr; node = node->next)
+    for (node = gCallbacks; node != NULL; node = node->next)
     {
         if ( node->func &&
              PL_strncmp(changed_pref,
                         node->domain,
                         strlen(node->domain)) == 0 )
         {
-            (*node->func) (changed_pref, node->data);
+            nsresult rv2 = (*node->func) (changed_pref, node->data);
+            if (NS_FAILED(rv2))
+                rv = rv2;
         }
     }
 
@@ -980,10 +963,10 @@ static nsresult pref_DoCallback(const char* changed_pref)
 
     if (gShouldCleanupDeadNodes && !gCallbacksInProgress)
     {
-        struct CallbackNode* prev_node = nullptr;
+        struct CallbackNode* prev_node = NULL;
         node = gCallbacks;
 
-        while (node != nullptr)
+        while (node != NULL)
         {
             if (!node->func)
             {

@@ -36,6 +36,11 @@
 
 ////////////////////////////////////////////////////////////////////////
 
+static NS_DEFINE_CID(kRDFServiceCID,        NS_RDFSERVICE_CID);
+static NS_DEFINE_CID(kRDFContainerUtilsCID, NS_RDFCONTAINERUTILS_CID);
+
+////////////////////////////////////////////////////////////////////////
+
 class ContainerEnumeratorImpl : public nsISimpleEnumerator {
 private:
     // pseudo-constants
@@ -79,8 +84,6 @@ ContainerEnumeratorImpl::Init()
 {
     if (gRefCnt++ == 0) {
         nsresult rv;
-
-        NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
         nsCOMPtr<nsIRDFService> rdf = do_GetService(kRDFServiceCID);
         NS_ASSERTION(rdf != nullptr, "unable to acquire resource manager");
         if (! rdf)
@@ -90,7 +93,6 @@ ContainerEnumeratorImpl::Init()
         NS_ASSERTION(NS_SUCCEEDED(rv), "unable to get resource");
         if (NS_FAILED(rv)) return rv;
 
-        NS_DEFINE_CID(kRDFContainerUtilsCID, NS_RDFCONTAINERUTILS_CID);
         rv = CallGetService(kRDFContainerUtilsCID, &gRDFC);
         if (NS_FAILED(rv)) return rv;
     }
@@ -107,7 +109,7 @@ ContainerEnumeratorImpl::~ContainerEnumeratorImpl()
     }
 }
 
-NS_IMPL_ISUPPORTS(ContainerEnumeratorImpl, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS1(ContainerEnumeratorImpl, nsISimpleEnumerator)
 
 
 NS_IMETHODIMP
@@ -154,7 +156,7 @@ ContainerEnumeratorImpl::HasMoreElements(bool* aResult)
         if (! nextValLiteral)
              continue;
 
-         const char16_t *nextValStr;
+         const PRUnichar *nextValStr;
          nextValLiteral->GetValueConst(&nextValStr);
 		 
          nsresult err;

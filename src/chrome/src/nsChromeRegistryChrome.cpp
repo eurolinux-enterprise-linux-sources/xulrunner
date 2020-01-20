@@ -13,27 +13,35 @@
 #include <windows.h>
 #elif defined(XP_MACOSX)
 #include <CoreServices/CoreServices.h>
+#elif defined(MOZ_WIDGET_GTK)
+#include <gtk/gtk.h>
 #endif
 
 #include "nsArrayEnumerator.h"
+#include "nsAppDirectoryServiceDefs.h"
 #include "nsComponentManager.h"
 #include "nsEnumeratorUtils.h"
 #include "nsNetUtil.h"
 #include "nsStringEnumerator.h"
 #include "nsTextFormatter.h"
+#include "nsUnicharUtils.h"
 #include "nsXPCOMCIDInternal.h"
+#include "nsZipArchive.h"
 
 #include "mozilla/LookAndFeel.h"
 
 #include "nsICommandLine.h"
 #include "nsILocaleService.h"
+#include "nsIFile.h"
 #include "nsIObserverService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
 #include "mozilla/Preferences.h"
 #include "nsIResProtocolHandler.h"
 #include "nsIScriptError.h"
+#include "nsIVersionComparator.h"
 #include "nsIXPConnect.h"
+#include "nsIXULAppInfo.h"
 #include "nsIXULRuntime.h"
 
 #define UILOCALE_CMD_LINE_ARG "UILocale"
@@ -116,17 +124,21 @@ nsChromeRegistryChrome::Init()
   if (NS_FAILED(rv))
     return rv;
 
+  mOverlayHash.Init();
+  mStyleHash.Init();
+  
   mSelectedLocale = NS_LITERAL_CSTRING("en-US");
   mSelectedSkin = NS_LITERAL_CSTRING("classic/1.0");
 
-  PL_DHashTableInit(&mPackagesHash, &kTableOps,
-                    nullptr, sizeof(PackageEntry), 16);
+  if (!PL_DHashTableInit(&mPackagesHash, &kTableOps,
+                         nullptr, sizeof(PackageEntry), 16))
+    return NS_ERROR_FAILURE;
 
   bool safeMode = false;
   nsCOMPtr<nsIXULRuntime> xulrun (do_GetService(XULAPPINFO_SERVICE_CONTRACTID));
   if (xulrun)
     xulrun->GetInSafeMode(&safeMode);
-
+  
   nsCOMPtr<nsIPrefService> prefserv (do_GetService(NS_PREFSERVICE_CONTRACTID));
   nsCOMPtr<nsIPrefBranch> prefs;
 
@@ -326,7 +338,7 @@ nsChromeRegistryChrome::SelectLocaleFromPref(nsIPrefBranch* prefs)
 
 NS_IMETHODIMP
 nsChromeRegistryChrome::Observe(nsISupports *aSubject, const char *aTopic,
-                                const char16_t *someData)
+                                const PRUnichar *someData)
 {
   nsresult rv = NS_OK;
 

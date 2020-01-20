@@ -11,8 +11,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 const kEntities = { "geolocation": "geolocation",
-                    "desktop-notification": "desktopNotification",
-                    "contacts": "contacts" };
+                    "desktop-notification": "desktopNotification" };
 
 function ContentPermissionPrompt() {}
 
@@ -21,8 +20,8 @@ ContentPermissionPrompt.prototype = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIContentPermissionPrompt]),
 
-  handleExistingPermission: function handleExistingPermission(request, type, isApp) {
-    let result = Services.perms.testExactPermissionFromPrincipal(request.principal, type);
+  handleExistingPermission: function handleExistingPermission(request) {
+    let result = Services.perms.testExactPermissionFromPrincipal(request.principal, request.type);
     if (result == Ci.nsIPermissionManager.ALLOW_ACTION) {
       request.allow();
       return true;
@@ -31,12 +30,6 @@ ContentPermissionPrompt.prototype = {
       request.cancel();
       return true;
     }
-
-    if (isApp && (result == Ci.nsIPermissionManager.UNKNOWN_ACTION && !!kEntities[type])) {
-      request.cancel();
-      return true;
-    }
-
     return false;
   },
 
@@ -60,18 +53,8 @@ ContentPermissionPrompt.prototype = {
   },
 
   prompt: function(request) {
-    let isApp = request.principal.appId !== Ci.nsIScriptSecurityManager.NO_APP_ID && request.principal.appId !== Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID;
-
-    // Only allow exactly one permission rquest here.
-    let types = request.types.QueryInterface(Ci.nsIArray);
-    if (types.length != 1) {
-      request.cancel();
-      return;
-    }
-    let perm = types.queryElementAt(0, Ci.nsIContentPermissionType);
-
     // Returns true if the request was handled
-    if (this.handleExistingPermission(request, perm.type, isApp))
+    if (this.handleExistingPermission(request))
        return;
 
     let chromeWin = this.getChromeForRequest(request);
@@ -80,17 +63,18 @@ ContentPermissionPrompt.prototype = {
       return;
 
     let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-    let entityName = kEntities[perm.type];
+    let entityName = kEntities[request.type];
 
     let buttons = [{
       label: browserBundle.GetStringFromName(entityName + ".allow"),
       callback: function(aChecked) {
         // If the user checked "Don't ask again", make a permanent exception
         if (aChecked) {
-          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION);
-        } else if (isApp || entityName == "desktopNotification") {
-          // Otherwise allow the permission for the current session (if the request comes from an app or if it's a desktop-notification request)
-          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
+          Services.perms.addFromPrincipal(request.principal, request.type, Ci.nsIPermissionManager.ALLOW_ACTION);
+        } else if (entityName == "desktopNotification") {
+          // For notifications, it doesn't make sense to grant permission once. So when the user clicks allow,
+          // we let the requestor create notifications for the session.
+          Services.perms.addFromPrincipal(request.principal, request.type, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
         }
 
         request.allow();
@@ -101,7 +85,7 @@ ContentPermissionPrompt.prototype = {
       callback: function(aChecked) {
         // If the user checked "Don't ask again", make a permanent exception
         if (aChecked)
-          Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.DENY_ACTION);
+          Services.perms.addFromPrincipal(request.principal, request.type, Ci.nsIPermissionManager.DENY_ACTION);
 
         request.cancel();
       }

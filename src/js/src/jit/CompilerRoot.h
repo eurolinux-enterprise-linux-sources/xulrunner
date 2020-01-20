@@ -11,8 +11,6 @@
 
 #include "jscntxt.h"
 
-#include "jit/Ion.h"
-#include "jit/IonAllocPolicy.h"
 #include "js/RootingAPI.h"
 
 namespace js {
@@ -26,10 +24,10 @@ class CompilerRoot : public CompilerRootNode
 {
   public:
     CompilerRoot(T ptr)
-      : CompilerRootNode(nullptr)
+      : CompilerRootNode(NULL)
     {
         if (ptr) {
-            JS_ASSERT(!GetIonContext()->runtime->isInsideNursery(ptr));
+            JS_ASSERT(!IsInsideNursery(GetIonContext()->compartment->rt, ptr));
             setRoot(ptr);
         }
     }

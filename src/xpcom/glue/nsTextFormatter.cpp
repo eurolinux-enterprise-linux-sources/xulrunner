@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "prdtoa.h"
+#include "prlong.h"
 #include "prlog.h"
 #include "prprf.h"
 #include "prmem.h"
@@ -48,10 +49,10 @@
 typedef struct SprintfStateStr SprintfState;
 
 struct SprintfStateStr {
-    int (*stuff)(SprintfState *ss, const char16_t *sp, uint32_t len);
+    int (*stuff)(SprintfState *ss, const PRUnichar *sp, uint32_t len);
 
-    char16_t *base;
-    char16_t *cur;
+    PRUnichar *base;
+    PRUnichar *cur;
     uint32_t maxlen;
 
     void *stuffclosure;
@@ -63,25 +64,23 @@ struct SprintfStateStr {
 struct NumArgState{
     int	    type;		/* type of the current ap                    */
     va_list ap;			/* point to the corresponding position on ap */
-
-    enum Type {
-        INT16,
-        UINT16,
-        INTN,
-        UINTN,
-        INT32,
-        UINT32,
-        INT64,
-        UINT64,
-        STRING,
-        DOUBLE,
-        INTSTR,
-        UNISTRING,
-        UNKNOWN
-    };
 };
 
 #define NAS_DEFAULT_NUM 20  /* default number of NumberedArgumentState array */
+
+#define TYPE_INT16	0
+#define TYPE_UINT16	1
+#define TYPE_INTN	2
+#define TYPE_UINTN	3
+#define TYPE_INT32	4
+#define TYPE_UINT32	5
+#define TYPE_INT64	6
+#define TYPE_UINT64	7
+#define TYPE_STRING	8
+#define TYPE_DOUBLE	9
+#define TYPE_INTSTR	10
+#define TYPE_UNISTRING	11
+#define TYPE_UNKNOWN	20
 
 #define _LEFT		0x1
 #define _SIGNED		0x2
@@ -94,10 +93,10 @@ struct NumArgState{
 /*
 ** Fill into the buffer using the data in src
 */
-static int fill2(SprintfState *ss, const char16_t *src, int srclen, 
+static int fill2(SprintfState *ss, const PRUnichar *src, int srclen, 
                  int width, int flags)
 {
-    char16_t space = ' ';
+    PRUnichar space = ' ';
     int rv;
     
     width -= srclen;
@@ -135,7 +134,7 @@ static int fill2(SprintfState *ss, const char16_t *src, int srclen,
 /*
 ** Fill a number. The order is: optional-sign zero-filling conversion-digits
 */
-static int fill_n(SprintfState *ss, const char16_t *src, int srclen, 
+static int fill_n(SprintfState *ss, const PRUnichar *src, int srclen, 
                   int width, int prec, int type, int flags)
 {
     int zerowidth   = 0;
@@ -145,9 +144,9 @@ static int fill_n(SprintfState *ss, const char16_t *src, int srclen,
     int rightspaces = 0;
     int cvtwidth;
     int rv;
-    char16_t sign;
-    char16_t space = ' ';
-    char16_t zero = '0';
+    PRUnichar sign;
+    PRUnichar space = ' ';
+    PRUnichar zero = '0';
 
     if ((type & 1) == 0) {
 	if (flags & _NEG) {
@@ -231,10 +230,10 @@ static int fill_n(SprintfState *ss, const char16_t *src, int srclen,
 ** Convert a long into its printable form
 */
 static int cvt_l(SprintfState *ss, long num, int width, int prec,
-                 int radix, int type, int flags, const char16_t *hexp)
+                 int radix, int type, int flags, const PRUnichar *hexp)
 {
-    char16_t cvtbuf[100];
-    char16_t *cvt;
+    PRUnichar cvtbuf[100];
+    PRUnichar *cvt;
     int digits;
 
     /* according to the man page this needs to happen */
@@ -271,10 +270,10 @@ static int cvt_l(SprintfState *ss, long num, int width, int prec,
 ** Convert a 64-bit integer into its printable form
 */
 static int cvt_ll(SprintfState *ss, int64_t num, int width, int prec,
-                  int radix, int type, int flags, const char16_t *hexp)
+                  int radix, int type, int flags, const PRUnichar *hexp)
 {
-    char16_t cvtbuf[100];
-    char16_t *cvt;
+    PRUnichar cvtbuf[100];
+    PRUnichar *cvt;
     int digits;
     int64_t rad;
 
@@ -313,7 +312,7 @@ static int cvt_ll(SprintfState *ss, int64_t num, int width, int prec,
 ** form.
 */
 static int cvt_f(SprintfState *ss, double d, int width, int prec, 
-                 const char16_t type, int flags)
+                 const PRUnichar type, int flags)
 {
     int    mode = 2;
     int    decpt;
@@ -480,10 +479,10 @@ static int cvt_f(SprintfState *ss, double d, int width, int prec,
         }
     }
 
-    char16_t rbuf[256];
-    char16_t *rbufp = rbuf;
+    PRUnichar rbuf[256];
+    PRUnichar *rbufp = rbuf;
     bufp = buf;
-    // cast to char16_t
+    // cast to PRUnichar
     while ((*rbufp++ = *bufp++)) { }
     *rbufp = '\0';
 
@@ -495,7 +494,7 @@ static int cvt_f(SprintfState *ss, double d, int width, int prec,
 ** width. "prec" is the maximum number of characters of "s" to output,
 ** where -1 means until NUL.
 */
-static int cvt_S(SprintfState *ss, const char16_t *s, int width,
+static int cvt_S(SprintfState *ss, const PRUnichar *s, int width,
                  int prec, int flags)
 {
     int slen;
@@ -513,7 +512,9 @@ static int cvt_S(SprintfState *ss, const char16_t *s, int width,
     }
 
     /* and away we go */
-    return fill2(ss, s ? s : MOZ_UTF16("(null)"), slen, width, flags);
+    NS_NAMED_LITERAL_STRING(nullstr, "(null)");
+
+    return fill2(ss, s ? s : nullstr.get(), slen, width, flags);
 }
 
 /*
@@ -535,13 +536,13 @@ static int cvt_s(SprintfState *ss, const char *s, int width,
 ** the number must start from 1, and no gap among them
 */
 
-static struct NumArgState* BuildArgArray(const char16_t *fmt, 
+static struct NumArgState* BuildArgArray(const PRUnichar *fmt, 
                                          va_list ap, int * rv, 
                                          struct NumArgState * nasArray)
 {
     int number = 0, cn = 0, i;
-    const char16_t* p;
-    char16_t  c;
+    const PRUnichar* p;
+    PRUnichar  c;
     struct NumArgState* nas;
 
     /*
@@ -566,7 +567,7 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 		if (c == '$') {
 		    if (i > 0) {
 			*rv = -1;
-			return nullptr;
+			return NULL;
 		    }
 		    number++;
 		    break;
@@ -575,7 +576,7 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
                     /* non-numbered argument case */
 		    if (number > 0) {
 			*rv = -1;
-			return nullptr;
+			return NULL;
 		    }
 		    i = 1;
 		    break;
@@ -586,21 +587,21 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
     }
 
     if (number == 0) {
-	return nullptr;
+	return NULL;
     }
     
     if (number > NAS_DEFAULT_NUM) {
 	nas = (struct NumArgState*)nsMemory::Alloc(number * sizeof(struct NumArgState));
 	if (!nas) {
 	    *rv = -1;
-	    return nullptr;
+	    return NULL;
 	}
     } else {
 	nas = nasArray;
     }
 
     for (i = 0; i < number; i++) {
-	nas[i].type = NumArgState::UNKNOWN;
+	nas[i].type = TYPE_UNKNOWN;
     }
 
     /*
@@ -631,7 +632,7 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 	/* nas[cn] starts from 0, and make sure 
            nas[cn].type is not assigned */
         cn--;
-	if (nas[cn].type != NumArgState::UNKNOWN) {
+	if (nas[cn].type != TYPE_UNKNOWN) {
 	    continue;
         }
 
@@ -663,19 +664,19 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 	}
 
 	/* size */
-	nas[cn].type = NumArgState::INTN;
+	nas[cn].type = TYPE_INTN;
 	if (c == 'h') {
-	    nas[cn].type = NumArgState::INT16;
+	    nas[cn].type = TYPE_INT16;
 	    c = *p++;
 	} else if (c == 'L') {
 	    /* XXX not quite sure here */
-	    nas[cn].type = NumArgState::INT64;
+	    nas[cn].type = TYPE_INT64;
 	    c = *p++;
 	} else if (c == 'l') {
-	    nas[cn].type = NumArgState::INT32;
+	    nas[cn].type = TYPE_INT32;
 	    c = *p++;
 	    if (c == 'l') {
-	        nas[cn].type = NumArgState::INT64;
+	        nas[cn].type = TYPE_INT64;
 	        c = *p++;
 	    }
 	}
@@ -694,48 +695,48 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 	case 'e':
 	case 'f':
 	case 'g':
-	    nas[cn].type = NumArgState::DOUBLE;
+	    nas[cn].type = TYPE_DOUBLE;
 	    break;
 
 	case 'p':
 	    /* XXX should use cpp */
 	    if (sizeof(void *) == sizeof(int32_t)) {
-		nas[cn].type = NumArgState::UINT32;
+		nas[cn].type = TYPE_UINT32;
 	    } else if (sizeof(void *) == sizeof(int64_t)) {
-	        nas[cn].type = NumArgState::UINT64;
+	        nas[cn].type = TYPE_UINT64;
 	    } else if (sizeof(void *) == sizeof(int)) {
-	        nas[cn].type = NumArgState::UINTN;
+	        nas[cn].type = TYPE_UINTN;
 	    } else {
-	        nas[cn].type = NumArgState::UNKNOWN;
+	        nas[cn].type = TYPE_UNKNOWN;
 	    }
 	    break;
 
 	case 'C':
 	    /* XXX not supported I suppose */
 	    PR_ASSERT(0);
-	    nas[cn].type = NumArgState::UNKNOWN;
+	    nas[cn].type = TYPE_UNKNOWN;
 	    break;
 
 	case 'S':
-	    nas[cn].type = NumArgState::UNISTRING;
+	    nas[cn].type = TYPE_UNISTRING;
 	    break;
 
 	case 's':
-	    nas[cn].type = NumArgState::STRING;
+	    nas[cn].type = TYPE_STRING;
 	    break;
 
 	case 'n':
-	    nas[cn].type = NumArgState::INTSTR;
+	    nas[cn].type = TYPE_INTSTR;
 	    break;
 
 	default:
 	    PR_ASSERT(0);
-	    nas[cn].type = NumArgState::UNKNOWN;
+	    nas[cn].type = TYPE_UNKNOWN;
 	    break;
 	}
 
 	/* get a legal para. */
-	if (nas[cn].type == NumArgState::UNKNOWN) {
+	if (nas[cn].type == TYPE_UNKNOWN) {
 	    *rv = -1;
 	    break;
 	}
@@ -750,12 +751,12 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 	if( nas != nasArray ) {
 	    PR_DELETE(nas);
         }
-	return nullptr;
+	return NULL;
     }
 
     cn = 0;
     while (cn < number) {
-	if (nas[cn].type == NumArgState::UNKNOWN) {
+	if (nas[cn].type == TYPE_UNKNOWN) {
 	    cn++;
 	    continue;
 	}
@@ -763,33 +764,33 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 	VARARGS_ASSIGN(nas[cn].ap, ap);
 
 	switch (nas[cn].type) {
-	case NumArgState::INT16:
-	case NumArgState::UINT16:
-	case NumArgState::INTN:
-	case NumArgState::UINTN:     (void)va_arg(ap, int);         break;
+	case TYPE_INT16:
+	case TYPE_UINT16:
+	case TYPE_INTN:
+	case TYPE_UINTN:     (void)va_arg(ap, int);         break;
 
-	case NumArgState::INT32:     (void)va_arg(ap, int32_t);     break;
+	case TYPE_INT32:     (void)va_arg(ap, int32_t);     break;
 
-	case NumArgState::UINT32:    (void)va_arg(ap, uint32_t);    break;
+	case TYPE_UINT32:    (void)va_arg(ap, uint32_t);    break;
 
-	case NumArgState::INT64:     (void)va_arg(ap, int64_t);     break;
+	case TYPE_INT64:     (void)va_arg(ap, int64_t);     break;
 
-	case NumArgState::UINT64:    (void)va_arg(ap, uint64_t);    break;
+	case TYPE_UINT64:    (void)va_arg(ap, uint64_t);    break;
 
-	case NumArgState::STRING:    (void)va_arg(ap, char*);       break;
+	case TYPE_STRING:    (void)va_arg(ap, char*);       break;
 
-	case NumArgState::INTSTR:    (void)va_arg(ap, int*);        break;
+	case TYPE_INTSTR:    (void)va_arg(ap, int*);        break;
 
-	case NumArgState::DOUBLE:    (void)va_arg(ap, double);      break;
+	case TYPE_DOUBLE:    (void)va_arg(ap, double);      break;
 
-	case NumArgState::UNISTRING: (void)va_arg(ap, char16_t*);  break;
+	case TYPE_UNISTRING: (void)va_arg(ap, PRUnichar*);  break;
 
 	default:
 	    if( nas != nasArray ) {
 		PR_DELETE( nas );
             }
 	    *rv = -1;
-	    return nullptr;
+	    return NULL;
 	}
 	cn++;
     }
@@ -799,21 +800,21 @@ static struct NumArgState* BuildArgArray(const char16_t *fmt,
 /*
 ** The workhorse sprintf code.
 */
-static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
+static int dosprintf(SprintfState *ss, const PRUnichar *fmt, va_list ap)
 {
-    char16_t c;
+    PRUnichar c;
     int flags, width, prec, radix, type;
     union {
-	char16_t ch;
+	PRUnichar ch;
 	int i;
 	long l;
 	int64_t ll;
 	double d;
 	const char *s;
-	const char16_t *S;
+	const PRUnichar *S;
 	int *ip;
     } u;
-    char16_t space = ' ';
+    PRUnichar space = ' ';
 
     nsAutoString hex;
     hex.AssignLiteral("0123456789abcdef");
@@ -821,9 +822,9 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
     nsAutoString HEX;
     HEX.AssignLiteral("0123456789ABCDEF");
 
-    const char16_t *hexp;
+    const PRUnichar *hexp;
     int rv, i;
-    struct NumArgState* nas = nullptr;
+    struct NumArgState* nas = NULL;
     struct NumArgState  nasArray[NAS_DEFAULT_NUM];
 
 
@@ -862,7 +863,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 	    continue;
 	}
 
-	if (nas != nullptr) {
+	if (nas != NULL) {
 	    /* the fmt contains the Numbered Arguments feature */
 	    i = 0;
 	    /* should imporve error check later */
@@ -871,7 +872,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 		c = *fmt++;
 	    }
 
-	    if (nas[i-1].type == NumArgState::UNKNOWN) {
+	    if (nas[i-1].type == TYPE_UNKNOWN) {
 		if (nas && (nas != nasArray)) {
 		    PR_DELETE(nas);
                 }
@@ -928,19 +929,19 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 	}
 
 	/* size */
-	type = NumArgState::INTN;
+	type = TYPE_INTN;
 	if (c == 'h') {
-	    type = NumArgState::INT16;
+	    type = TYPE_INT16;
 	    c = *fmt++;
 	} else if (c == 'L') {
 	    /* XXX not quite sure here */
-	    type = NumArgState::INT64;
+	    type = TYPE_INT64;
 	    c = *fmt++;
 	} else if (c == 'l') {
-	    type = NumArgState::INT32;
+	    type = TYPE_INT32;
 	    c = *fmt++;
 	    if (c == 'l') {
-		type = NumArgState::INT64;
+		type = TYPE_INT64;
 		c = *fmt++;
 	    }
 	}
@@ -976,35 +977,35 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 
         fetch_and_convert:
 	    switch (type) {
-            case NumArgState::INT16:
+            case TYPE_INT16:
 		u.l = va_arg(ap, int);
 		if (u.l < 0) {
 		    u.l = -u.l;
 		    flags |= _NEG;
 		}
 		goto do_long;
-            case NumArgState::UINT16:
+            case TYPE_UINT16:
 		u.l = va_arg(ap, int) & 0xffff;
 		goto do_long;
-            case NumArgState::INTN:
+            case TYPE_INTN:
 		u.l = va_arg(ap, int);
 		if (u.l < 0) {
 		    u.l = -u.l;
 		    flags |= _NEG;
 		}
 		goto do_long;
-            case NumArgState::UINTN:
+            case TYPE_UINTN:
 		u.l = (long)va_arg(ap, unsigned int);
 		goto do_long;
 
-            case NumArgState::INT32:
+            case TYPE_INT32:
 		u.l = va_arg(ap, int32_t);
 		if (u.l < 0) {
 		    u.l = -u.l;
 		    flags |= _NEG;
 		}
 		goto do_long;
-            case NumArgState::UINT32:
+            case TYPE_UINT32:
 		u.l = (long)va_arg(ap, uint32_t);
             do_long:
 		rv = cvt_l(ss, u.l, width, prec, radix, type, flags, hexp);
@@ -1013,14 +1014,14 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 		}
 		break;
 
-            case NumArgState::INT64:
+            case TYPE_INT64:
 		u.ll = va_arg(ap, int64_t);
 		if (u.ll < 0) {
 		    u.ll = -u.ll;
 		    flags |= _NEG;
 		}
 		goto do_longlong;
-            case NumArgState::UINT64:
+            case TYPE_UINT64:
 		u.ll = va_arg(ap, uint64_t);
             do_longlong:
 		rv = cvt_ll(ss, u.ll, width, prec, radix, type, flags, hexp);
@@ -1069,11 +1070,11 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 
         case 'p':
 	    if (sizeof(void *) == sizeof(int32_t)) {
-	    	type = NumArgState::UINT32;
+	    	type = TYPE_UINT32;
 	    } else if (sizeof(void *) == sizeof(int64_t)) {
-	    	type = NumArgState::UINT64;
+	    	type = TYPE_UINT64;
 	    } else if (sizeof(void *) == sizeof(int)) {
-		type = NumArgState::UINTN;
+		type = TYPE_UINTN;
 	    } else {
 		PR_ASSERT(0);
 		break;
@@ -1089,7 +1090,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 #endif
 
         case 'S':
-	    u.S = va_arg(ap, const char16_t*);
+	    u.S = va_arg(ap, const PRUnichar*);
 	    rv = cvt_S(ss, u.S, width, prec, flags);
 	    if (rv < 0) {
 		return rv;
@@ -1116,7 +1117,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 #if 0
 	    PR_ASSERT(0);
 #endif
-            char16_t perct = '%'; 
+            PRUnichar perct = '%'; 
 	    rv = (*ss->stuff)(ss, &perct, 1);
 	    if (rv < 0) {
 		return rv;
@@ -1129,7 +1130,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
     }
 
     /* Stuff trailing NUL */
-    char16_t null = '\0';
+    PRUnichar null = '\0';
 
     rv = (*ss->stuff)(ss, &null, 1);
 
@@ -1143,7 +1144,7 @@ static int dosprintf(SprintfState *ss, const char16_t *fmt, va_list ap)
 /************************************************************************/
 
 static int
-StringStuff(SprintfState* ss, const char16_t* sp, uint32_t len)
+StringStuff(SprintfState* ss, const PRUnichar* sp, uint32_t len)
 {
     if (*sp == '\0')
       return 0;
@@ -1163,10 +1164,10 @@ StringStuff(SprintfState* ss, const char16_t* sp, uint32_t len)
 ** Stuff routine that automatically grows the malloc'd output buffer
 ** before it overflows.
 */
-static int GrowStuff(SprintfState *ss, const char16_t *sp, uint32_t len)
+static int GrowStuff(SprintfState *ss, const PRUnichar *sp, uint32_t len)
 {
     ptrdiff_t off;
-    char16_t *newbase;
+    PRUnichar *newbase;
     uint32_t newlen;
 
     off = ss->cur - ss->base;
@@ -1174,9 +1175,9 @@ static int GrowStuff(SprintfState *ss, const char16_t *sp, uint32_t len)
 	/* Grow the buffer */
 	newlen = ss->maxlen + ((len > 32) ? len : 32);
 	if (ss->base) {
-	    newbase = (char16_t*) nsMemory::Realloc(ss->base, newlen*sizeof(char16_t));
+	    newbase = (PRUnichar*) nsMemory::Realloc(ss->base, newlen*sizeof(PRUnichar));
 	} else {
-	    newbase = (char16_t*) nsMemory::Alloc(newlen*sizeof(char16_t));
+	    newbase = (PRUnichar*) nsMemory::Alloc(newlen*sizeof(PRUnichar));
 	}
 	if (!newbase) {
 	    /* Ran out of memory */
@@ -1199,10 +1200,10 @@ static int GrowStuff(SprintfState *ss, const char16_t *sp, uint32_t len)
 /*
 ** sprintf into a malloc'd buffer
 */
-char16_t * nsTextFormatter::smprintf(const char16_t *fmt, ...)
+PRUnichar * nsTextFormatter::smprintf(const PRUnichar *fmt, ...)
 {
     va_list ap;
-    char16_t *rv;
+    PRUnichar *rv;
 
     va_start(ap, fmt);
     rv = nsTextFormatter::vsmprintf(fmt, ap);
@@ -1210,7 +1211,7 @@ char16_t * nsTextFormatter::smprintf(const char16_t *fmt, ...)
     return rv;
 }
 
-uint32_t nsTextFormatter::ssprintf(nsAString& out, const char16_t* fmt, ...)
+uint32_t nsTextFormatter::ssprintf(nsAString& out, const PRUnichar* fmt, ...)
 {
     va_list ap;
     uint32_t rv;
@@ -1221,7 +1222,7 @@ uint32_t nsTextFormatter::ssprintf(nsAString& out, const char16_t* fmt, ...)
     return rv;
 }
 
-uint32_t nsTextFormatter::vssprintf(nsAString& out, const char16_t* fmt, va_list ap)
+uint32_t nsTextFormatter::vssprintf(nsAString& out, const PRUnichar* fmt, va_list ap)
 {
     SprintfState ss;
     ss.stuff = StringStuff;
@@ -1235,7 +1236,7 @@ uint32_t nsTextFormatter::vssprintf(nsAString& out, const char16_t* fmt, va_list
     return n ? n - 1 : n;
 }
 
-char16_t * nsTextFormatter::vsmprintf(const char16_t *fmt, va_list ap)
+PRUnichar * nsTextFormatter::vsmprintf(const PRUnichar *fmt, va_list ap)
 {
     SprintfState ss;
     int rv;
@@ -1257,7 +1258,7 @@ char16_t * nsTextFormatter::vsmprintf(const char16_t *fmt, va_list ap)
 /*
 ** Stuff routine that discards overflow data
 */
-static int LimitStuff(SprintfState *ss, const char16_t *sp, uint32_t len)
+static int LimitStuff(SprintfState *ss, const PRUnichar *sp, uint32_t len)
 {
     uint32_t limit = ss->maxlen - (ss->cur - ss->base);
 
@@ -1275,7 +1276,7 @@ static int LimitStuff(SprintfState *ss, const char16_t *sp, uint32_t len)
 ** sprintf into a fixed size buffer. Make sure there is a NUL at the end
 ** when finished.
 */
-uint32_t nsTextFormatter::snprintf(char16_t *out, uint32_t outlen, const char16_t *fmt, ...)
+uint32_t nsTextFormatter::snprintf(PRUnichar *out, uint32_t outlen, const PRUnichar *fmt, ...)
 {
     va_list ap;
     uint32_t rv;
@@ -1291,7 +1292,7 @@ uint32_t nsTextFormatter::snprintf(char16_t *out, uint32_t outlen, const char16_
     return rv;
 }
 
-uint32_t nsTextFormatter::vsnprintf(char16_t *out, uint32_t outlen,const char16_t *fmt,
+uint32_t nsTextFormatter::vsnprintf(PRUnichar *out, uint32_t outlen,const PRUnichar *fmt,
                                     va_list ap)
 {
     SprintfState ss;
@@ -1319,7 +1320,7 @@ uint32_t nsTextFormatter::vsnprintf(char16_t *out, uint32_t outlen,const char16_
 /*
  * Free memory allocated, for the caller, by smprintf
  */
-void nsTextFormatter::smprintf_free(char16_t *mem)
+void nsTextFormatter::smprintf_free(PRUnichar *mem)
 {
     nsMemory::Free(mem);
 }

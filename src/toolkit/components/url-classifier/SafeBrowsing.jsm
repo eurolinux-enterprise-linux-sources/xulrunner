@@ -10,24 +10,8 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 
-// Skip all the ones containining "test", because we never need to ask for
-// updates for them.
-function getLists(prefName) {
-  let pref = Services.prefs.getCharPref(prefName);
-  // Splitting an empty string returns [''], we really want an empty array.
-  if (!pref) {
-    return [];
-  }
-  return pref.split(",")
-    .filter(function(value) { return value.indexOf("test-") == -1; })
-    .map(function(value) { return value.trim(); });
-}
-
-// These may be a comma-separated lists of tables.
-const phishingLists = getLists("urlclassifier.phish_table");
-const malwareLists = getLists("urlclassifier.malware_table");
-const downloadBlockLists = getLists("urlclassifier.downloadBlockTable");
-const downloadAllowLists = getLists("urlclassifier.downloadAllowTable");
+const [phishingList, malwareList] =
+  Services.prefs.getCharPref("urlclassifier.gethashtables").split(",").map(function(value) value.trim());
 
 var debug = false;
 function log(...stuff) {
@@ -47,24 +31,14 @@ this.SafeBrowsing = {
       return;
     }
 
-    Services.prefs.addObserver("browser.safebrowsing", this.readPrefs.bind(this), false);
+    Services.prefs.addObserver("browser.safebrowsing", this.readPrefs, false);
     this.readPrefs();
 
     // Register our two types of tables, and add custom Mozilla entries
     let listManager = Cc["@mozilla.org/url-classifier/listmanager;1"].
                       getService(Ci.nsIUrlListManager);
-    for (let i = 0; i < phishingLists.length; ++i) {
-      listManager.registerTable(phishingLists[i], false);
-    }
-    for (let i = 0; i < malwareLists.length; ++i) {
-      listManager.registerTable(malwareLists[i], false);
-    }
-    for (let i = 0; i < downloadBlockLists.length; ++i) {
-      listManager.registerTable(downloadBlockLists[i], false);
-    }
-    for (let i = 0; i < downloadAllowLists.length; ++i) {
-      listManager.registerTable(downloadAllowLists[i], false);
-    }
+    listManager.registerTable(phishingList, false);
+    listManager.registerTable(malwareList, false);
     this.addMozEntries();
 
     this.controlUpdateChecking();
@@ -79,6 +53,7 @@ this.SafeBrowsing = {
   malwareEnabled:  false,
 
   updateURL:             null,
+  keyURL:                null,
   gethashURL:            null,
 
   reportURL:             null,
@@ -117,7 +92,7 @@ this.SafeBrowsing = {
       var clientID = Services.appinfo.name;
     }
 
-    log("initializing safe browsing URLs, client id ", clientID);
+    log("initializing safe browsing URLs");
     let basePref = "browser.safebrowsing.";
 
     // Urls to HTML report pages
@@ -130,15 +105,21 @@ this.SafeBrowsing = {
 
     // Urls used to update DB
     this.updateURL  = Services.urlFormatter.formatURLPref(basePref + "updateURL");
+    this.keyURL     = Services.urlFormatter.formatURLPref(basePref + "keyURL");
     this.gethashURL = Services.urlFormatter.formatURLPref(basePref + "gethashURL");
 
     this.updateURL  = this.updateURL.replace("SAFEBROWSING_ID", clientID);
+    this.keyURL     = this.keyURL.replace("SAFEBROWSING_ID", clientID);
     this.gethashURL = this.gethashURL.replace("SAFEBROWSING_ID", clientID);
 
     let listManager = Cc["@mozilla.org/url-classifier/listmanager;1"].
                       getService(Ci.nsIUrlListManager);
 
     listManager.setUpdateUrl(this.updateURL);
+    // XXX Bug 779317 - setKeyUrl has the side effect of fetching a key from the server.
+    // This shouldn't happen if anti-phishing/anti-malware is disabled.
+    if (this.phishingEnabled || this.malwareEnabled)
+      listManager.setKeyUrl(this.keyURL);
     listManager.setGethashUrl(this.gethashURL);
   },
 
@@ -149,42 +130,23 @@ this.SafeBrowsing = {
     let listManager = Cc["@mozilla.org/url-classifier/listmanager;1"].
                       getService(Ci.nsIUrlListManager);
 
-    for (let i = 0; i < phishingLists.length; ++i) {
-      if (this.phishingEnabled) {
-        listManager.enableUpdate(phishingLists[i]);
-      } else {
-        listManager.disableUpdate(phishingLists[i]);
-      }
-    }
-    for (let i = 0; i < malwareLists.length; ++i) {
-      if (this.malwareEnabled) {
-        listManager.enableUpdate(malwareLists[i]);
-      } else {
-        listManager.disableUpdate(malwareLists[i]);
-      }
-    }
-    for (let i = 0; i < downloadBlockLists.length; ++i) {
-      if (this.malwareEnabled) {
-        listManager.enableUpdate(downloadBlockLists[i]);
-      } else {
-        listManager.disableUpdate(downloadBlockLists[i]);
-      }
-    }
-    for (let i = 0; i < downloadAllowLists.length; ++i) {
-      if (this.malwareEnabled) {
-        listManager.enableUpdate(downloadAllowLists[i]);
-      } else {
-        listManager.disableUpdate(downloadAllowLists[i]);
-      }
-    }
+    if (this.phishingEnabled)
+      listManager.enableUpdate(phishingList);
+    else
+      listManager.disableUpdate(phishingList);
+
+    if (this.malwareEnabled)
+      listManager.enableUpdate(malwareList);
+    else
+      listManager.disableUpdate(malwareList);
   },
 
 
   addMozEntries: function() {
     // Add test entries to the DB.
     // XXX bug 779008 - this could be done by DB itself?
-    const phishURL   = "itisatrap.org/firefox/its-a-trap.html";
-    const malwareURL = "itisatrap.org/firefox/its-an-attack.html";
+    const phishURL   = "mozilla.org/firefox/its-a-trap.html";
+    const malwareURL = "mozilla.org/firefox/its-an-attack.html";
 
     let update = "n:1000\ni:test-malware-simple\nad:1\n" +
                  "a:1:32:" + malwareURL.length + "\n" +

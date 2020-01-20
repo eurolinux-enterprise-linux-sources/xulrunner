@@ -74,7 +74,8 @@ public:
   // We should never write to the fanotify fd.
   virtual void OnFileCanWriteWithoutBlocking(int aFd)
   {
-    MOZ_CRASH("Must not write to fanotify fd");
+    MOZ_NOT_REACHED("Must not write to fanotify fd");
+    MOZ_CRASH();
   }
 
   void DoStart();
@@ -133,10 +134,7 @@ public:
   NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    if (gHalDiskSpaceWatcher) {
-      delete gHalDiskSpaceWatcher;
-      gHalDiskSpaceWatcher = nullptr;
-    }
+    delete gHalDiskSpaceWatcher;
     return NS_OK;
   }
 };

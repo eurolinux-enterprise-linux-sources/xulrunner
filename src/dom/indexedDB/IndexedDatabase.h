@@ -10,14 +10,13 @@
 #include "nsIProgrammingLanguage.h"
 
 #include "mozilla/Attributes.h"
-#include "js/StructuredClone.h"
+#include "jsapi.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsError.h"
-#include "nsString.h"
+#include "nsStringGlue.h"
 #include "nsTArray.h"
-#include "nsIInputStream.h"
 
 #define BEGIN_INDEXEDDB_NAMESPACE \
   namespace mozilla { namespace dom { namespace indexedDB {
@@ -29,12 +28,21 @@
   using namespace mozilla::dom::indexedDB;
 
 class nsIDOMBlob;
+class nsIInputStream;
 
 BEGIN_INDEXEDDB_NAMESPACE
 
 class FileInfo;
 class IDBDatabase;
 class IDBTransaction;
+
+template <class T>
+void SwapData(T& aData1, T& aData2)
+{
+  T temp = aData2;
+  aData2 = aData1;
+  aData1 = temp;
+}
 
 struct StructuredCloneFile
 {
@@ -57,8 +65,12 @@ struct StructuredCloneReadInfo
   // In IndexedDatabaseInlines.h
   inline StructuredCloneReadInfo();
 
-  inline StructuredCloneReadInfo&
-  operator=(StructuredCloneReadInfo&& aCloneReadInfo);
+  void Swap(StructuredCloneReadInfo& aCloneReadInfo)
+  {
+    mCloneBuffer.swap(aCloneReadInfo.mCloneBuffer);
+    mFiles.SwapElements(aCloneReadInfo.mFiles);
+    SwapData(mDatabase, aCloneReadInfo.mDatabase);
+  }
 
   // In IndexedDatabaseInlines.h
   inline bool
@@ -101,7 +113,14 @@ struct StructuredCloneWriteInfo
 {
   // In IndexedDatabaseInlines.h
   inline StructuredCloneWriteInfo();
-  inline StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo);
+
+  void Swap(StructuredCloneWriteInfo& aCloneWriteInfo)
+  {
+    mCloneBuffer.swap(aCloneWriteInfo.mCloneBuffer);
+    mFiles.SwapElements(aCloneWriteInfo.mFiles);
+    SwapData(mTransaction, aCloneWriteInfo.mTransaction);
+    SwapData(mOffsetToKeyProp, aCloneWriteInfo.mOffsetToKeyProp);
+  }
 
   bool operator==(const StructuredCloneWriteInfo& aOther) const
   {

@@ -12,7 +12,7 @@
 
 enum BinaryType { "blob", "arraybuffer" };
 
-[Func="mozilla::dom::WebSocket::PrefEnabled",
+[PrefControlled,
  Constructor(DOMString url),
  Constructor(DOMString url, DOMString protocols),
  Constructor(DOMString url, sequence<DOMString> protocols)]
@@ -32,10 +32,13 @@ interface WebSocket : EventTarget {
 
   // networking
 
+  [SetterThrows]
   attribute EventHandler onopen;
 
+  [SetterThrows]
   attribute EventHandler onerror;
 
+  [SetterThrows]
   attribute EventHandler onclose;
 
   readonly attribute DOMString extensions;
@@ -47,6 +50,7 @@ interface WebSocket : EventTarget {
 
   // messaging
 
+  [SetterThrows]
   attribute EventHandler onmessage;
 
   attribute BinaryType binaryType;

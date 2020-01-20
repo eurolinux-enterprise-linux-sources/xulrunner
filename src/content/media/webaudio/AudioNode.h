@@ -7,24 +7,27 @@
 #ifndef AudioNode_h_
 #define AudioNode_h_
 
-#include "mozilla/DOMEventTargetHelper.h"
+#include "nsDOMEventTargetHelper.h"
 #include "mozilla/dom/AudioNodeBinding.h"
 #include "nsCycleCollectionParticipant.h"
+#include "mozilla/Attributes.h"
+#include "EnableWebAudioCheck.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "AudioContext.h"
+#include "AudioParamTimeline.h"
 #include "MediaStreamGraph.h"
 #include "WebAudioUtils.h"
-#include "mozilla/MemoryReporting.h"
+
+struct JSContext;
 
 namespace mozilla {
 
+class ErrorResult;
+
 namespace dom {
 
-class AudioContext;
-class AudioBufferSourceNode;
 class AudioParam;
-class AudioParamTimeline;
 struct ThreeDPoint;
 
 template<class T>
@@ -57,6 +60,44 @@ private:
   bool mHeld;
 };
 
+template<class T>
+class SelfCountedReference {
+public:
+  SelfCountedReference() : mRefCnt(0) {}
+  ~SelfCountedReference()
+  {
+    NS_ASSERTION(mRefCnt == 0, "Forgot to drop the self reference?");
+  }
+
+  void Take(T* t)
+  {
+    if (mRefCnt++ == 0) {
+      t->AddRef();
+    }
+  }
+  void Drop(T* t)
+  {
+    if (mRefCnt > 0) {
+      --mRefCnt;
+      if (mRefCnt == 0) {
+        t->Release();
+      }
+    }
+  }
+  void ForceDrop(T* t)
+  {
+    if (mRefCnt > 0) {
+      mRefCnt = 0;
+      t->Release();
+    }
+  }
+
+  operator bool() const { return mRefCnt > 0; }
+
+private:
+  nsrefcnt mRefCnt;
+};
+
 /**
  * The DOM object representing a Web Audio AudioNode.
  *
@@ -64,25 +105,14 @@ private:
  * real-time processing and output of this AudioNode.
  *
  * We track the incoming and outgoing connections to other AudioNodes.
- * Outgoing connections have strong ownership.  Also, AudioNodes that will
- * produce sound on their output even when they have silent or no input ask
- * the AudioContext to keep playing or tail-time references to keep them alive
- * until the context is finished.
- *
- * Explicit disconnections will only remove references from output nodes after
- * the graph is notified and the main thread receives a reply.  Similarly,
- * nodes with playing or tail-time references release these references only
- * after receiving notification from their engine on the graph thread that
- * playing has stopped.  Engines notifying the main thread that they have
- * finished do so strictly *after* producing and returning their last block.
- * In this way, an engine that receives non-null input knows that the input
- * comes from nodes that are still alive and will keep their output nodes
- * alive for at least as long as it takes to process messages from the graph
- * thread.  i.e. the engine receiving non-null input knows that its node is
- * still alive, and will still be alive when it receives a message from the
- * engine.
+ * All connections are strong and thus rely on cycle collection to break them.
+ * However, we also track whether an AudioNode is capable of producing output
+ * in the future. If it isn't, then we break its connections to its inputs
+ * and outputs, allowing nodes to be immediately disconnected. This
+ * disconnection is done internally, invisible to DOM users.
  */
-class AudioNode : public DOMEventTargetHelper
+class AudioNode : public nsDOMEventTargetHelper,
+                  public EnableWebAudioCheck
 {
 protected:
   // You can only use refcounting to delete this object
@@ -99,13 +129,9 @@ public:
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioNode,
-                                           DOMEventTargetHelper)
+                                           nsDOMEventTargetHelper)
 
   virtual AudioBufferSourceNode* AsAudioBufferSourceNode() {
-    return nullptr;
-  }
-
-  virtual const DelayNode* AsDelayNode() const {
     return nullptr;
   }
 
@@ -148,7 +174,7 @@ public:
   {
     return mChannelCountMode;
   }
-  virtual void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv)
+  void SetChannelCountModeValue(ChannelCountMode aMode)
   {
     mChannelCountMode = aMode;
     SendChannelMixingParametersToStream();
@@ -171,16 +197,6 @@ public:
       }
     }
 
-    size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
-    {
-      size_t amount = 0;
-      if (mStreamPort) {
-        amount += mStreamPort->SizeOfIncludingThis(aMallocSizeOf);
-      }
-
-      return amount;
-    }
-
     // Weak reference.
     AudioNode* mInputNode;
     nsRefPtr<MediaInputPort> mStreamPort;
@@ -197,32 +213,10 @@ public:
   {
     return mInputNodes;
   }
-  const nsTArray<nsRefPtr<AudioNode> >& OutputNodes() const
-  {
-    return mOutputNodes;
-  }
-  const nsTArray<nsRefPtr<AudioParam> >& OutputParams() const
-  {
-    return mOutputParams;
-  }
 
   void RemoveOutputParam(AudioParam* aParam);
 
-  // MarkActive() asks the context to keep the AudioNode alive until the
-  // context is finished.  This takes care of "playing" references and
-  // "tail-time" references.
-  void MarkActive() { Context()->RegisterActiveNode(this); }
-  // Active nodes call MarkInactive() when they have finished producing sound
-  // for the foreseeable future.
-  // Do not call MarkInactive from a node destructor.  If the destructor is
-  // called, then the node is already inactive.
-  // MarkInactive() may delete |this|.
-  void MarkInactive() { Context()->UnregisterActiveNode(this); }
-
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
-
-  virtual const char* NodeType() const = 0;
+  virtual void NotifyInputConnected() {}
 
 private:
   friend class AudioBufferSourceNode;

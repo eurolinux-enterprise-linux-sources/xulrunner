@@ -7,9 +7,11 @@
 #ifndef jit_shared_BaselineCompiler_shared_h
 #define jit_shared_BaselineCompiler_shared_h
 
+#include "jscntxt.h"
 #include "jit/BaselineFrameInfo.h"
+#include "jit/IonSpewer.h"
 #include "jit/BaselineIC.h"
-#include "jit/BytecodeAnalysis.h"
+#include "jit/IonInstrumentation.h"
 #include "jit/IonMacroAssembler.h"
 
 namespace js {
@@ -19,14 +21,13 @@ class BaselineCompilerShared
 {
   protected:
     JSContext *cx;
-    JSScript *script;
+    RootedScript script;
     jsbytecode *pc;
     MacroAssembler masm;
     bool ionCompileable_;
     bool ionOSRCompileable_;
     bool debugMode_;
 
-    TempAllocator &alloc_;
     BytecodeAnalysis analysis_;
     FrameInfo frame;
 
@@ -69,16 +70,16 @@ class BaselineCompilerShared
 
     CodeOffsetLabel spsPushToggleOffset_;
 
-    BaselineCompilerShared(JSContext *cx, TempAllocator &alloc, JSScript *script);
+    BaselineCompilerShared(JSContext *cx, HandleScript script);
 
-    ICEntry *allocateICEntry(ICStub *stub, ICEntry::Kind kind) {
+    ICEntry *allocateICEntry(ICStub *stub, bool isForOp) {
         if (!stub)
-            return nullptr;
+            return NULL;
 
         // Create the entry and add it to the vector.
-        if (!icEntries_.append(ICEntry(script->pcToOffset(pc), kind)))
-            return nullptr;
-        ICEntry &vecEntry = icEntries_.back();
+        if (!icEntries_.append(ICEntry((uint32_t) (pc - script->code), isForOp)))
+            return NULL;
+        ICEntry &vecEntry = icEntries_[icEntries_.length() - 1];
 
         // Set the first stub for the IC entry to the fallback stub
         vecEntry.setFirstStub(stub);
@@ -96,9 +97,7 @@ class BaselineCompilerShared
     }
 
     JSFunction *function() const {
-        // Not delazifying here is ok as the function is guaranteed to have
-        // been delazified before compilation started.
-        return script->functionNonDelazifying();
+        return script->function();
     }
 
     PCMappingSlotInfo getStackTopSlotInfo() {
@@ -130,12 +129,7 @@ class BaselineCompilerShared
         masm.Push(BaselineFrameReg);
     }
 
-    enum CallVMPhase {
-        POST_INITIALIZE,
-        PRE_INITIALIZE,
-        CHECK_OVER_RECURSED
-    };
-    bool callVM(const VMFunction &fun, CallVMPhase phase=POST_INITIALIZE);
+    bool callVM(const VMFunction &fun);
 
   public:
     BytecodeAnalysis &analysis() {

@@ -6,18 +6,20 @@
 
 XPIDL_SOURCES += [
     'mozIJSSubScriptLoader.idl',
+    'nsIJSEngineTelemetryStats.idl',
     'nsIJSRuntimeService.idl',
     'nsIScriptError.idl',
-    'nsIXPConnect.idl',
+    'nsIXPCScriptNotify.idl',
     'nsIXPCScriptable.idl',
     'nsIXPCSecurityManager.idl',
-    'xpccomponents.idl',
-    'xpcexception.idl',
+    'nsIXPConnect.idl',
     'xpcIJSGetFactory.idl',
     'xpcIJSModuleLoader.idl',
     'xpcIJSWeakReference.idl',
+    'xpccomponents.idl',
+    'xpcexception.idl',
     'xpcjsid.idl',
 ]
 
-XPIDL_MODULE = 'xpconnect'
+MODULE = 'xpconnect'
 

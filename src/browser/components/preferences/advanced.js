@@ -7,8 +7,6 @@
 Components.utils.import("resource://gre/modules/DownloadUtils.jsm");
 Components.utils.import("resource://gre/modules/ctypes.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource://gre/modules/LoadContextInfo.jsm");
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var gAdvancedPane = {
   _inited: false,
@@ -79,8 +77,8 @@ var gAdvancedPane = {
     this.initSubmitHealthReport();
 #endif
 
-    this.updateActualCacheSize();
-    this.updateActualAppCacheSize();
+    this.updateActualCacheSize("disk");
+    this.updateActualCacheSize("offline");
 
     // Notify observers that the UI is now ready
     Services.obs.notifyObservers(window, "advanced-pane-loaded", null);
@@ -252,7 +250,7 @@ var gAdvancedPane = {
 
     let checkbox = document.getElementById("submitHealthReportBox");
 
-    if (!policy || policy.healthReportUploadLocked) {
+    if (!policy) {
       checkbox.setAttribute("disabled", "true");
       return;
     }
@@ -298,44 +296,22 @@ var gAdvancedPane = {
                                            "", null);
   },
 
-  // Retrieves the amount of space currently used by disk cache
-  updateActualCacheSize: function ()
-  {
-    var actualSizeLabel = document.getElementById("actualDiskCacheSize");
-    var prefStrBundle = document.getElementById("bundlePreferences");
-
-    // Needs to root the observer since cache service keeps only a weak reference.
-    this.observer = {
-      onNetworkCacheDiskConsumption: function(consumption) {
-        var size = DownloadUtils.convertByteUnits(consumption);
-        actualSizeLabel.value = prefStrBundle.getFormattedString("actualDiskCacheSize", size);
-      },
-
-      QueryInterface: XPCOMUtils.generateQI([
-        Components.interfaces.nsICacheStorageConsumptionObserver,
-        Components.interfaces.nsISupportsWeakReference
-      ])
-    };
-
-    actualSizeLabel.value = prefStrBundle.getString("actualDiskCacheSizeCalculated");
-
-    var cacheService =
-      Components.classes["@mozilla.org/netwerk/cache-storage-service;1"]
-                .getService(Components.interfaces.nsICacheStorageService);
-    cacheService.asyncGetDiskConsumption(this.observer);
-  },
-
-  // Retrieves the amount of space currently used by offline cache
-  updateActualAppCacheSize: function ()
+  // Retrieves the amount of space currently used by disk or offline cache
+  updateActualCacheSize: function (device)
   {
     var visitor = {
       visitDevice: function (deviceID, deviceInfo)
       {
-        if (deviceID == "offline") {
-          var actualSizeLabel = document.getElementById("actualAppCacheSize");
+        if (deviceID == device) {
+          var actualSizeLabel = document.getElementById(device == "disk" ?
+                                                        "actualDiskCacheSize" :
+                                                        "actualAppCacheSize");
           var sizeStrings = DownloadUtils.convertByteUnits(deviceInfo.totalSize);
           var prefStrBundle = document.getElementById("bundlePreferences");
-          var sizeStr = prefStrBundle.getFormattedString("actualAppCacheSize", sizeStrings);
+          var sizeStr = prefStrBundle.getFormattedString(device == "disk" ?
+                                                         "actualDiskCacheSize" :
+                                                         "actualAppCacheSize",
+                                                         sizeStrings);
           actualSizeLabel.value = sizeStr;
         }
         // Do not enumerate entries
@@ -396,12 +372,12 @@ var gAdvancedPane = {
    */
   clearCache: function ()
   {
-    var cache = Components.classes["@mozilla.org/netwerk/cache-storage-service;1"]
-                                 .getService(Components.interfaces.nsICacheStorageService);
+    var cacheService = Components.classes["@mozilla.org/network/cache-service;1"]
+                                 .getService(Components.interfaces.nsICacheService);
     try {
-      cache.clear();
+      cacheService.evictEntries(Components.interfaces.nsICache.STORE_ANYWHERE);
     } catch(ex) {}
-    this.updateActualCacheSize();
+    this.updateActualCacheSize("disk");
   },
 
   /**
@@ -412,7 +388,7 @@ var gAdvancedPane = {
     Components.utils.import("resource:///modules/offlineAppCache.jsm");
     OfflineAppCacheHelper.clear();
 
-    this.updateActualAppCacheSize();
+    this.updateActualCacheSize("offline");
     this.updateOfflineApps();
   },
 
@@ -557,7 +533,7 @@ var gAdvancedPane = {
 
     list.removeChild(item);
     gAdvancedPane.offlineAppSelected();
-    this.updateActualAppCacheSize();
+    this.updateActualCacheSize("offline");
   },
 
   // UPDATE TAB
@@ -654,7 +630,6 @@ var gAdvancedPane = {
 #ifdef MOZ_METRO
     if (this._showingWin8Prefs) {
       warnIncompatible.disabled |= metroEnabledPref.value;
-      warnIncompatible.checked |= metroEnabledPref.value;
     }
 #endif
 #endif
@@ -705,7 +680,6 @@ var gAdvancedPane = {
   {
     var enabledPref = document.getElementById("app.update.enabled");
     var autoPref = document.getElementById("app.update.auto");
-    var modePref = document.getElementById("app.update.mode");
 #ifdef XP_WIN
 #ifdef MOZ_METRO
     var metroEnabledPref = document.getElementById("app.update.metro.enabled");
@@ -727,7 +701,6 @@ var gAdvancedPane = {
         enabledPref.value = true;
         autoPref.value = true;
         metroEnabledPref.value = true;
-        modePref.value = 1;
         break;
 #endif
 #endif
@@ -741,6 +714,7 @@ var gAdvancedPane = {
     }
 
     var warnIncompatible = document.getElementById("warnIncompatible");
+    var modePref = document.getElementById("app.update.mode");
     warnIncompatible.disabled = enabledPref.locked || !enabledPref.value ||
                                 autoPref.locked || !autoPref.value ||
                                 modePref.locked;
@@ -749,7 +723,6 @@ var gAdvancedPane = {
 #ifdef MOZ_METRO
     if (this._showingWin8Prefs) {
       warnIncompatible.disabled |= metroEnabledPref.value;
-      warnIncompatible.checked |= metroEnabledPref.value;
     }
 #endif
 #endif

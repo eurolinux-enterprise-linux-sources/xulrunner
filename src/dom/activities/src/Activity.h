@@ -7,10 +7,13 @@
 
 #include "DOMRequest.h"
 #include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/MozActivityBinding.h"
 #include "nsIActivityProxy.h"
 #include "mozilla/Preferences.h"
-#include "nsPIDOMWindow.h"
+
+#define NS_DOMACTIVITY_CID                          \
+ {0x1c5b0930, 0xc90c, 0x4e9c, {0xaf, 0x4e, 0xb0, 0xb7, 0xa6, 0x59, 0xb4, 0xed}}
+
+#define NS_DOMACTIVITY_CONTRACTID "@mozilla.org/dom/activity;1"
 
 namespace mozilla {
 namespace dom {
@@ -21,31 +24,29 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(Activity, DOMRequest)
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  static bool PrefEnabled()
+  {
+    return Preferences::GetBool("dom.sysmsg.enabled", false);
+  }
 
   static already_AddRefed<Activity>
   Constructor(const GlobalObject& aOwner,
-              JSContext* aCx,
-              const ActivityOptions& aOptions,
+              nsIDOMMozActivityOptions* aOptions,
               ErrorResult& aRv)
   {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aOwner.GetAsSupports());
-    if (!window) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-
-    nsRefPtr<Activity> activity = new Activity(window);
-    aRv = activity->Initialize(window, aCx, aOptions);
+    nsRefPtr<Activity> activity = new Activity();
+    aRv = activity->Initialize(aOwner.Get(), aOptions);
     return activity.forget();
   }
 
-  Activity(nsPIDOMWindow* aWindow);
+  Activity();
 
 protected:
-  nsresult Initialize(nsPIDOMWindow* aWindow,
-                      JSContext* aCx,
-                      const ActivityOptions& aOptions);
+  nsresult Initialize(nsISupports* aOwner,
+                      nsIDOMMozActivityOptions* aOptions);
 
   nsCOMPtr<nsIActivityProxy> mProxy;
 

@@ -3,9 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_gfx_DrawTargetCG_h
-#define mozilla_gfx_DrawTargetCG_h
-
 #include <ApplicationServices/ApplicationServices.h>
 
 #include "2D.h"
@@ -13,7 +10,6 @@
 #include "PathCG.h"
 #include "SourceSurfaceCG.h"
 #include "GLDefs.h"
-#include "Tools.h"
 
 namespace mozilla {
 namespace gfx {
@@ -40,38 +36,32 @@ CGRectToRect(CGRect rect)
               rect.size.height);
 }
 
-static inline Point
-CGPointToPoint(CGPoint point)
-{
-  return Point(point.x, point.y);
-}
-
 static inline void
 SetStrokeOptions(CGContextRef cg, const StrokeOptions &aStrokeOptions)
 {
   switch (aStrokeOptions.mLineCap)
   {
-    case CapStyle::BUTT:
+    case CAP_BUTT:
       CGContextSetLineCap(cg, kCGLineCapButt);
       break;
-    case CapStyle::ROUND:
+    case CAP_ROUND:
       CGContextSetLineCap(cg, kCGLineCapRound);
       break;
-    case CapStyle::SQUARE:
+    case CAP_SQUARE:
       CGContextSetLineCap(cg, kCGLineCapSquare);
       break;
   }
 
   switch (aStrokeOptions.mLineJoin)
   {
-    case JoinStyle::BEVEL:
+    case JOIN_BEVEL:
       CGContextSetLineJoin(cg, kCGLineJoinBevel);
       break;
-    case JoinStyle::ROUND:
+    case JOIN_ROUND:
       CGContextSetLineJoin(cg, kCGLineJoinRound);
       break;
-    case JoinStyle::MITER:
-    case JoinStyle::MITER_OR_BEVEL:
+    case JOIN_MITER:
+    case JOIN_MITER_OR_BEVEL:
       CGContextSetLineJoin(cg, kCGLineJoinMiter);
       break;
   }
@@ -95,8 +85,6 @@ SetStrokeOptions(CGContextRef cg, const StrokeOptions &aStrokeOptions)
 class DrawTargetCG : public DrawTarget
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(DrawTargetCG)
-  friend class BorrowedCGContext;
   DrawTargetCG();
   virtual ~DrawTargetCG();
 
@@ -108,10 +96,6 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
-  virtual void DrawFilter(FilterNode *aNode,
-                          const Rect &aSourceRect,
-                          const Point &aDestPoint,
-                          const DrawOptions &aOptions = DrawOptions());
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
                            Point aOffset,
@@ -148,8 +132,7 @@ public:
   virtual TemporaryRef<DrawTarget> CreateSimilarDrawTarget(const IntSize &, SurfaceFormat) const;
   virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule) const;
   virtual TemporaryRef<GradientStops> CreateGradientStops(GradientStop *, uint32_t,
-                                                          ExtendMode aExtendMode = ExtendMode::CLAMP) const;
-  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
+                                                          ExtendMode aExtendMode = EXTEND_CLAMP) const;
 
   virtual void *GetNativeSurface(NativeSurfaceType);
 
@@ -173,18 +156,17 @@ private:
   CGContextRef mCg;
 
   /**
-   * The image buffer, if the buffer is owned by this class.
-   * If the DrawTarget was created for a pre-existing buffer or if the buffer's
-   * lifetime is managed by CoreGraphics, mData will be null.
-   * Data owned by DrawTargetCG will be deallocated in the destructor.
+   * A pointer to the image buffer if the buffer is owned by this class (set to
+   * nullptr otherwise).
+   * The data is not considered owned by DrawTargetCG if the DrawTarget was 
+   * created for a pre-existing buffer or if the buffer's lifetime is managed
+   * by CoreGraphics.
+   * Data owned by DrawTargetCG will be deallocated in the destructor. 
    */
-  AlignedArray<uint8_t> mData;
+  void *mData;
 
   RefPtr<SourceSurfaceCGContext> mSnapshot;
 };
 
 }
 }
-
-#endif
-

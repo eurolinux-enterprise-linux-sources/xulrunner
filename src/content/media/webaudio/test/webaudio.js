@@ -12,16 +12,6 @@ function expectException(func, exceptionCode) {
   ok(threw, "The exception was thrown");
 }
 
-function expectNoException(func) {
-  var threw = false;
-  try {
-    func();
-  } catch (ex) {
-    threw = true;
-  }
-  ok(!threw, "An exception was not thrown");
-}
-
 function expectTypeError(func) {
   var threw = false;
   try {
@@ -37,23 +27,24 @@ function fuzzyCompare(a, b) {
   return Math.abs(a - b) < 9e-3;
 }
 
-function compareChannels(buf1, buf2,
+function compareBuffers(buf1, buf2,
+                        /*optional*/ offset,
                         /*optional*/ length,
                         /*optional*/ sourceOffset,
                         /*optional*/ destOffset,
                         /*optional*/ skipLengthCheck) {
   if (!skipLengthCheck) {
-    is(buf1.length, buf2.length, "Channels must have the same length");
+    is(buf1.length, buf2.length, "Buffers must have the same length");
+  }
+  if (length == undefined) {
+    length = buf1.length - (offset || 0);
   }
   sourceOffset = sourceOffset || 0;
   destOffset = destOffset || 0;
-  if (length == undefined) {
-    length = buf1.length - sourceOffset;
-  }
   var difference = 0;
   var maxDifference = 0;
   var firstBadIndex = -1;
-  for (var i = 0; i < length; ++i) {
+  for (var i = offset || 0; i < Math.min(buf1.length, (offset || 0) + length); ++i) {
     if (!fuzzyCompare(buf1[i + sourceOffset], buf2[i + destOffset])) {
       difference++;
       maxDifference = Math.max(maxDifference, Math.abs(buf1[i + sourceOffset] - buf2[i + destOffset]));
@@ -63,34 +54,10 @@ function compareChannels(buf1, buf2,
     }
   };
 
-  is(difference, 0, "maxDifference: " + maxDifference +
-     ", first bad index: " + firstBadIndex +
-     " with test-data offset " + sourceOffset + " and expected-data offset " +
-     destOffset + "; corresponding values " + buf1[firstBadIndex + sourceOffset] +
-     " and " + buf2[firstBadIndex + destOffset] + " --- differences");
-}
-
-function compareBuffers(got, expected) {
-  if (got.numberOfChannels != expected.numberOfChannels) {
-    is(got.numberOfChannels, expected.numberOfChannels,
-       "Correct number of buffer channels");
-    return;
-  }
-  if (got.length != expected.length) {
-    is(got.length, expected.length,
-       "Correct buffer length");
-    return;
-  }
-  if (got.sampleRate != expected.sampleRate) {
-    is(got.sampleRate, expected.sampleRate,
-       "Correct sample rate");
-    return;
-  }
-
-  for (var i = 0; i < got.numberOfChannels; ++i) {
-    compareChannels(got.getChannelData(i), expected.getChannelData(i),
-                    got.length, 0, 0, true);
-  }
+  is(difference, 0, "Found " + difference + " different samples, maxDifference: " +
+     maxDifference + ", first bad index: " + firstBadIndex +
+     " with source offset " + sourceOffset + " and desitnation offset " +
+     destOffset);
 }
 
 function getEmptyBuffer(context, length) {
@@ -101,6 +68,8 @@ function getEmptyBuffer(context, length) {
  * This function assumes that the test file defines a single gTest variable with
  * the following properties and methods:
  *
+ * + length: mandatory property equal to the total number of frames which we
+ *           are waiting to see in the output.
  * + numberOfChannels: optional property which specifies the number of channels
  *                     in the output.  The default value is 2.
  * + createGraph: mandatory method which takes a context object and does
@@ -115,19 +84,9 @@ function getEmptyBuffer(context, length) {
  *                          returns either one expected buffer or an array of
  *                          them, designating what is expected to be observed
  *                          in the output.  If omitted, the output is expected
- *                          to be silence.  All buffers must have the same
- *                          length, which must be a bufferSize supported by
- *                          ScriptProcessorNode.  This function is guaranteed
- *                          to be called before createGraph.
- * + length: property equal to the total number of frames which we are waiting
- *           to see in the output, mandatory if createExpectedBuffers is not
- *           provided, in which case it must be a bufferSize supported by
- *           ScriptProcessorNode (256, 512, 1024, 2048, 4096, 8192, or 16384).
- *           If createExpectedBuffers is provided then this must be equal to
- *           the number of expected buffers * the expected buffer length.
- *
- * + skipOfflineContextTests: optional. when true, skips running tests on an offline
- *                            context by circumventing testOnOfflineContext.
+ *                          to be silence.  The sum of the length of the expected
+ *                          buffers should be equal to gTest.length.  This
+ *                          function is guaranteed to be called before createGraph.
  */
 function runTest()
 {
@@ -136,7 +95,7 @@ function runTest()
   }
 
   SimpleTest.waitForExplicitFinish();
-  function runTestFunction () {
+  addLoadEvent(function() {
     if (!gTest.numberOfChannels) {
       gTest.numberOfChannels = 2; // default
     }
@@ -159,9 +118,7 @@ function runTest()
            "Correct number of channels for expected buffer " + i);
         expectedFrames += expectedBuffers[i].length;
       }
-      if (gTest.length && gTest.createExpectedBuffers) {
-        is(expectedFrames, gTest.length, "Correct number of expected frames");
-      }
+      is(expectedFrames, gTest.length, "Correct number of expected frames");
 
       if (gTest.createGraphAsync) {
         gTest.createGraphAsync(context, function(nodeToInspect) {
@@ -181,7 +138,11 @@ function runTest()
         sp.onaudioprocess = function(e) {
           var expectedBuffer = expectedBuffers.shift();
           testLength += expectedBuffer.length;
-          compareBuffers(e.inputBuffer, expectedBuffer);
+          is(e.inputBuffer.numberOfChannels, expectedBuffer.numberOfChannels,
+             "Correct number of input buffer channels");
+          for (var i = 0; i < e.inputBuffer.numberOfChannels; ++i) {
+            compareBuffers(e.inputBuffer.getChannelData(i), expectedBuffer.getChannelData(i));
+          }
           if (expectedBuffers.length == 0) {
             sp.onaudioprocess = null;
             callback();
@@ -202,8 +163,9 @@ function runTest()
             is(e.renderedBuffer.numberOfChannels, expectedBuffer.numberOfChannels,
                "Correct number of input buffer channels");
             for (var i = 0; i < e.renderedBuffer.numberOfChannels; ++i) {
-              compareChannels(e.renderedBuffer.getChannelData(i),
+              compareBuffers(e.renderedBuffer.getChannelData(i),
                              expectedBuffer.getChannelData(i),
+                             undefined,
                              expectedBuffer.length,
                              samplesSeen,
                              undefined,
@@ -215,25 +177,14 @@ function runTest()
         };
         context.startRendering();
       }
-
       var context = new OfflineAudioContext(gTest.numberOfChannels, testLength, sampleRate);
       runTestOnContext(context, callback, testOutput);
     }
 
     testOnNormalContext(function() {
-      if (!gTest.skipOfflineContextTests) {
-        testOnOfflineContext(function() {
-          testOnOfflineContext(done, 44100);
-        }, 48000);
-      } else {
-        done();
-      }
+      testOnOfflineContext(function() {
+        testOnOfflineContext(done, 44100);
+      }, 48000);
     });
-  };
-
-  if (document.readyState !== 'complete') {
-    addLoadEvent(runTestFunction);
-  } else {
-    runTestFunction();
-  }
+  });
 }

@@ -7,8 +7,7 @@
 #ifndef builtin_Eval_h
 #define builtin_Eval_h
 
-#include "jsbytecode.h"
-#include "NamespaceImports.h"
+#include "vm/Stack.h"
 
 namespace js {
 
@@ -17,7 +16,7 @@ namespace js {
 // JSOP_EVAL which in turn calls DirectEval. Thus, even though IndirectEval is
 // the callee function object for *all* calls to eval, it is by construction
 // only ever called in the case indirect eval.
-extern bool
+extern JSBool
 IndirectEval(JSContext *cx, unsigned argc, Value *vp);
 
 // Performs a direct eval for the given arguments, which must correspond to the
@@ -28,19 +27,24 @@ DirectEval(JSContext *cx, const CallArgs &args);
 
 // Performs a direct eval called from Ion code.
 extern bool
-DirectEvalStringFromIon(JSContext *cx,
-                        HandleObject scopeObj, HandleScript callerScript,
-                        HandleValue thisValue, HandleString str,
-                        jsbytecode * pc, MutableHandleValue vp);
+DirectEvalFromIon(JSContext *cx,
+                  HandleObject scopeObj, HandleScript callerScript,
+                  HandleValue thisValue, HandleString str,
+                  jsbytecode * pc, MutableHandleValue vp);
+
+// True iff 'v' is the built-in eval function for the global object that
+// corresponds to 'scopeChain'.
 extern bool
-DirectEvalValueFromIon(JSContext *cx,
-                       HandleObject scopeObj, HandleScript callerScript,
-                       HandleValue thisValue, HandleValue evalArg,
-                       jsbytecode * pc, MutableHandleValue vp);
+IsBuiltinEvalForScope(JSObject *scopeChain, const Value &v);
 
 // True iff fun is a built-in eval function.
 extern bool
 IsAnyBuiltinEval(JSFunction *fun);
+
+// Return the principals to assign to code compiled for a call to
+// eval or the Function constructor.
+extern JSPrincipals *
+PrincipalsForCompiledCode(const CallReceiver &call, JSContext *cx);
 
 }  // namespace js
 #endif /* builtin_Eval_h */

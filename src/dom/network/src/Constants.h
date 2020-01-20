@@ -13,9 +13,8 @@ namespace mozilla {
 namespace dom {
 namespace network {
 
-  static const uint32_t kDefaultType = 5; // ConnectionType::None
-  static const bool   kDefaultIsWifi = false;
-  static const uint32_t kDefaultDHCPGateway = 0;
+  static const double kDefaultBandwidth    = -1.0;
+  static const bool   kDefaultCanBeMetered = false;
 
 } // namespace network
 } // namespace dom

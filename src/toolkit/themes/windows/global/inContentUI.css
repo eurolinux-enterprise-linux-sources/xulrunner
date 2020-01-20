@@ -16,7 +16,9 @@
   background-repeat: repeat;
   color: -moz-dialogText;
   background-color: -moz-dialog;
-  background-image: /* Texture */
+  background-image: /* Fade-out texture at the top, and blend with browser tab */
+                    linear-gradient(rgba(255,255,255,0.5), rgba(255,255,255,0) 30%),
+                    /* Texture */
                     url("chrome://global/skin/inContentUI/background-texture.png");
 }
 
@@ -25,18 +27,24 @@ html|html {
 }
 
 %ifdef WINDOWS_AERO
-@media (-moz-windows-default-theme) and (-moz-os-version: windows-vista),
-       (-moz-windows-default-theme) and (-moz-os-version: windows-win7) {
+@media (-moz-windows-default-theme) {
   *|*:root {
     color: #000;
     background-color: #CCD9EA;
+    background-image: /* Fade-out texture at the top */
+                      linear-gradient(rgb(237,245,252), rgba(237,245,252,0) 156px),
+                      /* Texture */
+                      url("chrome://global/skin/inContentUI/background-texture.png");
   }
 }
 
-@media (-moz-windows-glass) {
+@media (-moz-windows-compositor) {
   *|*:root {
+    color: #000;
     /* Blame shorlander for this monstrosity. */
-    background-image: /* Side gradients */
+    background-image: /* Fade-out texture and light beams at the top */
+                      linear-gradient(rgb(237,245,252) 3px, rgba(237,245,252,0) 156px),
+                      /* Side gradients */
                       linear-gradient(to right,
                                       rgba(255,255,255,0.2), rgba(255,255,255,0) 40%,
                                       rgba(255,255,255,0) 60%, rgba(255,255,255,0.2)),
@@ -68,19 +76,11 @@ html|html {
   background-image: linear-gradient(rgba(255, 255, 255, 0),
                                     rgba(255, 255, 255, 0.75));
   border: 1px solid #C3CEDF;
+  border-radius: 5px;
 }
 
 %ifdef WINDOWS_AERO
-@media (-moz-os-version: windows-vista),
-       (-moz-os-version: windows-win7) {
-%endif
-  *|*.main-content {
-    border-radius: 5px;
-  }
-%ifdef WINDOWS_AERO
-}
-
-@media (-moz-windows-glass) {
+@media (-moz-windows-compositor) {
   /* Buttons */
   *|button,
   menulist,

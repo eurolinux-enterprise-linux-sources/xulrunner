@@ -17,7 +17,6 @@
 
 #include "nsDirectoryViewer.h"
 #include "nsIDirIndex.h"
-#include "nsIDocShell.h"
 #include "jsapi.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
@@ -51,10 +50,12 @@
 #include "nsXPCOMCID.h"
 #include "nsIDocument.h"
 #include "mozilla/Preferences.h"
+#include "nsContentUtils.h"
 #include "nsCxPusher.h"
 
 using namespace mozilla;
 
+static const int FORMAT_HTML = 2;
 static const int FORMAT_XUL = 3;
 
 //----------------------------------------------------------------------
@@ -83,7 +84,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsHTTPIndex)
     NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIHTTPIndex)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION(nsHTTPIndex, mInner)
+NS_IMPL_CYCLE_COLLECTION_1(nsHTTPIndex, mInner)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsHTTPIndex)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsHTTPIndex)
 
@@ -160,24 +161,26 @@ nsHTTPIndex::OnFTPControlLog(bool server, const char *msg)
     AutoPushJSContext cx(context->GetNativeContext());
     NS_ENSURE_TRUE(cx, NS_OK);
 
-    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+    JS::Rooted<JSObject*> global(cx, JS_GetGlobalForScopeChain(cx));
     NS_ENSURE_TRUE(global, NS_OK);
+
+    JS::Value params[2];
 
     nsString unicodeMsg;
     unicodeMsg.AssignWithConversion(msg);
-    JSString* jsMsgStr = JS_NewUCStringCopyZ(cx, unicodeMsg.get());
+    JSString* jsMsgStr = JS_NewUCStringCopyZ(cx, (jschar*) unicodeMsg.get());
     NS_ENSURE_TRUE(jsMsgStr, NS_ERROR_OUT_OF_MEMORY);
 
-    JS::AutoValueArray<2> params(cx);
-    params[0].setBoolean(server);
-    params[1].setString(jsMsgStr);
+    params[0] = BOOLEAN_TO_JSVAL(server);
+    params[1] = STRING_TO_JSVAL(jsMsgStr);
 
     JS::Rooted<JS::Value> val(cx);
     JS_CallFunctionName(cx,
                         global,
                         "OnFTPControlLog",
+                        2,
                         params,
-                        &val);
+                        val.address());
     return NS_OK;
 }
 
@@ -233,7 +236,7 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     NS_ENSURE_TRUE(context, NS_ERROR_FAILURE);
 
     AutoPushJSContext cx(context->GetNativeContext());
-    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
+    JS::Rooted<JSObject*> global(cx, JS_GetGlobalForScopeChain(cx));
 
     // Using XPConnect, wrap the HTTP index object...
     static NS_DEFINE_CID(kXPConnectCID, NS_XPCONNECT_CID);
@@ -258,7 +261,7 @@ nsHTTPIndex::OnStartRequest(nsIRequest *request, nsISupports* aContext)
     JS::Rooted<JS::Value> jslistener(cx, OBJECT_TO_JSVAL(jsobj));
 
     // ...and stuff it into the global context
-    bool ok = JS_SetProperty(cx, global, "HTTPIndex", jslistener);
+    bool ok = JS_SetProperty(cx, global, "HTTPIndex", jslistener.address());
     NS_ASSERTION(ok, "unable to set Listener property");
     if (!ok)
       return NS_ERROR_FAILURE;
@@ -458,16 +461,16 @@ nsHTTPIndex::OnIndexAvailable(nsIRequest* aRequest, nsISupports *aContext,
       rv = aIndex->GetType(&type);
       switch (type) {
       case nsIDirIndex::TYPE_UNKNOWN:
-        rv = mDirRDF->GetLiteral(MOZ_UTF16("UNKNOWN"), getter_AddRefs(lit));
+        rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("UNKNOWN").get(), getter_AddRefs(lit));
         break;
       case nsIDirIndex::TYPE_DIRECTORY:
-        rv = mDirRDF->GetLiteral(MOZ_UTF16("DIRECTORY"), getter_AddRefs(lit));
+        rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("DIRECTORY").get(), getter_AddRefs(lit));
         break;
       case nsIDirIndex::TYPE_FILE:
-        rv = mDirRDF->GetLiteral(MOZ_UTF16("FILE"), getter_AddRefs(lit));
+        rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("FILE").get(), getter_AddRefs(lit));
         break;
       case nsIDirIndex::TYPE_SYMLINK:
-        rv = mDirRDF->GetLiteral(MOZ_UTF16("SYMLINK"), getter_AddRefs(lit));
+        rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("SYMLINK").get(), getter_AddRefs(lit));
         break;
       }
       
@@ -585,9 +588,9 @@ nsHTTPIndex::CommonInit()
     mDirRDF->GetResource(NS_LITERAL_CSTRING(NC_NAMESPACE_URI "IsContainer"),
                          getter_AddRefs(kNC_IsContainer));
 
-    rv = mDirRDF->GetLiteral(MOZ_UTF16("true"), getter_AddRefs(kTrueLiteral));
+    rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("true").get(), getter_AddRefs(kTrueLiteral));
     if (NS_FAILED(rv)) return(rv);
-    rv = mDirRDF->GetLiteral(MOZ_UTF16("false"), getter_AddRefs(kFalseLiteral));
+    rv = mDirRDF->GetLiteral(NS_LITERAL_STRING("false").get(), getter_AddRefs(kFalseLiteral));
     if (NS_FAILED(rv)) return(rv);
 
     rv = NS_NewISupportsArray(getter_AddRefs(mConnectionList));
@@ -703,9 +706,9 @@ void nsHTTPIndex::GetDestination(nsIRDFResource* r, nsXPIDLCString& dest) {
   if (!url) {
      const char* temp;
      r->GetValueConst(&temp);
-     dest.Adopt(temp ? strdup(temp) : 0);
+     dest.Adopt(temp ? nsCRT::strdup(temp) : 0);
   } else {
-    const char16_t* uri;
+    const PRUnichar* uri;
     url->GetValueConst(&uri);
     dest.Adopt(ToNewUTF8String(nsDependentString(uri)));
   }
@@ -754,7 +757,7 @@ nsHTTPIndex::GetURI(char * *uri)
 	if (! uri)
 		return(NS_ERROR_NULL_POINTER);
 
-	if ((*uri = strdup("rdf:httpindex")) == nullptr)
+	if ((*uri = nsCRT::strdup("rdf:httpindex")) == nullptr)
 		return(NS_ERROR_OUT_OF_MEMORY);
 
 	return(NS_OK);
@@ -1164,6 +1167,8 @@ nsHTTPIndex::ArcLabelsIn(nsIRDFNode *aNode, nsISimpleEnumerator **_retval)
 NS_IMETHODIMP
 nsHTTPIndex::ArcLabelsOut(nsIRDFResource *aSource, nsISimpleEnumerator **_retval)
 {
+	nsresult	rv = NS_ERROR_UNEXPECTED;
+
 	*_retval = nullptr;
 
 	nsCOMPtr<nsISimpleEnumerator> child, anonArcs;
@@ -1174,7 +1179,7 @@ nsHTTPIndex::ArcLabelsOut(nsIRDFResource *aSource, nsISimpleEnumerator **_retval
 
 	if (mInner)
 	{
-		mInner->ArcLabelsOut(aSource, getter_AddRefs(anonArcs));
+		rv = mInner->ArcLabelsOut(aSource, getter_AddRefs(anonArcs));
 	}
 
 	return NS_NewUnionEnumerator(_retval, child, anonArcs);
@@ -1254,7 +1259,7 @@ nsDirectoryViewerFactory::~nsDirectoryViewerFactory()
 }
 
 
-NS_IMPL_ISUPPORTS(nsDirectoryViewerFactory, nsIDocumentLoaderFactory)
+NS_IMPL_ISUPPORTS1(nsDirectoryViewerFactory, nsIDocumentLoaderFactory)
 
 
 
@@ -1263,7 +1268,7 @@ nsDirectoryViewerFactory::CreateInstance(const char *aCommand,
                                          nsIChannel* aChannel,
                                          nsILoadGroup* aLoadGroup,
                                          const char* aContentType, 
-                                         nsIDocShell* aContainer,
+                                         nsISupports* aContainer,
                                          nsISupports* aExtraInfo,
                                          nsIStreamListener** aDocListenerResult,
                                          nsIContentViewer** aDocViewerResult)

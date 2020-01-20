@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/DateTime.h"
+#include "DateTime.h"
 
 #include <time.h>
 
@@ -69,7 +69,7 @@ UTCToLocalStandardOffsetSeconds()
 #endif
 
     // Get the current time.
-    time_t currentMaybeWithDST = time(nullptr);
+    time_t currentMaybeWithDST = time(NULL);
     if (currentMaybeWithDST == time_t(-1))
         return 0;
 
@@ -164,7 +164,7 @@ js::DateTimeInfo::DateTimeInfo()
 {
     // Set to a totally impossible TZA so that the comparison above will fail
     // and all fields will be properly initialized.
-    localTZA_ = UnspecifiedNaN<double>();
+    localTZA_ = UnspecifiedNaN();
     updateTimeZoneAdjustment();
 }
 

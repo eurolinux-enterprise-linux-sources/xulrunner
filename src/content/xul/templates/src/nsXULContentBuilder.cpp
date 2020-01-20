@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "nsContentCID.h"
 #include "nsIDocument.h"
@@ -32,8 +32,8 @@
 #include "nsNodeUtils.h"
 #include "mozAutoDocUpdate.h"
 #include "nsTextNode.h"
-#include "mozilla/dom/Element.h"
 
+#include "jsapi.h"
 #include "pldhash.h"
 #include "rdf.h"
 
@@ -146,7 +146,7 @@ protected:
      * @param aResult result to look up variable->value bindings in
      */
     nsresult
-    AddPersistentAttributes(Element* aTemplateNode,
+    AddPersistentAttributes(nsIContent* aTemplateNode,
                             nsIXULTemplateResult* aResult,
                             nsIContent* aRealNode);
 
@@ -249,7 +249,7 @@ protected:
     nsresult
     CreateElement(int32_t aNameSpaceID,
                   nsIAtom* aTag,
-                  Element** aResult);
+                  nsIContent** aResult);
 
     /**
      * Set the container and empty attributes on a node. If
@@ -513,15 +513,15 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
         bool isGenerationElement = false;
         bool isUnique = aIsUnique;
 
-        // We identify the resource element by presence of a
-        // "uri='rdf:*'" attribute. (We also support the older
-        // "uri='...'" syntax.)
-        if (tmplKid->HasAttr(kNameSpaceID_None, nsGkAtoms::uri) && aMatch->IsActive()) {
-            isGenerationElement = true;
-            isUnique = false;
+        {
+            // We identify the resource element by presence of a
+            // "uri='rdf:*'" attribute. (We also support the older
+            // "uri='...'" syntax.)
+            if (tmplKid->HasAttr(kNameSpaceID_None, nsGkAtoms::uri) && aMatch->IsActive()) {
+                isGenerationElement = true;
+                isUnique = false;
+            }
         }
-
-        MOZ_ASSERT_IF(isGenerationElement, tmplKid->IsElement());
 
         nsIAtom *tag = tmplKid->Tag();
 
@@ -584,11 +584,9 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
         else if (isGenerationElement) {
             // It's the "resource" element. Create a new element using
             // the namespace ID and tag from the template element.
-            nsCOMPtr<Element> element;
-            rv = CreateElement(nameSpaceID, tag, getter_AddRefs(element));
+            rv = CreateElement(nameSpaceID, tag, getter_AddRefs(realKid));
             if (NS_FAILED(rv))
                 return rv;
-            realKid = element.forget();
 
             // Add the resource element to the content support map so
             // we can remove the match based on the content node later.
@@ -614,7 +612,7 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
             // given node.
             // SynchronizeUsingTemplate contains code used to update textnodes,
             // so make sure to modify both when changing this
-            char16_t attrbuf[128];
+            PRUnichar attrbuf[128];
             nsFixedString attrValue(attrbuf, ArrayLength(attrbuf), 0);
             tmplKid->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
             if (!attrValue.IsEmpty()) {
@@ -652,10 +650,8 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
         }
         else {
             // It's just a generic element. Create it!
-            nsCOMPtr<Element> element;
-            rv = CreateElement(nameSpaceID, tag, getter_AddRefs(element));
+            rv = CreateElement(nameSpaceID, tag, getter_AddRefs(realKid));
             if (NS_FAILED(rv)) return rv;
-            realKid = element.forget();
         }
 
         if (realKid && !realKidAlreadyExisted) {
@@ -683,8 +679,7 @@ nsXULContentBuilder::BuildContentFromTemplate(nsIContent *aTemplateNode,
 
             // Add any persistent attributes
             if (isGenerationElement) {
-                rv = AddPersistentAttributes(tmplKid->AsElement(), aChild,
-                                             realKid);
+                rv = AddPersistentAttributes(tmplKid, aChild, realKid);
                 if (NS_FAILED(rv)) return rv;
             }
 
@@ -754,7 +749,7 @@ nsXULContentBuilder::CopyAttributesToElement(nsIContent* aTemplateNode,
             // Create a buffer here, because there's a chance that an
             // attribute in the template is going to be an RDF URI, which is
             // usually longish.
-            char16_t attrbuf[128];
+            PRUnichar attrbuf[128];
             nsFixedString attribValue(attrbuf, ArrayLength(attrbuf), 0);
             aTemplateNode->GetAttr(attribNameSpaceID, attribName, attribValue);
             if (!attribValue.IsEmpty()) {
@@ -788,7 +783,7 @@ nsXULContentBuilder::CopyAttributesToElement(nsIContent* aTemplateNode,
 }
 
 nsresult
-nsXULContentBuilder::AddPersistentAttributes(Element* aTemplateNode,
+nsXULContentBuilder::AddPersistentAttributes(nsIContent* aTemplateNode,
                                              nsIXULTemplateResult* aResult,
                                              nsIContent* aRealNode)
 {
@@ -852,7 +847,7 @@ nsXULContentBuilder::AddPersistentAttributes(Element* aTemplateNode,
         if (! value)
             continue;
 
-        const char16_t* valueStr;
+        const PRUnichar* valueStr;
         rv = value->GetValueConst(&valueStr);
         NS_ENSURE_SUCCESS(rv, rv);
 
@@ -892,7 +887,7 @@ nsXULContentBuilder::SynchronizeUsingTemplate(nsIContent* aTemplateNode,
         // This code is similar to that in BuildContentFromTemplate
         if (tmplKid->NodeInfo()->Equals(nsGkAtoms::textnode,
                                         kNameSpaceID_XUL)) {
-            char16_t attrbuf[128];
+            PRUnichar attrbuf[128];
             nsFixedString attrValue(attrbuf, ArrayLength(attrbuf), 0);
             tmplKid->GetAttr(kNameSpaceID_None, nsGkAtoms::value, attrValue);
             if (!attrValue.IsEmpty()) {
@@ -1239,7 +1234,7 @@ nsXULContentBuilder::EnsureElementHasGenericChild(nsIContent* parent,
 
     if (rv == NS_RDF_NO_VALUE) {
         // we need to construct a new child element.
-        nsCOMPtr<Element> element;
+        nsCOMPtr<nsIContent> element;
 
         rv = CreateElement(nameSpaceID, tag, getter_AddRefs(element));
         if (NS_FAILED(rv))
@@ -1357,18 +1352,25 @@ nsXULContentBuilder::GetElementsForResult(nsIXULTemplateResult* aResult,
 nsresult
 nsXULContentBuilder::CreateElement(int32_t aNameSpaceID,
                                    nsIAtom* aTag,
-                                   Element** aResult)
+                                   nsIContent** aResult)
 {
     nsCOMPtr<nsIDocument> doc = mRoot->GetDocument();
     NS_ASSERTION(doc != nullptr, "not initialized");
     if (! doc)
         return NS_ERROR_NOT_INITIALIZED;
 
+    nsCOMPtr<nsIContent> result;
     nsCOMPtr<nsINodeInfo> nodeInfo =
         doc->NodeInfoManager()->GetNodeInfo(aTag, nullptr, aNameSpaceID,
                                             nsIDOMNode::ELEMENT_NODE);
 
-    return NS_NewElement(aResult, nodeInfo.forget(), NOT_FROM_PARSER);
+    nsresult rv = NS_NewElement(getter_AddRefs(result), nodeInfo.forget(),
+                                NOT_FROM_PARSER);
+    if (NS_FAILED(rv))
+        return rv;
+
+    result.forget(aResult);
+    return NS_OK;
 }
 
 nsresult

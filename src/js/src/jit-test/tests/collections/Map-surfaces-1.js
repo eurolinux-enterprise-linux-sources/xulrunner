@@ -1,7 +1,5 @@
 // Map surfaces
 
-load(libdir + "iteration.js");
-
 var desc = Object.getOwnPropertyDescriptor(this, "Map");
 assertEq(desc.enumerable, false);
 assertEq(desc.configurable, true);
@@ -9,7 +7,7 @@ assertEq(desc.writable, true);
 
 assertEq(typeof Map, 'function');
 assertEq(Object.keys(Map).length, 0);
-assertEq(Map.length, 0);
+assertEq(Map.length, 1);
 assertEq(Map.name, "Map");
 
 assertEq(Object.getPrototypeOf(Map.prototype), Object.prototype);
@@ -45,5 +43,5 @@ assertEq(desc.get.length, 0);
 assertEq(desc.set, undefined);
 checkMethod("clear", 0);
 
-// Map.prototype[@@iterator] and .entries are the same function object.
-assertEq(Map.prototype[std_iterator], Map.prototype.entries);
+// Map.prototype.iterator and .entries are the same function object.
+assertEq(Map.prototype.iterator, Map.prototype.entries);

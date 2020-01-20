@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict";
-
 var kMaxChunkDuration = 30; // ms
 
 function escapeHTML(html) {
@@ -131,16 +129,18 @@ TreeView.prototype = {
       data: data[0].getData()
     });
     this._processPendingActionsChunk();
+    if (this._initSelection === true) {
+      this._initSelection = false;
+      this._select(this._horizontalScrollbox.firstChild);
+      this._toggle(this._horizontalScrollbox.firstChild);
+    }
     changeFocus(this._container);
   },
   // Provide a snapshot of the reverse selection to restore with 'invert callback'
   getReverseSelectionSnapshot: function TreeView__getReverseSelectionSnapshot(isJavascriptOnly) {
+    if (!this._selectedNode)
+      return;
     var snapshot = [];
-
-    if (!this._selectedNode) {
-      return snapshot;
-    }
-
     var curr = this._selectedNode.data;
 
     while(curr) {
@@ -176,7 +176,8 @@ TreeView.prototype = {
     this.restoreSelectionSnapshot(frames, false);
   },
   // Take a selection snapshot and restore the selection
-  restoreSelectionSnapshot: function TreeView_restoreSelectionSnapshot(snapshot, allowNonContiguous) {
+  restoreSelectionSnapshot: function TreeView_restoreSelectionSnapshot(snapshot, allowNonContigious) {
+    //console.log("restore selection: " + JSON.stringify(snapshot));
     var currNode = this._horizontalScrollbox.firstChild;
     if (currNode.data.name == snapshot[0] || snapshot[0] == "(total)") {
       snapshot.shift();
@@ -187,17 +188,19 @@ TreeView.prototype = {
       this._syncProcessPendingActionProcessing();
       for (var i = 0; i < currNode.treeChildren.length; i++) {
         if (currNode.treeChildren[i].data.name == snapshot[0]) {
+          //console.log("Found: " + currNode.treeChildren[i].data.name + "\n");
           snapshot.shift();
           this._toggle(currNode, false, true);
           currNode = currNode.treeChildren[i];
           continue next_level;
         }
       }
-      if (allowNonContiguous) {
+      if (allowNonContigious === true) {
         // We need to do a Breadth-first search to find a match
         var pendingSearch = [currNode.data];
         while (pendingSearch.length > 0) {
           var node = pendingSearch.shift();
+          //console.log("searching: " + node.name + " for: " + snapshot[0] + "\n");
           if (!node.treeChildren)
             continue;
           for (var i = 0; i < node.treeChildren.length; i++) {
@@ -458,7 +461,7 @@ TreeView.prototype = {
       '<span class="resourceIcon" data-resource="' + node.library + '"></span> ' +
       '<span class="functionName">' + nodeName + '</span>' +
       '<span class="libraryName">' + libName + '</span>' +
-      ((nodeName === '(total)' || gHideSourceLinks) ? '' :
+      (nodeName === '(total)' ? '' :
         '<input type="button" value="Focus Callstack" title="Focus Callstack" class="focusCallstackButton" tabindex="-1">');
   },
   _resolveChildren: function TreeView__resolveChildren(div, childrenCollapsedValue) {

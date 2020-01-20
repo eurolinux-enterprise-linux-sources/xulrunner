@@ -25,9 +25,10 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMCursor,
                                            DOMRequest)
 
-  DOMCursor(nsPIDOMWindow* aWindow, nsICursorContinueCallback *aCallback);
+  DOMCursor(nsIDOMWindow* aWindow, nsICursorContinueCallback *aCallback);
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   bool Done() const
   {

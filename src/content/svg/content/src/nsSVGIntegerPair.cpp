@@ -13,7 +13,19 @@
 #include "SVGIntegerPairSMILType.h"
 
 using namespace mozilla;
-using namespace mozilla::dom;
+
+NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGIntegerPair::DOMAnimatedInteger, mSVGElement)
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGIntegerPair::DOMAnimatedInteger)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGIntegerPair::DOMAnimatedInteger)
+
+DOMCI_DATA(SVGAnimatedIntegerPair, nsSVGIntegerPair::DOMAnimatedInteger)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGIntegerPair::DOMAnimatedInteger)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedInteger)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedInteger)
+NS_INTERFACE_MAP_END
 
 static nsSVGAttrTearoffTable<nsSVGIntegerPair, nsSVGIntegerPair::DOMAnimatedInteger>
   sSVGFirstAnimatedIntegerTearoffTable;
@@ -29,14 +41,22 @@ ParseIntegerOptionalInteger(const nsAString& aValue,
   nsCharSeparatedTokenizerTemplate<IsSVGWhitespace>
     tokenizer(aValue, ',',
               nsCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
-  if (tokenizer.whitespaceBeforeFirstToken()) {
+  if (tokenizer.firstTokenBeganWithWhitespace()) {
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
   uint32_t i;
   for (i = 0; i < 2 && tokenizer.hasMoreTokens(); ++i) {
-    if (!SVGContentUtils::ParseInteger(tokenizer.nextToken(), aValues[i])) {
-      return NS_ERROR_DOM_SYNTAX_ERR;
+    NS_ConvertUTF16toUTF8 utf8Token(tokenizer.nextToken());
+    const char *token = utf8Token.get();
+    if (*token == '\0') {
+      return NS_ERROR_DOM_SYNTAX_ERR; // empty string (e.g. two commas in a row)
+    }
+
+    char *end;
+    aValues[i] = strtol(token, &end, 10);
+    if (*end != '\0' || !NS_finite(aValues[i])) {
+      return NS_ERROR_DOM_SYNTAX_ERR; // parse error
     }
   }
   if (i == 1) {
@@ -45,8 +65,8 @@ ParseIntegerOptionalInteger(const nsAString& aValue,
 
   if (i == 0                    ||                // Too few values.
       tokenizer.hasMoreTokens() ||                // Too many values.
-      tokenizer.whitespaceAfterCurrentToken() ||  // Trailing whitespace.
-      tokenizer.separatorAfterCurrentToken()) {   // Trailing comma.
+      tokenizer.lastTokenEndedWithWhitespace() || // Trailing whitespace.
+      tokenizer.lastTokenEndedWithSeparator()) {  // Trailing comma.
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
@@ -148,7 +168,16 @@ nsSVGIntegerPair::SetAnimValue(const int32_t aValue[2], nsSVGElement *aSVGElemen
   aSVGElement->DidAnimateIntegerPair(mAttrEnum);
 }
 
-already_AddRefed<SVGAnimatedInteger>
+nsresult
+nsSVGIntegerPair::ToDOMAnimatedInteger(nsIDOMSVGAnimatedInteger **aResult,
+                                       PairIndex aIndex,
+                                       nsSVGElement *aSVGElement)
+{
+  *aResult = ToDOMAnimatedInteger(aIndex, aSVGElement).get();
+  return NS_OK;
+}
+
+already_AddRefed<nsIDOMSVGAnimatedInteger>
 nsSVGIntegerPair::ToDOMAnimatedInteger(PairIndex aIndex,
                                        nsSVGElement* aSVGElement)
 {

@@ -3,20 +3,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/HTMLMetaElement.h"
 #include "mozilla/dom/HTMLMetaElementBinding.h"
-#include "nsContentUtils.h"
 #include "nsStyleConsts.h"
+#include "nsAsyncDOMEvent.h"
+#include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Meta)
 
 namespace mozilla {
 namespace dom {
 
-HTMLMetaElement::HTMLMetaElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLMetaElement::HTMLMetaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
+  SetIsDOMBinding();
 }
 
 HTMLMetaElement::~HTMLMetaElement()
@@ -24,8 +25,17 @@ HTMLMetaElement::~HTMLMetaElement()
 }
 
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLMetaElement, nsGenericHTMLElement,
-                            nsIDOMHTMLMetaElement)
+NS_IMPL_ADDREF_INHERITED(HTMLMetaElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLMetaElement, Element)
+
+
+// QueryInterface implementation for HTMLMetaElement
+NS_INTERFACE_TABLE_HEAD(HTMLMetaElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLMetaElement, nsIDOMHTMLMetaElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
+
 
 NS_IMPL_ELEMENT_CLONE(HTMLMetaElement)
 
@@ -83,15 +93,15 @@ HTMLMetaElement::CreateAndDispatchEvent(nsIDocument* aDoc,
   if (!aDoc)
     return;
 
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, aEventName, true, true);
-  asyncDispatcher->PostDOMEvent();
+  nsRefPtr<nsAsyncDOMEvent> event = new nsAsyncDOMEvent(this, aEventName, true,
+                                                        true);
+  event->PostDOMEvent();
 }
 
 JSObject*
-HTMLMetaElement::WrapNode(JSContext* aCx)
+HTMLMetaElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLMetaElementBinding::Wrap(aCx, this);
+  return HTMLMetaElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

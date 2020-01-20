@@ -6,8 +6,9 @@
 
 #include "SpeechGrammarList.h"
 
+#include "nsContentUtils.h"
+
 #include "mozilla/dom/SpeechGrammarListBinding.h"
-#include "mozilla/ErrorResult.h"
 
 namespace mozilla {
 namespace dom {
@@ -31,16 +32,15 @@ SpeechGrammarList::~SpeechGrammarList()
 }
 
 SpeechGrammarList*
-SpeechGrammarList::Constructor(const GlobalObject& aGlobal,
-                               ErrorResult& aRv)
+SpeechGrammarList::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  return new SpeechGrammarList(aGlobal.GetAsSupports());
+  return new SpeechGrammarList(aGlobal.Get());
 }
 
 JSObject*
-SpeechGrammarList::WrapObject(JSContext* aCx)
+SpeechGrammarList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return SpeechGrammarListBinding::Wrap(aCx, this);
+  return SpeechGrammarListBinding::Wrap(aCx, aScope, this);
 }
 
 nsISupports*

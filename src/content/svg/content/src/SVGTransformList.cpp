@@ -22,13 +22,13 @@ SVGTransformList::GetConsolidationMatrix() const
   if (mItems.IsEmpty())
     return result;
 
-  result = mItems[0].GetMatrix();
+  result = mItems[0].Matrix();
 
   if (mItems.Length() == 1)
     return result;
 
   for (uint32_t i = 1; i < mItems.Length(); ++i) {
-    result.PreMultiply(mItems[i].GetMatrix());
+    result.PreMultiply(mItems[i].Matrix());
   }
 
   return result;
@@ -70,8 +70,10 @@ SVGTransformList::GetValueAsString(nsAString& aValue) const
 nsresult
 SVGTransformList::SetValueFromString(const nsAString& aValue)
 {
-  SVGTransformListParser parser(aValue);
-  if (!parser.Parse()) {
+  SVGTransformListParser parser;
+  nsresult rv = parser.Parse(aValue);
+
+  if (NS_FAILED(rv)) {
     // there was a parse error.
     return NS_ERROR_DOM_SYNTAX_ERR;
   }

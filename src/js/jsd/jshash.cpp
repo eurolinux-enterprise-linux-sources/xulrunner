@@ -7,22 +7,13 @@
 /*
  * PR hash table package.
  */
-
-#include "jshash.h"
-
-#include "mozilla/MathAlgorithms.h"
-
 #include <stdlib.h>
 #include <string.h>
-
 #include "jstypes.h"
-
-#include "js/Utility.h"
+#include "jsutil.h"
+#include "jshash.h"
 
 using namespace js;
-
-using mozilla::CeilingLog2Size;
-using mozilla::RotateLeft;
 
 /* Compute the number of buckets in ht */
 #define NBUCKETS(ht)    JS_BIT(JS_HASH_BITS - (ht)->shift)
@@ -65,7 +56,7 @@ DefaultFreeEntry(void *pool, JSHashEntry *he, unsigned flag)
         js_free(he);
 }
 
-static const JSHashAllocOps defaultHashAllocOps = {
+static JSHashAllocOps defaultHashAllocOps = {
     DefaultAllocTable, DefaultFreeTable,
     DefaultAllocEntry, DefaultFreeEntry
 };
@@ -73,7 +64,7 @@ static const JSHashAllocOps defaultHashAllocOps = {
 JSHashTable *
 JS_NewHashTable(uint32_t n, JSHashFunction keyHash,
                 JSHashComparator keyCompare, JSHashComparator valueCompare,
-                const JSHashAllocOps *allocOps, void *allocPriv)
+                JSHashAllocOps *allocOps, void *allocPriv)
 {
     JSHashTable *ht;
     size_t nb;
@@ -81,16 +72,16 @@ JS_NewHashTable(uint32_t n, JSHashFunction keyHash,
     if (n <= MINBUCKETS) {
         n = MINBUCKETSLOG2;
     } else {
-        n = CeilingLog2Size(n);
+        n = JS_CEILING_LOG2W(n);
         if (int32_t(n) < 0)
-            return nullptr;
+            return NULL;
     }
 
     if (!allocOps) allocOps = &defaultHashAllocOps;
 
     ht = (JSHashTable*) allocOps->allocTable(allocPriv, sizeof *ht);
     if (!ht)
-        return nullptr;
+        return NULL;
     memset(ht, 0, sizeof *ht);
     ht->shift = JS_HASH_BITS - n;
     n = JS_BIT(n);
@@ -98,7 +89,7 @@ JS_NewHashTable(uint32_t n, JSHashFunction keyHash,
     ht->buckets = (JSHashEntry**) allocOps->allocTable(allocPriv, nb);
     if (!ht->buckets) {
         allocOps->freeTable(allocPriv, ht, nb);
-        return nullptr;
+        return NULL;
     }
     memset(ht->buckets, 0, nb);
 
@@ -115,13 +106,13 @@ JS_HashTableDestroy(JSHashTable *ht)
 {
     uint32_t i, n;
     JSHashEntry *he, **hep;
-    const JSHashAllocOps *allocOps = ht->allocOps;
+    JSHashAllocOps *allocOps = ht->allocOps;
     void *allocPriv = ht->allocPriv;
 
     n = NBUCKETS(ht);
     for (i = 0; i < n; i++) {
         hep = &ht->buckets[i];
-        while ((he = *hep) != nullptr) {
+        while ((he = *hep) != NULL) {
             *hep = he->next;
             allocOps->freeEntry(allocPriv, he, HT_FREE_ENTRY);
         }
@@ -151,7 +142,7 @@ JS_HashTableRawLookup(JSHashTable *ht, JSHashNumber keyHash, const void *key)
     ht->nlookups++;
 #endif
     hep = hep0 = BUCKET_HEAD(ht, keyHash);
-    while ((he = *hep) != nullptr) {
+    while ((he = *hep) != NULL) {
         if (he->keyHash == keyHash && ht->keyCompare(key, he->key)) {
             /* Move to front of chain if not already there */
             if (hep != hep0) {
@@ -169,27 +160,27 @@ JS_HashTableRawLookup(JSHashTable *ht, JSHashNumber keyHash, const void *key)
     return hep;
 }
 
-static bool
+static JSBool
 Resize(JSHashTable *ht, uint32_t newshift)
 {
     size_t nb, nentries, i;
     JSHashEntry **oldbuckets, *he, *next, **hep;
     size_t nold = NBUCKETS(ht);
 
-    MOZ_ASSERT(newshift < JS_HASH_BITS);
+    JS_ASSERT(newshift < JS_HASH_BITS);
 
     nb = (size_t)1 << (JS_HASH_BITS - newshift);
 
     /* Integer overflow protection. */
     if (nb > (size_t)-1 / sizeof(JSHashEntry*))
-        return false;
+        return JS_FALSE;
     nb *= sizeof(JSHashEntry*);
 
     oldbuckets = ht->buckets;
     ht->buckets = (JSHashEntry**)ht->allocOps->allocTable(ht->allocPriv, nb);
     if (!ht->buckets) {
         ht->buckets = oldbuckets;
-        return false;
+        return JS_FALSE;
     }
     memset(ht->buckets, 0, nb);
 
@@ -198,7 +189,7 @@ Resize(JSHashTable *ht, uint32_t newshift)
 
     for (i = 0; nentries != 0; i++) {
         for (he = oldbuckets[i]; he; he = next) {
-            MOZ_ASSERT(nentries != 0);
+            JS_ASSERT(nentries != 0);
             --nentries;
             next = he->next;
             hep = BUCKET_HEAD(ht, he->keyHash);
@@ -209,7 +200,7 @@ Resize(JSHashTable *ht, uint32_t newshift)
              */
             while (*hep)
                 hep = &(*hep)->next;
-            he->next = nullptr;
+            he->next = NULL;
             *hep = he;
         }
     }
@@ -218,7 +209,7 @@ Resize(JSHashTable *ht, uint32_t newshift)
 #endif
     ht->allocOps->freeTable(ht->allocPriv, oldbuckets,
                             nold * sizeof oldbuckets[0]);
-    return true;
+    return JS_TRUE;
 }
 
 JSHashEntry *
@@ -232,7 +223,7 @@ JS_HashTableRawAdd(JSHashTable *ht, JSHashEntry **&hep,
     n = NBUCKETS(ht);
     if (ht->nentries >= OVERLOADED(n)) {
         if (!Resize(ht, ht->shift - 1))
-            return nullptr;
+            return NULL;
 #ifdef JS_HASHMETER
         ht->ngrows++;
 #endif
@@ -242,7 +233,7 @@ JS_HashTableRawAdd(JSHashTable *ht, JSHashEntry **&hep,
     /* Make a new key value entry */
     he = ht->allocOps->allocEntry(ht->allocPriv, key);
     if (!he)
-        return nullptr;
+        return NULL;
     he->keyHash = keyHash;
     he->key = key;
     he->value = value;
@@ -260,7 +251,7 @@ JS_HashTableAdd(JSHashTable *ht, const void *key, void *value)
 
     keyHash = ht->keyHash(key);
     hep = JS_HashTableRawLookup(ht, keyHash, key);
-    if ((he = *hep) != nullptr) {
+    if ((he = *hep) != NULL) {
         /* Hit; see if values match */
         if (ht->valueCompare(he->value, value)) {
             /* key,value pair is already present in table */
@@ -292,7 +283,7 @@ JS_HashTableRawRemove(JSHashTable *ht, JSHashEntry **hep, JSHashEntry *he)
     }
 }
 
-bool
+JSBool
 JS_HashTableRemove(JSHashTable *ht, const void *key)
 {
     JSHashNumber keyHash;
@@ -300,12 +291,12 @@ JS_HashTableRemove(JSHashTable *ht, const void *key)
 
     keyHash = ht->keyHash(key);
     hep = JS_HashTableRawLookup(ht, keyHash, key);
-    if ((he = *hep) == nullptr)
-        return false;
+    if ((he = *hep) == NULL)
+        return JS_FALSE;
 
     /* Hit; remove element */
     JS_HashTableRawRemove(ht, hep, he);
-    return true;
+    return JS_TRUE;
 }
 
 void *
@@ -316,10 +307,10 @@ JS_HashTableLookup(JSHashTable *ht, const void *key)
 
     keyHash = ht->keyHash(key);
     hep = JS_HashTableRawLookup(ht, keyHash, key);
-    if ((he = *hep) != nullptr) {
+    if ((he = *hep) != NULL) {
         return he->value;
     }
-    return nullptr;
+    return NULL;
 }
 
 /*
@@ -338,8 +329,8 @@ JS_HashTableEnumerateEntries(JSHashTable *ht, JSHashEnumerator f, void *arg)
     n = 0;
     for (bucket = ht->buckets; n != nlimit; ++bucket) {
         hep = bucket;
-        while ((he = *hep) != nullptr) {
-            MOZ_ASSERT(n < nlimit);
+        while ((he = *hep) != NULL) {
+            JS_ASSERT(n < nlimit);
             rv = f(he, n, arg);
             n++;
             if (rv & HT_ENUMERATE_REMOVE) {
@@ -358,15 +349,15 @@ JS_HashTableEnumerateEntries(JSHashTable *ht, JSHashEnumerator f, void *arg)
 out:
     /* Shrink table if removal of entries made it underloaded */
     if (ht->nentries != nlimit) {
-        MOZ_ASSERT(ht->nentries < nlimit);
+        JS_ASSERT(ht->nentries < nlimit);
         nbuckets = NBUCKETS(ht);
         if (MINBUCKETS < nbuckets && ht->nentries < UNDERLOADED(nbuckets)) {
-            newlog2 = CeilingLog2Size(ht->nentries);
+            newlog2 = JS_CEILING_LOG2W(ht->nentries);
             if (newlog2 < MINBUCKETSLOG2)
                 newlog2 = MINBUCKETSLOG2;
 
             /*  Check that we really shrink the table. */
-            MOZ_ASSERT(JS_HASH_BITS - ht->shift > newlog2);
+            JS_ASSERT(JS_HASH_BITS - ht->shift > newlog2);
             Resize(ht, JS_HASH_BITS - newlog2);
         }
     }
@@ -442,7 +433,7 @@ JS_HashString(const void *key)
 
     h = 0;
     for (s = (const unsigned char *)key; *s; s++)
-        h = RotateLeft(h, 4) ^ *s;
+        h = JS_ROTATE_LEFT32(h, 4) ^ *s;
     return h;
 }
 

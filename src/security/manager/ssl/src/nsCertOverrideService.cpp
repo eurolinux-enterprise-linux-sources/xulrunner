@@ -5,10 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCertOverrideService.h"
-
-#include "pkix/pkixtypes.h"
 #include "nsIX509Cert.h"
-#include "NSSCertDBTrustDomain.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSCertHelper.h"
 #include "nsCRT.h"
@@ -32,7 +29,7 @@
 #include "ssl.h" // For SSL_ClearSessionCache
 
 using namespace mozilla;
-using namespace mozilla::psm;
+using mozilla::psm::SharedSSLState;
 
 static const char kCertOverrideFileName[] = "cert_override.txt";
 
@@ -84,10 +81,10 @@ nsCertOverride::convertStringToBits(const nsACString &str, OverrideBits &ob)
   }
 }
 
-NS_IMPL_ISUPPORTS(nsCertOverrideService,
-                  nsICertOverrideService,
-                  nsIObserver,
-                  nsISupportsWeakReference)
+NS_IMPL_THREADSAFE_ISUPPORTS3(nsCertOverrideService, 
+                              nsICertOverrideService,
+                              nsIObserver,
+                              nsISupportsWeakReference)
 
 nsCertOverrideService::nsCertOverrideService()
   : monitor("nsCertOverrideService.monitor")
@@ -105,6 +102,8 @@ nsCertOverrideService::Init()
     NS_NOTREACHED("nsCertOverrideService initialized off main thread");
     return NS_ERROR_NOT_SAME_THREAD;
   }
+
+  mSettingsTable.Init();
 
   mOidTagForStoringNewHashes = SEC_OID_SHA256;
 
@@ -139,7 +138,7 @@ nsCertOverrideService::Init()
 NS_IMETHODIMP
 nsCertOverrideService::Observe(nsISupports     *,
                                const char      *aTopic,
-                               const char16_t *aData)
+                               const PRUnichar *aData)
 {
   // check the topic
   if (!nsCRT::strcmp(aTopic, "profile-before-change")) {
@@ -148,7 +147,7 @@ nsCertOverrideService::Observe(nsISupports     *,
 
     ReentrantMonitorAutoEnter lock(monitor);
 
-    if (!nsCRT::strcmp(aData, MOZ_UTF16("shutdown-cleanse"))) {
+    if (!nsCRT::strcmp(aData, NS_LITERAL_STRING("shutdown-cleanse").get())) {
       RemoveAllFromMemory();
       // delete the storage file
       if (mSettingsFile) {
@@ -394,11 +393,11 @@ GetCertFingerprintByOidTag(nsIX509Cert *aCert,
   if (!cert2)
     return NS_ERROR_FAILURE;
 
-  mozilla::pkix::ScopedCERTCertificate nsscert(cert2->GetCert());
+  ScopedCERTCertificate nsscert(cert2->GetCert());
   if (!nsscert)
     return NS_ERROR_FAILURE;
 
-  return GetCertFingerprintByOidTag(nsscert.get(), aOidTag, fp);
+  return GetCertFingerprintByOidTag(nsscert, aOidTag, fp);
 }
 
 static nsresult
@@ -432,11 +431,11 @@ GetCertFingerprintByDottedOidString(nsIX509Cert *aCert,
   if (!cert2)
     return NS_ERROR_FAILURE;
 
-  mozilla::pkix::ScopedCERTCertificate nsscert(cert2->GetCert());
+  ScopedCERTCertificate nsscert(cert2->GetCert());
   if (!nsscert)
     return NS_ERROR_FAILURE;
 
-  return GetCertFingerprintByDottedOidString(nsscert.get(), dottedOid, fp);
+  return GetCertFingerprintByDottedOidString(nsscert, dottedOid, fp);
 }
 
 NS_IMETHODIMP
@@ -455,11 +454,11 @@ nsCertOverrideService::RememberValidityOverride(const nsACString & aHostName, in
   if (!cert2)
     return NS_ERROR_FAILURE;
 
-  mozilla::pkix::ScopedCERTCertificate nsscert(cert2->GetCert());
+  ScopedCERTCertificate nsscert(cert2->GetCert());
   if (!nsscert)
     return NS_ERROR_FAILURE;
 
-  char* nickname = DefaultServerNicknameForCert(nsscert.get());
+  char* nickname = nsNSSCertificate::defaultServerNickname(nsscert);
   if (!aTemporary && nickname && *nickname)
   {
     ScopedPK11SlotInfo slot(PK11_GetInternalKeySlot());
@@ -468,7 +467,7 @@ nsCertOverrideService::RememberValidityOverride(const nsACString & aHostName, in
       return NS_ERROR_FAILURE;
     }
   
-    SECStatus srv = PK11_ImportCert(slot, nsscert.get(), CK_INVALID_HANDLE,
+    SECStatus srv = PK11_ImportCert(slot, nsscert, CK_INVALID_HANDLE, 
                                     nickname, false);
     if (srv != SECSuccess) {
       PR_Free(nickname);
@@ -478,7 +477,7 @@ nsCertOverrideService::RememberValidityOverride(const nsACString & aHostName, in
   PR_FREEIF(nickname);
 
   nsAutoCString fpStr;
-  nsresult rv = GetCertFingerprintByOidTag(nsscert.get(),
+  nsresult rv = GetCertFingerprintByOidTag(nsscert, 
                   mOidTagForStoringNewHashes, fpStr);
   if (NS_FAILED(rv))
     return rv;
@@ -662,7 +661,7 @@ nsCertOverrideService::ClearValidityOverride(const nsACString & aHostName, int32
 
 NS_IMETHODIMP
 nsCertOverrideService::GetAllOverrideHostsWithPorts(uint32_t *aCount, 
-                                                        char16_t ***aHostsWithPortsArray)
+                                                        PRUnichar ***aHostsWithPortsArray)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

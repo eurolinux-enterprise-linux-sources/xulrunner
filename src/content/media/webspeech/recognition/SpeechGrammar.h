@@ -4,17 +4,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_SpeechGrammar_h
-#define mozilla_dom_SpeechGrammar_h
+#pragma once
 
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsString.h"
 #include "nsWrapperCache.h"
-#include "js/TypeDecls.h"
 
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
+
+#include "EnableWebSpeechRecognitionCheck.h"
+
+struct JSContext;
 
 namespace mozilla {
 namespace dom {
@@ -22,7 +24,8 @@ namespace dom {
 class GlobalObject;
 
 class SpeechGrammar MOZ_FINAL : public nsISupports,
-                                public nsWrapperCache
+                                public nsWrapperCache,
+                                public EnableWebSpeechRecognitionCheck
 {
 public:
   SpeechGrammar(nsISupports* aParent);
@@ -33,10 +36,10 @@ public:
 
   nsISupports* GetParentObject() const;
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  static SpeechGrammar* Constructor(const GlobalObject& aGlobal,
-                                    ErrorResult& aRv);
+  static SpeechGrammar* Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
 
   void GetSrc(nsString& aRetVal, ErrorResult& aRv) const;
 
@@ -52,5 +55,3 @@ private:
 
 } // namespace dom
 } // namespace mozilla
-
-#endif

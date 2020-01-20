@@ -34,13 +34,8 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
   nsAutoCString charset;
   aURI->GetOriginCharset(charset);
   nsAutoString ref;
-  nsresult rv = nsContentUtils::ConvertStringFromEncoding(charset,
-                                                          refPart,
-                                                          ref);
+  nsresult rv = nsContentUtils::ConvertStringFromCharset(charset, refPart, ref);
   if (NS_FAILED(rv)) {
-    // XXX Eww. If fallible malloc failed, using a conversion method that
-    // assumes UTF-8 and doesn't handle UTF-8 errors.
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=951082
     CopyUTF8toUTF16(refPart, ref);
   }
   if (ref.IsEmpty())
@@ -53,7 +48,7 @@ nsReferencedElement::Reset(nsIContent* aFromContent, nsIURI* aURI,
 
   nsIContent* bindingParent = aFromContent->GetBindingParent();
   if (bindingParent) {
-    nsXBLBinding* binding = bindingParent->GetXBLBinding();
+    nsXBLBinding* binding = doc->BindingManager()->GetBinding(bindingParent);
     if (binding) {
       bool isEqualExceptRef;
       rv = aURI->EqualsExceptRef(binding->PrototypeBinding()->DocURI(),
@@ -217,13 +212,13 @@ nsReferencedElement::Observe(Element* aOldElement,
 NS_IMPL_ISUPPORTS_INHERITED0(nsReferencedElement::ChangeNotification,
                              nsRunnable)
 
-NS_IMPL_ISUPPORTS(nsReferencedElement::DocumentLoadNotification,
-                  nsIObserver)
+NS_IMPL_ISUPPORTS1(nsReferencedElement::DocumentLoadNotification,
+                   nsIObserver)
 
 NS_IMETHODIMP
 nsReferencedElement::DocumentLoadNotification::Observe(nsISupports* aSubject,
                                                        const char* aTopic,
-                                                       const char16_t* aData)
+                                                       const PRUnichar* aData)
 {
   NS_ASSERTION(PL_strcmp(aTopic, "external-resource-document-created") == 0,
                "Unexpected topic");

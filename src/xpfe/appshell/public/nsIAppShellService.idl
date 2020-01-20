@@ -14,10 +14,10 @@ interface nsIAppShell;
 [ptr] native JSContext(JSContext);
 
 %{C++
-#include "js/TypeDecls.h"
+struct JSContext;
 %}
 
-[scriptable, uuid(2fa2f813-c216-4efb-8a8c-de60108ce5e5)]
+[scriptable, uuid(5c19ab54-67bf-46d0-ac5b-21abd9050c3b)]
 interface nsIAppShellService : nsISupports
 {
   /**
@@ -44,13 +44,7 @@ interface nsIAppShellService : nsISupports
                                     in long aInitialWidth,
                                     in long aInitialHeight);
 
-  /**
-   * This is the constructor for creating an invisible DocShell.
-   * It is used to simulate DOM windows without an actual physical
-   * representation.
-   * @param aIsChrome Set true if you want to use it for chrome content.
-   */
-  nsIWebNavigation createWindowlessBrowser([optional] in bool aIsChrome);
+  nsIWebNavigation createWindowlessBrowser();
 
   [noscript]
   void createHiddenWindow();
@@ -132,14 +126,4 @@ interface nsIAppShellService : nsISupports
    */
   [noscript]
   readonly attribute boolean hasHiddenPrivateWindow;
-
-  /**
-   * Start/stop tracking lags in the event loop.
-   * If the event loop gets unresponsive, a "event-loop-lag" notification
-   * is sent. Note that calling `startEventLoopLagTracking` when tracking
-   * is already enabled has no effect.
-   * @return true if tracking succeeded.
-   */
-  bool startEventLoopLagTracking();
-  void stopEventLoopLagTracking();
 };

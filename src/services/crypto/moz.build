@@ -7,6 +7,5 @@
 DIRS += ['component']
 TEST_DIRS += ['tests']
 
-EXTRA_COMPONENTS += [
-    'cryptoComponents.manifest',
-]
+MODULE = 'services-crypto'
+

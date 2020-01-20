@@ -41,7 +41,6 @@ var gLoadTimeout = 0;
 var gTimeoutHook = null;
 var gRemote = false;
 var gIgnoreWindowSize = false;
-var gShuffle = false;
 var gTotalChunks = 0;
 var gThisChunk = 0;
 var gContainingWindow = null;
@@ -109,9 +108,6 @@ var gExpectedCrashDumpFiles = [];
 var gUnexpectedCrashDumpFiles = { };
 var gCrashDumpDir;
 var gFailedNoPaint = false;
-
-// The enabled-state of the test-plugins, stored so they can be reset later
-var gTestPluginEnabledStates = null;
 
 const TYPE_REFTEST_EQUAL = '==';
 const TYPE_REFTEST_NOTEQUAL = '!=';
@@ -212,20 +208,6 @@ function IDForEventTarget(event)
     }
 }
 
-function getTestPlugin(aName) {
-  var ph = CC["@mozilla.org/plugin/host;1"].getService(CI.nsIPluginHost);
-  var tags = ph.getPluginTags();
-
-  // Find the test plugin
-  for (var i = 0; i < tags.length; i++) {
-    if (tags[i].name == aName)
-      return tags[i];
-  }
-
-  LogWarning("Failed to find the test-plugin.");
-  return null;
-}
-
 this.OnRefTestLoad = function OnRefTestLoad(win)
 {
     gCrashDumpDir = CC[NS_DIRECTORY_SERVICE_CONTRACTID]
@@ -240,7 +222,7 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
     var prefs = Components.classes["@mozilla.org/preferences-service;1"].
                 getService(Components.interfaces.nsIPrefBranch);
     try {
-        gBrowserIsRemote = prefs.getBoolPref("browser.tabs.remote.autostart");
+        gBrowserIsRemote = prefs.getBoolPref("browser.tabs.remote");
     } catch (e) {
         gBrowserIsRemote = false;
     }
@@ -261,21 +243,19 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
     if (gBrowserIsIframe) {
       gBrowser = gContainingWindow.document.createElementNS(XHTML_NS, "iframe");
       gBrowser.setAttribute("mozbrowser", "");
-      gBrowser.setAttribute("mozapp", prefs.getCharPref("browser.manifestURL"));
     } else {
       gBrowser = gContainingWindow.document.createElementNS(XUL_NS, "xul:browser");
     }
     gBrowser.setAttribute("id", "browser");
     gBrowser.setAttribute("type", "content-primary");
     gBrowser.setAttribute("remote", gBrowserIsRemote ? "true" : "false");
-    gBrowser.setAttribute("mozasyncpanzoom", "true");
     // Make sure the browser element is exactly 800x1000, no matter
     // what size our window is
     gBrowser.setAttribute("style", "min-width: 800px; min-height: 1000px; max-width: 800px; max-height: 1000px");
 
-#ifdef BOOTSTRAP
-#ifdef REFTEST_B2G
-    var doc = gContainingWindow.document.getElementsByTagName("html")[0];
+#if BOOTSTRAP
+#if REFTEST_B2G
+    var doc = gContainingWindow.document.getElementsByTagName("window")[0];
 #else
     var doc = gContainingWindow.document.getElementById('main-window');
 #endif
@@ -286,17 +266,6 @@ this.OnRefTestLoad = function OnRefTestLoad(win)
 #else
     document.getElementById("reftest-window").appendChild(gBrowser);
 #endif
-
-    // reftests should have the test plugins enabled, not click-to-play
-    let plugin1 = getTestPlugin("Test Plug-in");
-    let plugin2 = getTestPlugin("Second Test Plug-in");
-    if (plugin1 && plugin2) {
-      gTestPluginEnabledStates = [plugin1.enabledState, plugin2.enabledState];
-      plugin1.enabledState = CI.nsIPluginTag.STATE_ENABLED;
-      plugin2.enabledState = CI.nsIPluginTag.STATE_ENABLED;
-    } else {
-      LogWarning("Could not get test plugin tags.");
-    }
 
     gBrowserMessageManager = gBrowser.QueryInterface(CI.nsIFrameLoaderOwner)
                                      .frameLoader.messageManager;
@@ -335,8 +304,8 @@ function InitAndStartRefTests()
                 var mfl = FileUtils.openFileOutputStream(f, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE);
                 // Set to mirror to stdout as well as the file
                 gDumpLog = function (msg) {
-#ifdef BOOTSTRAP
-#ifdef REFTEST_B2G
+#if BOOTSTRAP
+#if REFTEST_B2G
                     dump(msg);
 #else
                     //NOTE: on android-xul, we have a libc crash if we do a dump with %7s in the string
@@ -396,15 +365,6 @@ function InitAndStartRefTests()
     if (gRemote) {
         gServer = null;
     } else {
-        // not all gecko applications autoregister xpcom components
-        if (CC["@mozilla.org/server/jshttp;1"] === undefined) {
-            var file = CC["@mozilla.org/file/directory_service;1"].
-                        getService(CI.nsIProperties).get("ProfD", CI.nsIFile);
-            file.appendRelativePath("extensions/reftest@mozilla.org/chrome.manifest");
-
-            registrar = Components.manager.QueryInterface(CI.nsIComponentRegistrar);
-            registrar.autoRegister(file);
-        }
         gServer = CC["@mozilla.org/server/jshttp;1"].
                       createInstance(CI.nsIHttpServer);
     }
@@ -418,10 +378,8 @@ function InitAndStartRefTests()
         DoneTests();
     }
 
-    // Focus the content browser.
-    if (gFocusFilterMode != FOCUS_FILTER_NON_NEEDS_FOCUS_TESTS) {
-        gBrowser.focus();
-    }
+    // Focus the content browser
+    gBrowser.focus();
 
     StartTests();
 }
@@ -431,17 +389,6 @@ function StartHTTPServer()
     gServer.registerContentType("sjs", "sjs");
     gServer.start(-1);
     gHttpServerPort = gServer.identity.primaryPort;
-}
-
-// Perform a Fisher-Yates shuffle of the array.
-function Shuffle(array)
-{
-    for (var i = array.length - 1; i > 0; i--) {
-        var j = Math.floor(Math.random() * (i + 1));
-        var temp = array[i];
-        array[i] = array[j];
-        array[j] = temp;
-    }
 }
 
 function StartTests()
@@ -460,12 +407,6 @@ function StartTests()
         gNoCanvasCache = prefs.getIntPref("reftest.nocache");
     } catch(e) {
         gNoCanvasCache = false;
-    }
-
-    try {
-      gShuffle = prefs.getBoolPref("reftest.shuffle");
-    } catch (e) {
-      gShuffle = false;
     }
 
     try {
@@ -502,11 +443,6 @@ function StartTests()
         DoneTests();
     }
 #endif
-
-    if (gShuffle) {
-        gNoCanvasCache = true;
-    }
-
     try {
         ReadTopManifest(uri);
         BuildUseCounts();
@@ -545,11 +481,6 @@ function StartTests()
             gDumpLog("REFTEST INFO | Running chunk " + gThisChunk + " out of " + gTotalChunks + " chunks.  ");
             gDumpLog("tests " + (start+1) + "-" + end + "/" + gURLs.length + "\n");
         }
-
-        if (gShuffle) {
-            Shuffle(gURLs);
-        }
-
         gTotalTests = gURLs.length;
 
         if (!gTotalTests)
@@ -567,14 +498,6 @@ function StartTests()
 
 function OnRefTestUnload()
 {
-  let plugin1 = getTestPlugin("Test Plug-in");
-  let plugin2 = getTestPlugin("Second Test Plug-in");
-  if (plugin1 && plugin2) {
-    plugin1.enabledState = gTestPluginEnabledStates[0];
-    plugin2.enabledState = gTestPluginEnabledStates[1];
-  } else {
-    LogWarning("Failed to get test plugin tags.");
-  }
 }
 
 // Read all available data from an input stream and return it
@@ -598,7 +521,6 @@ function getStreamContent(inputStream)
 function BuildConditionSandbox(aURL) {
     var sandbox = new Components.utils.Sandbox(aURL.spec);
     var xr = CC[NS_XREAPPINFO_CONTRACTID].getService(CI.nsIXULRuntime);
-    var appInfo = CC[NS_XREAPPINFO_CONTRACTID].getService(CI.nsIXULAppInfo);
     sandbox.isDebugBuild = gDebug.isDebugBuild;
     sandbox.xulRuntime = {widgetToolkit: xr.widgetToolkit, OS: xr.OS, __exposedProps__: { widgetToolkit: "r", OS: "r", XPCOMABI: "r", shell: "r" } };
 
@@ -616,6 +538,13 @@ function BuildConditionSandbox(aURL) {
         sandbox.smallScreen = true;
     }
 
+#if REFTEST_B2G
+    // XXX nsIGfxInfo isn't available in B2G
+    sandbox.d2d = false;
+    sandbox.azureQuartz = false;
+    sandbox.azureSkia = false;
+    sandbox.contentSameGfxBackendAsCanvas = false;
+#else
     var gfxInfo = (NS_GFXINFO_CONTRACTID in CC) && CC[NS_GFXINFO_CONTRACTID].getService(CI.nsIGfxInfo);
     try {
       sandbox.d2d = gfxInfo.D2DEnabled;
@@ -625,10 +554,10 @@ function BuildConditionSandbox(aURL) {
     var info = gfxInfo.getInfo();
     sandbox.azureQuartz = info.AzureCanvasBackend == "quartz";
     sandbox.azureSkia = info.AzureCanvasBackend == "skia";
-    sandbox.azureSkiaGL = info.AzureSkiaAccelerated; // FIXME: assumes GL right now
     // true if we are using the same Azure backend for rendering canvas and content
     sandbox.contentSameGfxBackendAsCanvas = info.AzureContentBackend == info.AzureCanvasBackend
                                             || (info.AzureContentBackend == "none" && info.AzureCanvasBackend == "cairo");
+#endif
 
     sandbox.layersGPUAccelerated =
       gWindowUtils.layerManagerType != "Basic";
@@ -639,31 +568,16 @@ function BuildConditionSandbox(aURL) {
 
     // Shortcuts for widget toolkits.
     sandbox.B2G = xr.widgetToolkit == "gonk";
-    sandbox.B2GDT = appInfo.name.toLowerCase() == "b2g" && !sandbox.B2G;
     sandbox.Android = xr.OS == "Android" && !sandbox.B2G;
     sandbox.cocoaWidget = xr.widgetToolkit == "cocoa";
     sandbox.gtk2Widget = xr.widgetToolkit == "gtk2";
     sandbox.qtWidget = xr.widgetToolkit == "qt";
     sandbox.winWidget = xr.widgetToolkit == "windows";
 
-    if (sandbox.Android) {
-        var sysInfo = CC["@mozilla.org/system-info;1"].getService(CI.nsIPropertyBag2);
-
-        // This is currently used to distinguish Android 4.0.3 (SDK version 15)
-        // and later from Android 2.x
-        sandbox.AndroidVersion = sysInfo.getPropertyAsInt32("version");
-    }
-
 #if MOZ_ASAN
     sandbox.AddressSanitizer = true;
 #else
     sandbox.AddressSanitizer = false;
-#endif
-
-#if MOZ_WEBRTC
-    sandbox.webrtc = true;
-#else
-    sandbox.webrtc = false;
 #endif
 
     var hh = CC[NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX + "http"].
@@ -683,9 +597,17 @@ function BuildConditionSandbox(aURL) {
 
     // see if we have the test plugin available,
     // and set a sandox prop accordingly
+    sandbox.haveTestPlugin = false;
+
     var navigator = gContainingWindow.navigator;
-    var testPlugin = navigator.plugins["Test Plug-in"];
-    sandbox.haveTestPlugin = !!testPlugin;
+    for (var i = 0; i < navigator.mimeTypes.length; i++) {
+        if (navigator.mimeTypes[i].type == "application/x-test" &&
+            navigator.mimeTypes[i].enabledPlugin != null &&
+            navigator.mimeTypes[i].enabledPlugin.name == "Test Plug-in") {
+            sandbox.haveTestPlugin = true;
+            break;
+        }
+    }
 
     // Set a flag on sandbox if the windows default theme is active
     var box = gContainingWindow.document.createElement("box");
@@ -1195,15 +1117,6 @@ function Focus()
     return true;
 }
 
-function Blur()
-{
-    // On non-remote reftests, this will transfer focus to the dummy window
-    // we created to hold focus for non-needs-focus tests.  Buggy tests
-    // (ones which require focus but don't request needs-focus) will then
-    // fail.
-    gContainingWindow.blur();
-}
-
 function StartCurrentTest()
 {
     gTestLog = [];
@@ -1236,9 +1149,6 @@ function StartCurrentTest()
     }
     else {
         gDumpLog("REFTEST TEST-START | " + gURLs[0].prettyPath + "\n");
-        if (!gURLs[0].needsFocus) {
-            Blur();
-        }
         var currentTest = gTotalTests - gURLs.length;
         gContainingWindow.document.title = "reftest: " + currentTest + " / " + gTotalTests +
             " (" + Math.floor(100 * (currentTest / gTotalTests)) + "%)";
@@ -1690,7 +1600,7 @@ function RecordResult(testRunTime, errorMsg, scriptResults)
                         result += "REFTEST   IMAGE 2 (REFERENCE): " + gCanvas2.toDataURL() + "\n";
                     } else {
                         result += "\n";
-                        result += "REFTEST   IMAGE: " + gCanvas1.toDataURL() + "\n";
+                        gDumpLog("REFTEST   IMAGE: " + gCanvas1.toDataURL() + "\n");
                     }
                 } else {
                     result += "\n";
@@ -1721,11 +1631,6 @@ function RecordResult(testRunTime, errorMsg, scriptResults)
 function LoadFailed(why)
 {
     ++gTestResults.FailedLoad;
-    // Once bug 896840 is fixed, this can go away, but for now it will give log
-    // output that is TBPL starable for bug 789751 and bug 720452.
-    if (!why) {
-        gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | load failed with unknown reason\n");
-    }
     gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | " +
          gURLs[0]["url" + gState].spec + " | load failed: " + why + "\n");
     FlushTestLog();
@@ -1924,7 +1829,7 @@ function RegisterMessageListenersAndLoadContentScript()
         function (m) { SetAsyncScroll(true); }
     );
 
-    gBrowserMessageManager.loadFrameScript("chrome://reftest/content/reftest-content.js", true, true);
+    gBrowserMessageManager.loadFrameScript("chrome://reftest/content/reftest-content.js", true);
 }
 
 function SetAsyncScroll(enabled)

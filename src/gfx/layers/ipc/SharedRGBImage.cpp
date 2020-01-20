@@ -2,23 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ShadowLayers.h"
 #include "SharedRGBImage.h"
-#include "ImageTypes.h"                 // for ImageFormat::SHARED_RGB, etc
-#include "Shmem.h"                      // for Shmem
-#include "gfx2DGlue.h"                  // for ImageFormatToSurfaceFormat, etc
-#include "gfxPlatform.h"                // for gfxPlatform, gfxImageFormat
-#include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator, etc
-#include "mozilla/layers/ImageClient.h"  // for ImageClient
-#include "mozilla/layers/ImageDataSerializer.h"  // for ImageDataSerializer
-#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
-#include "mozilla/layers/TextureClient.h"  // for BufferTextureClient, etc
-#include "mozilla/layers/ImageBridgeChild.h"  // for ImageBridgeChild
-#include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr
-#include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
-#include "nsISupportsImpl.h"            // for Image::AddRef, etc
-#include "nsRect.h"                     // for nsIntRect
-#include "nsSize.h"                     // for nsIntSize
+#include "mozilla/layers/LayersSurfaces.h"
+#include "Shmem.h"
+#include "mozilla/layers/ISurfaceAllocator.h"
 
 // Just big enough for a 1080p RGBA32 frame
 #define MAX_FRAME_SIZE (16 * 1024 * 1024)
@@ -26,40 +14,12 @@
 namespace mozilla {
 namespace layers {
 
-already_AddRefed<Image>
-CreateSharedRGBImage(ImageContainer *aImageContainer,
-                     nsIntSize aSize,
-                     gfxImageFormat aImageFormat)
-{
-  NS_ASSERTION(aImageFormat == gfxImageFormat::ARGB32 ||
-               aImageFormat == gfxImageFormat::RGB24 ||
-               aImageFormat == gfxImageFormat::RGB16_565,
-               "RGB formats supported only");
-
-  if (!aImageContainer) {
-    NS_WARNING("No ImageContainer to allocate SharedRGBImage");
-    return nullptr;
-  }
-
-  nsRefPtr<Image> image = aImageContainer->CreateImage(ImageFormat::SHARED_RGB);
-
-  if (!image) {
-    NS_WARNING("Failed to create SharedRGBImage");
-    return nullptr;
-  }
-
-  nsRefPtr<SharedRGBImage> rgbImage = static_cast<SharedRGBImage*>(image.get());
-  if (!rgbImage->Allocate(gfx::ToIntSize(aSize),
-                          gfx::ImageFormatToSurfaceFormat(aImageFormat))) {
-    NS_WARNING("Failed to allocate a shared image");
-    return nullptr;
-  }
-  return image.forget();
-}
-
-SharedRGBImage::SharedRGBImage(ImageClient* aCompositable)
-: Image(nullptr, ImageFormat::SHARED_RGB)
-, mCompositable(aCompositable)
+SharedRGBImage::SharedRGBImage(ISurfaceAllocator *aAllocator) :
+  Image(nullptr, SHARED_RGB),
+  mSize(0, 0),
+  mSurfaceAllocator(aAllocator),
+  mAllocated(false),
+  mShmem(new ipc::Shmem())
 {
   MOZ_COUNT_CTOR(SharedRGBImage);
 }
@@ -68,56 +28,135 @@ SharedRGBImage::~SharedRGBImage()
 {
   MOZ_COUNT_DTOR(SharedRGBImage);
 
-  if (mCompositable->GetAsyncID() != 0 &&
-      !InImageBridgeChildThread()) {
-    ImageBridgeChild::DispatchReleaseTextureClient(mTextureClient.forget().drop());
-    ImageBridgeChild::DispatchReleaseImageClient(mCompositable.forget().drop());
+  if (mAllocated) {
+    SurfaceDescriptor desc;
+    DropToSurfaceDescriptor(desc);
+    mSurfaceAllocator->DestroySharedSurface(&desc);
   }
+  delete mShmem;
 }
 
-bool
-SharedRGBImage::Allocate(gfx::IntSize aSize, gfx::SurfaceFormat aFormat)
+already_AddRefed<SharedRGBImage>
+SharedRGBImage::Create(ImageContainer *aImageContainer,
+                       nsIntSize aSize,
+                       gfxImageFormat aImageFormat)
 {
-  mSize = aSize;
-  mTextureClient = mCompositable->CreateBufferTextureClient(aFormat);
-  return mTextureClient->AllocateForSurface(aSize);
-}
+  NS_ASSERTION(aImageFormat == gfxASurface::ImageFormatARGB32 ||
+               aImageFormat == gfxASurface::ImageFormatRGB24 ||
+               aImageFormat == gfxASurface::ImageFormatRGB16_565,
+               "RGB formats supported only");
 
-uint8_t*
-SharedRGBImage::GetBuffer()
-{
-  if (!mTextureClient) {
+  if (!aImageContainer) {
+    NS_WARNING("No ImageContainer to allocate SharedRGBImage");
     return nullptr;
   }
 
-  ImageDataSerializer serializer(mTextureClient->GetBuffer(), mTextureClient->GetBufferSize());
-  return serializer.GetData();
+  ImageFormat format = SHARED_RGB;
+  nsRefPtr<Image> image = aImageContainer->CreateImage(&format, 1);
+
+  if (!image) {
+    NS_WARNING("Failed to create SharedRGBImage");
+    return nullptr;
+  }
+
+  nsRefPtr<SharedRGBImage> rgbImage = static_cast<SharedRGBImage*>(image.get());
+  rgbImage->mSize = gfxIntSize(aSize.width, aSize.height);
+  rgbImage->mImageFormat = aImageFormat;
+
+  if (!rgbImage->AllocateBuffer(aSize, aImageFormat)) {
+    NS_WARNING("Failed to allocate shared memory for SharedRGBImage");
+    return nullptr;
+  }
+
+  return rgbImage.forget();
 }
 
-gfx::IntSize
-SharedRGBImage::GetSize()
+uint8_t *
+SharedRGBImage::GetBuffer()
 {
-  return mSize;
+  return mShmem->get<uint8_t>();
 }
 
 size_t
 SharedRGBImage::GetBufferSize()
 {
-  return mTextureClient ? mTextureClient->GetBufferSize()
-                        : 0;
+  return mSize.width * mSize.height * gfxASurface::BytesPerPixel(mImageFormat);
 }
 
-TextureClient*
-SharedRGBImage::GetTextureClient(CompositableClient* aClient)
+gfxIntSize
+SharedRGBImage::GetSize()
 {
-  return mTextureClient.get();
+  return mSize;
 }
 
-TemporaryRef<gfx::SourceSurface>
-SharedRGBImage::GetAsSourceSurface()
+bool
+SharedRGBImage::AllocateBuffer(nsIntSize aSize, gfxImageFormat aImageFormat)
+{
+  if (mAllocated) {
+    NS_WARNING("Already allocated shmem");
+    return false;
+  }
+
+  size_t size = GetBufferSize();
+
+  if (size == 0 || size > MAX_FRAME_SIZE) {
+    NS_WARNING("Invalid frame size");
+  }
+  if (mSurfaceAllocator->AllocUnsafeShmem(size, OptimalShmemType(), mShmem)) {
+    mAllocated = true;
+  }
+
+  return mAllocated;
+}
+
+already_AddRefed<gfxASurface>
+SharedRGBImage::GetAsSurface()
 {
   return nullptr;
 }
+
+bool
+SharedRGBImage::ToSurfaceDescriptor(SurfaceDescriptor& aResult)
+{
+  if (!mAllocated) {
+    return false;
+  }
+  this->AddRef();
+  aResult = RGBImage(*mShmem,
+                     nsIntRect(0, 0, mSize.width, mSize.height),
+                     mImageFormat,
+                     reinterpret_cast<uint64_t>(this));
+  return true;
+}
+
+bool
+SharedRGBImage::DropToSurfaceDescriptor(SurfaceDescriptor& aResult)
+{
+  if (!mAllocated) {
+    return false;
+  }
+  aResult = RGBImage(*mShmem,
+                     nsIntRect(0, 0, mSize.width, mSize.height),
+                     mImageFormat,
+                     0);
+  *mShmem = ipc::Shmem();
+  mAllocated = false;
+  return true;
+}
+
+SharedRGBImage*
+SharedRGBImage::FromSurfaceDescriptor(const SurfaceDescriptor& aDescriptor)
+{
+  if (aDescriptor.type() != SurfaceDescriptor::TRGBImage) {
+    return nullptr;
+  }
+  const RGBImage& rgb = aDescriptor.get_RGBImage();
+  if (rgb.owner() == 0) {
+    return nullptr;
+  }
+  return reinterpret_cast<SharedRGBImage*>(rgb.owner());
+}
+
 
 } // namespace layers
 } // namespace mozilla

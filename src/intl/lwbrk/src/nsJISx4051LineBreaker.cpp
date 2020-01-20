@@ -10,6 +10,7 @@
 #include "jisx4051class.h"
 #include "nsComplexBreaker.h"
 #include "nsTArray.h"
+#include "nsUnicharUtils.h"
 
 /* 
 
@@ -340,18 +341,18 @@ static const uint16_t gPairConservative[MAX_CLASSES] = {
 #define CLASS_CLOSE_LIKE_CHARACTER             0x0A
 #define CLASS_NON_BREAKABLE                    0x0B
 
-#define U_NULL      char16_t(0x0000)
-#define U_SLASH     char16_t('/')
-#define U_SPACE     char16_t(' ')
-#define U_HYPHEN    char16_t('-')
-#define U_EQUAL     char16_t('=')
-#define U_PERCENT   char16_t('%')
-#define U_AMPERSAND char16_t('&')
-#define U_SEMICOLON char16_t(';')
-#define U_BACKSLASH char16_t('\\')
-#define U_OPEN_SINGLE_QUOTE char16_t(0x2018)
-#define U_OPEN_DOUBLE_QUOTE char16_t(0x201C)
-#define U_OPEN_GUILLEMET    char16_t(0x00AB)
+#define U_NULL      PRUnichar(0x0000)
+#define U_SLASH     PRUnichar('/')
+#define U_SPACE     PRUnichar(' ')
+#define U_HYPHEN    PRUnichar('-')
+#define U_EQUAL     PRUnichar('=')
+#define U_PERCENT   PRUnichar('%')
+#define U_AMPERSAND PRUnichar('&')
+#define U_SEMICOLON PRUnichar(';')
+#define U_BACKSLASH PRUnichar('\\')
+#define U_OPEN_SINGLE_QUOTE PRUnichar(0x2018)
+#define U_OPEN_DOUBLE_QUOTE PRUnichar(0x201C)
+#define U_OPEN_GUILLEMET    PRUnichar(0x00AB)
 
 #define NEED_CONTEXTUAL_ANALYSIS(c) (IS_HYPHEN(c) || \
                                      (c) == U_SLASH || \
@@ -372,13 +373,13 @@ GETCLASSFROMTABLE(const uint32_t* t, uint16_t l)
 }
 
 static inline int
-IS_HALFWIDTH_IN_JISx4051_CLASS3(char16_t u)
+IS_HALFWIDTH_IN_JISx4051_CLASS3(PRUnichar u)
 {
   return ((0xff66 <= (u)) && ((u) <= 0xff70));
 }
 
 static inline int
-IS_CJK_CHAR(char16_t u)
+IS_CJK_CHAR(PRUnichar u)
 {
   return ((0x1100 <= (u) && (u) <= 0x11ff) ||
           (0x2e80 <= (u) && (u) <= 0xd7ff) ||
@@ -387,13 +388,13 @@ IS_CJK_CHAR(char16_t u)
 }
 
 static inline bool
-IS_NONBREAKABLE_SPACE(char16_t u)
+IS_NONBREAKABLE_SPACE(PRUnichar u)
 {
   return u == 0x00A0 || u == 0x2007; // NO-BREAK SPACE, FIGURE SPACE
 }
 
 static inline bool
-IS_HYPHEN(char16_t u)
+IS_HYPHEN(PRUnichar u)
 {
   return (u == U_HYPHEN ||
           u == 0x058A || // ARMENIAN HYPHEN
@@ -403,7 +404,7 @@ IS_HYPHEN(char16_t u)
 }
 
 static int8_t
-GetClass(char16_t u)
+GetClass(PRUnichar u)
 {
    uint16_t h = u & 0xFF00;
    uint16_t l = u & 0x00ff;
@@ -451,7 +452,7 @@ GetClass(char16_t u)
      } else if (l < 0x00e0) {
        c = CLASS_CHARACTER; // Halfwidth Hangul variants
      } else if (l < 0x00f0) {
-       static char16_t NarrowFFEx[16] = {
+       static PRUnichar NarrowFFEx[16] = {
          0x00A2, 0x00A3, 0x00AC, 0x00AF, 0x00A6, 0x00A5, 0x20A9, 0x0000,
          0x2502, 0x2190, 0x2191, 0x2192, 0x2193, 0x25A0, 0x25CB, 0x0000
        };
@@ -496,8 +497,6 @@ GetClass(char16_t u)
      } else {
        c = CLASS_CHARACTER;
      }
-   } else if (u == 0xfeff) {
-     c = CLASS_NON_BREAKABLE;
    } else {
      c = CLASS_CHARACTER; // others
    }
@@ -530,11 +529,11 @@ nsJISx4051LineBreaker::~nsJISx4051LineBreaker()
 {
 }
 
-NS_IMPL_ISUPPORTS(nsJISx4051LineBreaker, nsILineBreaker)
+NS_IMPL_ISUPPORTS1(nsJISx4051LineBreaker, nsILineBreaker)
 
 class ContextState {
 public:
-  ContextState(const char16_t* aText, uint32_t aLength) {
+  ContextState(const PRUnichar* aText, uint32_t aLength) {
     mUniText = aText;
     mText = nullptr;
     mLength = aLength;
@@ -551,9 +550,9 @@ public:
   uint32_t Length() { return mLength; }
   uint32_t Index() { return mIndex; }
 
-  char16_t GetCharAt(uint32_t aIndex) {
+  PRUnichar GetCharAt(uint32_t aIndex) {
     NS_ASSERTION(aIndex < mLength, "Out of range!");
-    return mUniText ? mUniText[aIndex] : char16_t(mText[aIndex]);
+    return mUniText ? mUniText[aIndex] : PRUnichar(mText[aIndex]);
   }
 
   void AdvanceIndex() {
@@ -619,10 +618,10 @@ public:
     mHasPreviousBackslash = true;
   }
 
-  char16_t GetPreviousNonHyphenCharacter() const {
+  PRUnichar GetPreviousNonHyphenCharacter() const {
     return mPreviousNonHyphenCharacter;
   }
-  void NotifyNonHyphenCharacter(char16_t ch) {
+  void NotifyNonHyphenCharacter(PRUnichar ch) {
     mPreviousNonHyphenCharacter = ch;
   }
 
@@ -638,7 +637,7 @@ private:
     mHasPreviousBackslash = false;
 
     for (uint32_t i = 0; i < mLength; ++i) {
-      char16_t u = GetCharAt(i);
+      PRUnichar u = GetCharAt(i);
       if (!mHasNonbreakableSpace && IS_NONBREAKABLE_SPACE(u))
         mHasNonbreakableSpace = 1;
       else if (mUniText && !mHasCJKChar && IS_CJK_CHAR(u))
@@ -646,13 +645,13 @@ private:
     }
   }
 
-  const char16_t* mUniText;
+  const PRUnichar* mUniText;
   const uint8_t* mText;
 
   uint32_t mIndex;
   uint32_t mLength;         // length of text
   uint32_t mLastBreakIndex;
-  char16_t mPreviousNonHyphenCharacter; // The last character we have seen
+  PRUnichar mPreviousNonHyphenCharacter; // The last character we have seen
                                          // which is not U_HYPHEN
   bool mHasCJKChar; // if the text has CJK character, this is true.
   bool mHasNonbreakableSpace; // if the text has no-breakable space,
@@ -663,7 +662,7 @@ private:
 };
 
 static int8_t
-ContextualAnalysis(char16_t prev, char16_t cur, char16_t next,
+ContextualAnalysis(PRUnichar prev, PRUnichar cur, PRUnichar next,
                    ContextState &aState)
 {
   // Don't return CLASS_OPEN/CLASS_CLOSE if aState.UseJISX4051 is FALSE.
@@ -681,27 +680,14 @@ ContextualAnalysis(char16_t prev, char16_t cur, char16_t next,
     // If one side is numeric and the other is a character, or if both sides are
     // characters, the hyphen should be breakable.
     if (!aState.UseConservativeBreaking(1)) {
-      char16_t prevOfHyphen = aState.GetPreviousNonHyphenCharacter();
+      PRUnichar prevOfHyphen = aState.GetPreviousNonHyphenCharacter();
       if (prevOfHyphen && next) {
-        int8_t prevClass = GetClass(prevOfHyphen);
-        int8_t nextClass = GetClass(next);
-        bool prevIsNumOrCharOrClose =
-          prevIsNum ||
-          (prevClass == CLASS_CHARACTER &&
-            !NEED_CONTEXTUAL_ANALYSIS(prevOfHyphen)) ||
-          prevClass == CLASS_CLOSE ||
-          prevClass == CLASS_CLOSE_LIKE_CHARACTER;
-        bool nextIsNumOrCharOrOpen =
-          nextIsNum ||
-          (nextClass == CLASS_CHARACTER && !NEED_CONTEXTUAL_ANALYSIS(next)) ||
-          nextClass == CLASS_OPEN ||
-          nextClass == CLASS_OPEN_LIKE_CHARACTER ||
-          next == U_OPEN_SINGLE_QUOTE ||
-          next == U_OPEN_DOUBLE_QUOTE ||
-          next == U_OPEN_GUILLEMET;
-        if (prevIsNumOrCharOrClose && nextIsNumOrCharOrOpen) {
+        bool prevIsChar = !NEED_CONTEXTUAL_ANALYSIS(prevOfHyphen) &&
+                            GetClass(prevOfHyphen) == CLASS_CHARACTER;
+        bool nextIsChar = !NEED_CONTEXTUAL_ANALYSIS(next) &&
+                            GetClass(next) == CLASS_CHARACTER;
+        if ((prevIsNum || prevIsChar) && (nextIsNum || nextIsChar))
           return CLASS_CLOSE;
-        }
       }
     }
   } else {
@@ -756,7 +742,7 @@ ContextualAnalysis(char16_t prev, char16_t cur, char16_t next,
 
 
 int32_t
-nsJISx4051LineBreaker::WordMove(const char16_t* aText, uint32_t aLen,
+nsJISx4051LineBreaker::WordMove(const PRUnichar* aText, uint32_t aLen,
                                 uint32_t aPos, int8_t aDirection)
 {
   bool    textNeedsJISx4051 = false;
@@ -798,7 +784,7 @@ nsJISx4051LineBreaker::WordMove(const char16_t* aText, uint32_t aLen,
 }
 
 int32_t
-nsJISx4051LineBreaker::Next(const char16_t* aText, uint32_t aLen,
+nsJISx4051LineBreaker::Next(const PRUnichar* aText, uint32_t aLen,
                             uint32_t aPos) 
 {
   NS_ASSERTION(aText, "aText shouldn't be null");
@@ -809,7 +795,7 @@ nsJISx4051LineBreaker::Next(const char16_t* aText, uint32_t aLen,
 }
 
 int32_t
-nsJISx4051LineBreaker::Prev(const char16_t* aText, uint32_t aLen,
+nsJISx4051LineBreaker::Prev(const PRUnichar* aText, uint32_t aLen,
                             uint32_t aPos) 
 {
   NS_ASSERTION(aText, "aText shouldn't be null");
@@ -821,7 +807,7 @@ nsJISx4051LineBreaker::Prev(const char16_t* aText, uint32_t aLen,
 }
 
 void
-nsJISx4051LineBreaker::GetJISx4051Breaks(const char16_t* aChars, uint32_t aLength,
+nsJISx4051LineBreaker::GetJISx4051Breaks(const PRUnichar* aChars, uint32_t aLength,
                                          uint8_t aWordBreak,
                                          uint8_t* aBreakBefore)
 {
@@ -830,7 +816,7 @@ nsJISx4051LineBreaker::GetJISx4051Breaks(const char16_t* aChars, uint32_t aLengt
   ContextState state(aChars, aLength);
 
   for (cur = 0; cur < aLength; ++cur, state.AdvanceIndex()) {
-    char16_t ch = aChars[cur];
+    PRUnichar ch = aChars[cur];
     int8_t cl;
 
     if (NEED_CONTEXTUAL_ANALYSIS(ch)) {
@@ -895,7 +881,7 @@ nsJISx4051LineBreaker::GetJISx4051Breaks(const uint8_t* aChars, uint32_t aLength
   ContextState state(aChars, aLength);
 
   for (cur = 0; cur < aLength; ++cur, state.AdvanceIndex()) {
-    char16_t ch = aChars[cur];
+    PRUnichar ch = aChars[cur];
     int8_t cl;
 
     if (NEED_CONTEXTUAL_ANALYSIS(ch)) {

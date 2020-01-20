@@ -8,7 +8,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PhoneNumberUtils.jsm");
+
 Cu.import("resource://gre/modules/WspPduHelper.jsm", this);
 
 const DEBUG = false; // set to true to see debug messages
@@ -28,18 +28,9 @@ XPCOMUtils.defineLazyGetter(this, "SL", function () {
   return SL;
 });
 
-XPCOMUtils.defineLazyGetter(this, "CP", function () {
-  let CP = {};
-  Cu.import("resource://gre/modules/CpPduHelper.jsm", CP);
-  return CP;
-});
-
 XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
                                    "@mozilla.org/system-message-internal;1",
                                    "nsISystemMessagesInternal");
-XPCOMUtils.defineLazyServiceGetter(this, "gRIL",
-                                   "@mozilla.org/ril;1",
-                                   "nsIRadioInterfaceLayer");
 
 /**
  * Helpers for WAP PDU processing.
@@ -65,8 +56,8 @@ this.WapPushManager = {
 
     let appid = options.headers["x-wap-application-id"];
     if (!appid) {
-      // Assume message without applicatioin ID is WAP Push
       debug("Push message doesn't contains X-Wap-Application-Id.");
+      return;
     }
 
     // MMS
@@ -94,7 +85,6 @@ this.WapPushManager = {
     */
     let contentType = options.headers["content-type"].media;
     let msg;
-    let authInfo = null;
 
     if (contentType === "text/vnd.wap.si" ||
         contentType === "application/vnd.wap.sic") {
@@ -102,42 +92,19 @@ this.WapPushManager = {
     } else if (contentType === "text/vnd.wap.sl" ||
                contentType === "application/vnd.wap.slc") {
       msg = SL.PduHelper.parse(data, contentType);
-    } else if (contentType === "text/vnd.wap.connectivity-xml" ||
-               contentType === "application/vnd.wap.connectivity-wbxml") {
-      // Apply HMAC authentication on WBXML encoded CP message.
-      if (contentType === "application/vnd.wap.connectivity-wbxml") {
-        let params = options.headers["content-type"].params;
-        let sec = params && params.sec;
-        let mac = params && params.mac;
-        authInfo = CP.Authenticator.check(data.array.subarray(data.offset),
-                                          sec, mac, function getNetworkPin() {
-          let imsi = gRIL.getRadioInterface(options.serviceId).rilContext.imsi;
-          return CP.Authenticator.formatImsi(imsi);
-        });
-      }
-
-      msg = CP.PduHelper.parse(data, contentType);
     } else {
+      // TODO: Bug 869291 - Support Receiving WAP-Push-CP
+
       // Unsupported type, provide raw data.
       msg = {
         contentType: contentType,
         content: data.array
       };
-      msg.content.length = data.array.length;
-    }
-
-    let sender = PhoneNumberUtils.normalize(options.sourceAddress, false);
-    let parsedSender = PhoneNumberUtils.parse(sender);
-    if (parsedSender && parsedSender.internationalNumber) {
-      sender = parsedSender.internationalNumber;
     }
 
     gSystemMessenger.broadcastMessage("wappush-received", {
-      sender:         sender,
       contentType:    msg.contentType,
-      content:        msg.content,
-      authInfo:       authInfo,
-      serviceId:      options.serviceId
+      content:        msg.content
     });
   },
 

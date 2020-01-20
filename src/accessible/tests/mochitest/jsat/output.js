@@ -18,29 +18,13 @@ Cu.import("resource://gre/modules/accessibility/OutputGenerator.jsm", this);
  * scoped to the "root" element in markup.
  */
 function testContextOutput(expected, aAccOrElmOrID, aOldAccOrElmOrID, aGenerator) {
+  aOldAccOrElmOrID = aOldAccOrElmOrID || "root";
   var accessible = getAccessible(aAccOrElmOrID);
-  var oldAccessible = aOldAccOrElmOrID !== null ?
-	getAccessible(aOldAccOrElmOrID || 'root') : null;
+  var oldAccessible = getAccessible(aOldAccOrElmOrID);
   var context = new PivotContext(accessible, oldAccessible);
-  var output = aGenerator.genForContext(context).output;
-
-  // Create a version of the output that has null members where we have
-  // null members in the expected output. Those are indexes that are not testable
-  // because of the changing nature of the test (different window names), or strings
-  // that are inaccessible to us, like the title of parent documents.
-  var masked_output = [];
-  for (var i=0; i < output.length; i++) {
-    if (expected[i] === null) {
-      masked_output.push(null);
-    } else {
-      masked_output[i] = output[i];
-    }
-  }
-
-  isDeeply(masked_output, expected,
-           "Context output is correct for " + aAccOrElmOrID +
-           " (output: " + output.join(", ") + ") ==" +
-           " (expected: " + expected.join(", ") + ")");
+  var output = aGenerator.genForContext(context);
+  isDeeply(output, expected,
+    "Context output is correct for " + aAccOrElmOrID);
 }
 
 /**
@@ -53,8 +37,7 @@ function testContextOutput(expected, aAccOrElmOrID, aOldAccOrElmOrID, aGenerator
  */
 function testObjectOutput(aAccOrElmOrID, aGenerator) {
   var accessible = getAccessible(aAccOrElmOrID);
-  var context = new PivotContext(accessible);
-  var output = aGenerator.genForObject(accessible, context);
+  var output = aGenerator.genForObject(accessible);
   var outputOrder;
   try {
     outputOrder = SpecialPowers.getIntPref(PREF_UTTERANCE_ORDER);

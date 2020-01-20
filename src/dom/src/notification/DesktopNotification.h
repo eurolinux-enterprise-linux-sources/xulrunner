@@ -5,6 +5,8 @@
 #ifndef mozilla_dom_DesktopNotification_h
 #define mozilla_dom_DesktopNotification_h
 
+#include "PCOMContentPermissionRequestChild.h"
+
 #include "nsIPrincipal.h"
 #include "nsIAlertsService.h"
 #include "nsIContentPermissionPrompt.h"
@@ -14,13 +16,13 @@
 #include "nsWeakPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDOMWindow.h"
-#include "nsIScriptObjectPrincipal.h"
+#include "nsThreadUtils.h"
 
+#include "nsDOMEventTargetHelper.h"
 #include "nsIDOMEvent.h"
 #include "nsIDocument.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/ErrorResult.h"
 #include "nsWrapperCache.h"
 
@@ -44,14 +46,10 @@ public:
 
   DesktopNotificationCenter(nsPIDOMWindow *aWindow)
   {
-    MOZ_ASSERT(aWindow);
     mOwner = aWindow;
 
-    nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
-    MOZ_ASSERT(sop);
-
-    mPrincipal = sop->GetPrincipal();
-    MOZ_ASSERT(mPrincipal);
+    // Grab the uri of the document
+    mPrincipal = mOwner->GetDoc()->NodePrincipal();
 
     SetIsDOMBinding();
   }
@@ -69,7 +67,8 @@ public:
     return mOwner;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   already_AddRefed<DesktopNotification>
   CreateNotification(const nsAString& title,
@@ -81,9 +80,8 @@ private:
   nsCOMPtr<nsIPrincipal> mPrincipal;
 };
 
-class DesktopNotificationRequest;
 
-class DesktopNotification MOZ_FINAL : public DOMEventTargetHelper
+class DesktopNotification MOZ_FINAL : public nsDOMEventTargetHelper
 {
   friend class DesktopNotificationRequest;
 
@@ -121,7 +119,8 @@ public:
     return GetOwner();
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   void Show(ErrorResult& aRv);
 
@@ -142,6 +141,48 @@ protected:
   static uint32_t sCount;
 };
 
+/*
+ * Simple Request
+ */
+class DesktopNotificationRequest : public nsIContentPermissionRequest,
+                                   public nsRunnable,
+                                   public PCOMContentPermissionRequestChild
+
+{
+ public:
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSICONTENTPERMISSIONREQUEST
+
+  DesktopNotificationRequest(DesktopNotification* notification)
+    : mDesktopNotification(notification) {}
+
+  NS_IMETHOD Run() MOZ_OVERRIDE
+  {
+    nsCOMPtr<nsIContentPermissionPrompt> prompt =
+      do_CreateInstance(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
+    if (prompt) {
+      prompt->Prompt(this);
+    }
+    return NS_OK;
+  }
+
+  ~DesktopNotificationRequest()
+  {
+  }
+
+ virtual bool Recv__delete__(const bool& allow) MOZ_OVERRIDE
+ {
+   if (allow)
+     (void) Allow();
+   else
+     (void) Cancel();
+   return true;
+ }
+ virtual void IPDLRelease() MOZ_OVERRIDE { Release(); }
+
+  nsRefPtr<DesktopNotification> mDesktopNotification;
+};
+
 class AlertServiceObserver: public nsIObserver
 {
  public:
@@ -157,7 +198,7 @@ class AlertServiceObserver: public nsIObserver
   NS_IMETHODIMP
   Observe(nsISupports *aSubject,
           const char *aTopic,
-          const char16_t *aData)
+          const PRUnichar *aData)
   {
 
     // forward to parent

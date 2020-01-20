@@ -18,7 +18,7 @@
 #include "mozilla/Attributes.h"
 
 nsresult NS_NewSVGSVGElement(nsIContent **aResult,
-                             already_AddRefed<nsINodeInfo>&& aNodeInfo,
+                             already_AddRefed<nsINodeInfo> aNodeInfo,
                              mozilla::dom::FromParser aFromParser);
 
 class nsIDOMSVGNumber;
@@ -28,11 +28,9 @@ class nsSVGInnerSVGFrame;
 class nsSVGImageFrame;
 
 namespace mozilla {
-class AutoSVGRenderingState;
 class DOMSVGAnimatedPreserveAspectRatio;
-class DOMSVGLength;
-class EventChainPreVisitor;
 class SVGFragmentIdentifier;
+class AutoSVGRenderingState;
 
 namespace dom {
 class SVGAngle;
@@ -47,15 +45,15 @@ class SVGSVGElement;
 class DOMSVGTranslatePoint MOZ_FINAL : public nsISVGPoint {
 public:
   DOMSVGTranslatePoint(SVGPoint* aPt, SVGSVGElement *aElement)
-    : nsISVGPoint(aPt, true), mElement(aElement) {}
+    : nsISVGPoint(aPt), mElement(aElement) {}
 
   DOMSVGTranslatePoint(DOMSVGTranslatePoint* aPt)
-    : nsISVGPoint(&aPt->mPt, true), mElement(aPt->mElement) {}
+    : nsISVGPoint(&aPt->mPt), mElement(aPt->mElement) {}
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMSVGTranslatePoint, nsISVGPoint)
 
-  virtual DOMSVGPoint* Copy() MOZ_OVERRIDE;
+  virtual nsISVGPoint* Clone() MOZ_OVERRIDE;
 
   // WebIDL
   virtual float X() MOZ_OVERRIDE { return mPt.GetX(); }
@@ -91,12 +89,13 @@ class SVGSVGElement MOZ_FINAL : public SVGSVGElementBase
   friend class mozilla::SVGFragmentIdentifier;
   friend class mozilla::AutoSVGRenderingState;
 
-  SVGSVGElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
+  SVGSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                 FromParser aFromParser);
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   friend nsresult (::NS_NewSVGSVGElement(nsIContent **aResult,
-                                         already_AddRefed<nsINodeInfo>&& aNodeInfo,
+                                         already_AddRefed<nsINodeInfo> aNodeInfo,
                                          mozilla::dom::FromParser aFromParser));
 
 public:
@@ -128,7 +127,7 @@ public:
 
   // nsIContent interface
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
-  virtual nsresult PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsEventAttributeName(nsIAtom* aName) MOZ_OVERRIDE;
 
@@ -169,7 +168,7 @@ public:
     return HasViewBoxRect() || ShouldSynthesizeViewBox();
   }
 
-  gfx::Matrix GetViewBoxTransform() const;
+  gfxMatrix GetViewBoxTransform() const;
 
   bool HasChildrenOnlyTransform() const {
     return mHasChildrenOnlyTransform;
@@ -238,16 +237,15 @@ public:
   bool AnimationsPaused();
   float GetCurrentTime();
   void SetCurrentTime(float seconds);
-  void DeselectAll();
   already_AddRefed<nsIDOMSVGNumber> CreateSVGNumber();
-  already_AddRefed<DOMSVGLength> CreateSVGLength();
+  already_AddRefed<nsIDOMSVGLength> CreateSVGLength();
   already_AddRefed<SVGAngle> CreateSVGAngle();
   already_AddRefed<nsISVGPoint> CreateSVGPoint();
   already_AddRefed<SVGMatrix> CreateSVGMatrix();
   already_AddRefed<SVGIRect> CreateSVGRect();
   already_AddRefed<SVGTransform> CreateSVGTransform();
   already_AddRefed<SVGTransform> CreateSVGTransformFromMatrix(SVGMatrix& matrix);
-  using nsINode::GetElementById; // This does what we want
+  Element* GetElementById(const nsAString& elementId, ErrorResult& rv);
   already_AddRefed<SVGAnimatedRect> ViewBox();
   already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
   uint16_t ZoomAndPan();

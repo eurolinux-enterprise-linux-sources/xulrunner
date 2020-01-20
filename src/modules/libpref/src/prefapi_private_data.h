@@ -5,11 +5,6 @@
 
 /* Data shared between prefapi.c and nsPref.cpp */
 
-#ifndef prefapi_private_data_h
-#define prefapi_private_data_h
-
-#include "mozilla/MemoryReporting.h"
-
 extern PLDHashTable			gHashTable;
 extern bool                 gDirty;
 
@@ -44,6 +39,4 @@ void pref_GetPrefFromEntry(PrefHashEntry *aHashEntry,
                            mozilla::dom::PrefSetting* aPref);
 
 size_t
-pref_SizeOfPrivateData(mozilla::MallocSizeOf aMallocSizeOf);
-
-#endif
+pref_SizeOfPrivateData(nsMallocSizeOfFun aMallocSizeOf);

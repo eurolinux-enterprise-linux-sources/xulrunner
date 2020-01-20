@@ -1,4 +1,4 @@
-/* -*- Mode: IDL; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -12,12 +12,13 @@
 
 callback OfflineRenderSuccessCallback = void (AudioBuffer renderedData);
 
-[Constructor(unsigned long numberOfChannels, unsigned long length, float sampleRate)]
+[Constructor(unsigned long numberOfChannels, unsigned long length, float sampleRate),
+ PrefControlled]
 interface OfflineAudioContext : AudioContext {
 
-    [Throws]
     void startRendering();
 
+    [SetterThrows]
     attribute EventHandler oncomplete;
 
 };

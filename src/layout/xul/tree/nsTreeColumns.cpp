@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMElement.h"
 #include "nsIBoxObject.h"
@@ -39,8 +39,6 @@ nsTreeColumn::~nsTreeColumn()
     mNext->SetPrevious(nullptr);
   }
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsTreeColumn)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTreeColumn)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mContent)
@@ -194,7 +192,7 @@ nsTreeColumn::GetId(nsAString& aId)
 }
 
 NS_IMETHODIMP
-nsTreeColumn::GetIdConst(const char16_t** aIdConst)
+nsTreeColumn::GetIdConst(const PRUnichar** aIdConst)
 {
   *aIdConst = mId.get();
   return NS_OK;
@@ -376,9 +374,9 @@ nsTreeColumns::GetParentObject() const
 }
 
 /* virtual */ JSObject*
-nsTreeColumns::WrapObject(JSContext* aCx)
+nsTreeColumns::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return dom::TreeColumnsBinding::Wrap(aCx, this);
+  return dom::TreeColumnsBinding::Wrap(aCx, aScope, this);
 }
 
 nsITreeBoxObject*
@@ -559,12 +557,6 @@ nsTreeColumns::NamedGetter(const nsAString& aId, bool& aFound)
   return nullptr;
 }
 
-bool
-nsTreeColumns::NameIsEnumerable(const nsAString& aName)
-{
-  return true;
-}
-
 nsTreeColumn*
 nsTreeColumns::GetNamedColumn(const nsAString& aId)
 {
@@ -580,7 +572,7 @@ nsTreeColumns::GetNamedColumn(const nsAString& aId, nsITreeColumn** _retval)
 }
 
 void
-nsTreeColumns::GetSupportedNames(unsigned, nsTArray<nsString>& aNames)
+nsTreeColumns::GetSupportedNames(nsTArray<nsString>& aNames)
 {
   for (nsTreeColumn* currCol = mFirstColumn; currCol; currCol = currCol->GetNext()) {
     aNames.AppendElement(currCol->GetId());

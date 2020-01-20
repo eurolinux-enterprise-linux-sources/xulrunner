@@ -23,7 +23,7 @@
 #include "nsObjCExceptions.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMCSSStyleDeclaration.h"
@@ -36,13 +36,10 @@
 #include "imgLoader.h"
 #include "imgRequestProxy.h"
 #include "nsMenuItemX.h"
-#include "gfxPlatform.h"
+#include "gfxImageSurface.h"
 #include "imgIContainer.h"
 #include "nsCocoaUtils.h"
 #include "nsContentUtils.h"
-
-using mozilla::gfx::SourceSurface;
-using mozilla::RefPtr;
 
 static const uint32_t kIconWidth = 16;
 static const uint32_t kIconHeight = 16;
@@ -56,7 +53,7 @@ static const uint32_t kIconBytes = kIconBytesPerRow * kIconHeight;
 typedef NS_STDCALL_FUNCPROTO(nsresult, GetRectSideMethod, nsIDOMRect,
                              GetBottom, (nsIDOMCSSPrimitiveValue**));
 
-NS_IMPL_ISUPPORTS(nsMenuItemIconX, imgINotificationObserver)
+NS_IMPL_ISUPPORTS1(nsMenuItemIconX, imgINotificationObserver)
 
 nsMenuItemIconX::nsMenuItemIconX(nsMenuObjectX* aMenuItem,
                                  nsIContent*    aContent,
@@ -179,11 +176,15 @@ nsMenuItemIconX::GetIconURI(nsIURI** aIconURI)
   if (!hasImageAttr) {
     // If the content node has no "image" attribute, get the
     // "list-style-image" property from CSS.
-    nsCOMPtr<nsIDocument> document = mContent->GetDocument();
-    if (!document)
+    nsCOMPtr<nsIDOMDocument> domDocument =
+      do_QueryInterface(mContent->GetDocument());
+    if (!domDocument)
       return NS_ERROR_FAILURE;
 
-    nsCOMPtr<nsPIDOMWindow> window = document->GetWindow();
+    nsCOMPtr<nsIDOMWindow> window;
+    rv = domDocument->GetDefaultView(getter_AddRefs(window));
+    if (NS_FAILED(rv))
+      return rv;
     if (!window)
       return NS_ERROR_FAILURE;
 
@@ -316,7 +317,7 @@ nsMenuItemIconX::LoadIcon(nsIURI* aIconURI)
   // not exposed to web content
   nsresult rv = loader->LoadImage(aIconURI, nullptr, nullptr, nullptr, loadGroup, this,
                                    nullptr, nsIRequest::LOAD_NORMAL, nullptr,
-                                   nullptr, EmptyString(), getter_AddRefs(mIconRequest));
+                                   nullptr, getter_AddRefs(mIconRequest));
   if (NS_FAILED(rv)) return rv;
 
   // We need to request the icon be decoded (bug 573583, bug 705516).
@@ -386,17 +387,20 @@ nsMenuItemIconX::OnStopFrame(imgIRequest*    aRequest)
   if (mImageRegionRect.IsEmpty()) {
     mImageRegionRect.SetRect(0, 0, origWidth, origHeight);
   }
-
-  RefPtr<SourceSurface> surface =
-    imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
-                             imgIContainer::FLAG_NONE);
+  
+  nsRefPtr<gfxASurface> surface;
+  imageContainer->GetFrame(imgIContainer::FRAME_CURRENT,
+                           imgIContainer::FLAG_NONE,
+                           getter_AddRefs(surface));
   if (!surface) {
     [mNativeMenuItem setImage:nil];
     return NS_ERROR_FAILURE;
   }
+  nsRefPtr<gfxImageSurface> frame(surface->GetAsReadableARGB32ImageSurface());
+  NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
 
   CGImageRef origImage = NULL;
-  nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(surface, &origImage);
+  nsresult rv = nsCocoaUtils::CreateCGImageFromSurface(frame, &origImage);
   if (NS_FAILED(rv) || !origImage) {
     [mNativeMenuItem setImage:nil];
     return NS_ERROR_FAILURE;

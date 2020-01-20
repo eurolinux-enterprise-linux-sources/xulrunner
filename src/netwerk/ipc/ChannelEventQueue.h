@@ -10,10 +10,9 @@
 
 #include <nsTArray.h>
 #include <nsAutoPtr.h>
+#include <nsThreadUtils.h>
 
 class nsISupports;
-class nsIEventTarget;
-class nsIThread;
 
 namespace mozilla {
 namespace net {
@@ -35,7 +34,7 @@ class ChannelEvent
 
 class AutoEventEnqueuerBase;
 
-class ChannelEventQueue MOZ_FINAL
+class ChannelEventQueue
 {
   NS_INLINE_DECL_REFCOUNTING(ChannelEventQueue)
 
@@ -46,6 +45,8 @@ class ChannelEventQueue MOZ_FINAL
     , mForced(false)
     , mFlushing(false)
     , mOwner(owner) {}
+
+  ~ChannelEventQueue() {}
 
   // Checks to determine if an IPDL-generated channel event can be processed
   // immediately, or needs to be queued using Enqueue().
@@ -69,17 +70,9 @@ class ChannelEventQueue MOZ_FINAL
   inline void Suspend();
   // Resume flushes the queue asynchronously, i.e. items in queue will be
   // dispatched in a new event on the current thread.
-  void Resume();
-
-  // Retargets delivery of events to the target thread specified.
-  nsresult RetargetDeliveryTo(nsIEventTarget* aTargetThread);
+  inline void Resume();
 
  private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~ChannelEventQueue()
-  {
-  }
-
   inline void MaybeFlushQueue();
   void FlushQueue();
   inline void CompleteResume();
@@ -93,9 +86,6 @@ class ChannelEventQueue MOZ_FINAL
 
   // Keep ptr to avoid refcount cycle: only grab ref during flushing.
   nsISupports *mOwner;
-
-  // Target thread for delivery of events.
-  nsCOMPtr<nsIThread> mTargetThread;
 
   friend class AutoEventEnqueuer;
 };
@@ -147,6 +137,22 @@ ChannelEventQueue::CompleteResume()
     // queued ones.
     mSuspended = false;
     MaybeFlushQueue();
+  }
+}
+
+inline void
+ChannelEventQueue::Resume()
+{
+  // Resuming w/o suspend: error in debug mode, ignore in build
+  MOZ_ASSERT(mSuspendCount > 0);
+  if (mSuspendCount <= 0) {
+    return;
+  }
+
+  if (!--mSuspendCount) {
+    nsRefPtr<nsRunnableMethod<ChannelEventQueue> > event =
+      NS_NewRunnableMethod(this, &ChannelEventQueue::CompleteResume);
+    NS_DispatchToCurrentThread(event);
   }
 }
 

@@ -14,9 +14,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGStyleElement::WrapNode(JSContext *aCx)
+SVGStyleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGStyleElementBinding::Wrap(aCx, this);
+  return SVGStyleElementBinding::Wrap(aCx, aScope, this);
 }
 
 //----------------------------------------------------------------------
@@ -26,18 +26,15 @@ NS_IMPL_ADDREF_INHERITED(SVGStyleElement, SVGStyleElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGStyleElement, SVGStyleElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGStyleElement)
-  NS_INTERFACE_TABLE_INHERITED(SVGStyleElement,
-                               nsIStyleSheetLinkingElement,
-                               nsIMutationObserver)
+  NS_INTERFACE_TABLE_INHERITED3(SVGStyleElement, nsIDOMLinkStyle,
+                                nsIStyleSheetLinkingElement,
+                                nsIMutationObserver)
 NS_INTERFACE_TABLE_TAIL_INHERITING(SVGStyleElementBase)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(SVGStyleElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SVGStyleElement,
                                                   SVGStyleElementBase)
   tmp->nsStyleLinkElement::Traverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGStyleElement,
                                                 SVGStyleElementBase)
   tmp->nsStyleLinkElement::Unlink();
@@ -46,7 +43,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 //----------------------------------------------------------------------
 // Implementation
 
-SVGStyleElement::SVGStyleElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGStyleElement::SVGStyleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGStyleElementBase(aNodeInfo)
 {
   AddMutationObserver(this);
@@ -83,9 +80,9 @@ void
 SVGStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
   nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
-  ShadowRoot* oldShadow = GetShadowRoot();
+
   SVGStyleElementBase::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc, oldShadow);
+  UpdateStyleSheetInternal(oldDoc);
 }
 
 nsresult
@@ -99,7 +96,7 @@ SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     if (aName == nsGkAtoms::title ||
         aName == nsGkAtoms::media ||
         aName == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, nullptr, true);
+      UpdateStyleSheetInternal(nullptr, true);
     } else if (aName == nsGkAtoms::scoped) {
       UpdateStyleSheetScopedness(true);
     }
@@ -118,7 +115,7 @@ SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
     if (aAttribute == nsGkAtoms::title ||
         aAttribute == nsGkAtoms::media ||
         aAttribute == nsGkAtoms::type) {
-      UpdateStyleSheetInternal(nullptr, nullptr, true);
+      UpdateStyleSheetInternal(nullptr, true);
     } else if (aAttribute == nsGkAtoms::scoped) {
       UpdateStyleSheetScopedness(false);
     }
@@ -186,7 +183,7 @@ void
 SVGStyleElement::ContentChanged(nsIContent* aContent)
 {
   if (nsContentUtils::IsInSameAnonymousTree(this, aContent)) {
-    UpdateStyleSheetInternal(nullptr, nullptr);
+    UpdateStyleSheetInternal(nullptr);
   }
 }
 

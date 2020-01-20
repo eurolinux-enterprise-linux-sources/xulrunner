@@ -4,7 +4,7 @@
 "use strict";
 
 var FindHelper = {
-  _finder: null,
+  _fastFind: null,
   _targetTab: null,
   _initialViewport: null,
   _viewportChanged: false,
@@ -31,42 +31,42 @@ var FindHelper = {
   },
 
   doFind: function(aSearchString) {
-    if (!this._finder) {
+    if (!this._fastFind) {
       this._targetTab = BrowserApp.selectedTab;
-      this._finder = this._targetTab.browser.finder;
-      this._finder.addResultListener(this);
+      this._fastFind = this._targetTab.browser.fastFind;
       this._initialViewport = JSON.stringify(this._targetTab.getViewport());
       this._viewportChanged = false;
     }
 
-    this._finder.fastFind(aSearchString, false);
+    let result = this._fastFind.find(aSearchString, false);
+    this.handleResult(result);
   },
 
   findAgain: function(aString, aFindBackwards) {
     // This can happen if the user taps next/previous after re-opening the search bar
-    if (!this._finder) {
+    if (!this._fastFind) {
       this.doFind(aString);
       return;
     }
 
-    this._finder.findAgain(aFindBackwards, false, false);
+    let result = this._fastFind.findAgain(aFindBackwards, false);
+    this.handleResult(result);
   },
 
   findClosed: function() {
     // If there's no find in progress, there's nothing to clean up
-    if (!this._finder)
+    if (!this._fastFind)
       return;
 
-    this._finder.removeSelection();
-    this._finder.removeResultListener(this);
-    this._finder = null;
+    this._fastFind.collapseSelection();
+    this._fastFind = null;
     this._targetTab = null;
     this._initialViewport = null;
     this._viewportChanged = false;
   },
 
-  onFindResult: function(aData) {
-    if (aData.result == Ci.nsITypeAheadFind.FIND_NOTFOUND) {
+  handleResult: function(aResult) {
+    if (aResult == Ci.nsITypeAheadFind.FIND_NOTFOUND) {
       if (this._viewportChanged) {
         if (this._targetTab != BrowserApp.selectedTab) {
           // this should never happen
@@ -77,8 +77,6 @@ var FindHelper = {
         this._targetTab.sendViewportUpdate();
       }
     } else {
-      // Disabled until bug 1014113 is fixed
-      //ZoomHelper.zoomToRect(aData.rect, -1, false, true);
       this._viewportChanged = true;
     }
   }

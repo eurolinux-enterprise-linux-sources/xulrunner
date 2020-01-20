@@ -9,10 +9,6 @@
 
 #include "prmon.h"
 
-#ifdef MOZILLA_INTERNAL_API
-#include "GeckoProfiler.h"
-#endif //MOZILLA_INTERNAL_API
-
 #include "mozilla/BlockingResourceBase.h"
 
 //
@@ -90,14 +86,11 @@ public:
      **/      
     nsresult Wait(PRIntervalTime interval = PR_INTERVAL_NO_TIMEOUT)
     {
-#ifdef MOZILLA_INTERNAL_API
-        GeckoProfilerSleepRAII profiler_sleep;
-#endif //MOZILLA_INTERNAL_API
         return PR_Wait(mReentrantMonitor, interval) == PR_SUCCESS ?
             NS_OK : NS_ERROR_FAILURE;
     }
 
-#else // ifndef DEBUG
+#else
     void Enter();
     void Exit();
     nsresult Wait(PRIntervalTime interval = PR_INTERVAL_NO_TIMEOUT);
@@ -219,47 +212,6 @@ private:
     mozilla::ReentrantMonitor* mReentrantMonitor;
 };
 
-/**
- * ReentrantMonitorAutoExit
- * Exit the ReentrantMonitor when it enters scope, and enters it when it leaves
- * scope.
- *
- * MUCH PREFERRED to bare calls to ReentrantMonitor.Exit and Enter.
- */
-class MOZ_STACK_CLASS ReentrantMonitorAutoExit
-{
-public:
-    /**
-     * Constructor
-     * The constructor releases the given lock.  The destructor
-     * acquires the lock. The lock must be held before constructing
-     * this object!
-     *
-     * @param aReentrantMonitor A valid mozilla::ReentrantMonitor*. It
-     *                 must be already locked.
-     **/
-    ReentrantMonitorAutoExit(ReentrantMonitor& aReentrantMonitor) :
-        mReentrantMonitor(&aReentrantMonitor)
-    {
-        NS_ASSERTION(mReentrantMonitor, "null monitor");
-        mReentrantMonitor->AssertCurrentThreadIn();
-        mReentrantMonitor->Exit();
-    }
-
-    ~ReentrantMonitorAutoExit(void)
-    {
-        mReentrantMonitor->Enter();
-    }
-
-private:
-    ReentrantMonitorAutoExit();
-    ReentrantMonitorAutoExit(const ReentrantMonitorAutoExit&);
-    ReentrantMonitorAutoExit& operator =(const ReentrantMonitorAutoExit&);
-    static void* operator new(size_t) CPP_THROW_NEW;
-    static void operator delete(void*);
-
-    ReentrantMonitor* mReentrantMonitor;
-};
 
 } // namespace mozilla
 

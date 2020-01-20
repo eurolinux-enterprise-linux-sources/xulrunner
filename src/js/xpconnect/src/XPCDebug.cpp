@@ -1,12 +1,10 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=8 sts=4 et sw=4 tw=99: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "xpcprivate.h"
-#include "jsprf.h"
-#include "js/OldDebugAPI.h"
 
 #ifdef XP_WIN
 #include <windows.h>
@@ -32,8 +30,8 @@ static void DebugDump(const char* fmt, ...)
   printf("%s", buffer);
 }
 
-bool
-xpc_DumpJSStack(JSContext* cx, bool showArgs, bool showLocals, bool showThisProps)
+JSBool
+xpc_DumpJSStack(JSContext* cx, JSBool showArgs, JSBool showLocals, JSBool showThisProps)
 {
     if (char* buf = xpc_PrintJSStack(cx, showArgs, showLocals, showThisProps)) {
         DebugDump("%s\n", buf);
@@ -43,16 +41,21 @@ xpc_DumpJSStack(JSContext* cx, bool showArgs, bool showLocals, bool showThisProp
 }
 
 char*
-xpc_PrintJSStack(JSContext* cx, bool showArgs, bool showLocals,
-                 bool showThisProps)
+xpc_PrintJSStack(JSContext* cx, JSBool showArgs, JSBool showLocals,
+                 JSBool showThisProps)
 {
-    JS::AutoSaveExceptionState state(cx);
+    char* buf;
+    JSExceptionState *state = JS_SaveExceptionState(cx);
+    if (!state)
+        DebugDump("%s", "Call to a debug function modifying state!\n");
 
-    char *buf = JS::FormatStackDump(cx, nullptr, showArgs, showLocals, showThisProps);
+    JS_ClearPendingException(cx);
+
+    buf = JS::FormatStackDump(cx, nullptr, showArgs, showLocals, showThisProps);
     if (!buf)
         DebugDump("%s", "Failed to format JavaScript stack for dump\n");
 
-    state.restore();
+    JS_RestoreExceptionState(cx, state);
     return buf;
 }
 
@@ -65,7 +68,7 @@ xpcDumpEvalErrorReporter(JSContext *cx, const char *message,
     DebugDump("Error: %s\n", message);
 }
 
-bool
+JSBool
 xpc_DumpEvalInJSStackFrame(JSContext* cx, uint32_t frameno, const char* text)
 {
     if (!cx || !text) {
@@ -94,22 +97,20 @@ xpc_DumpEvalInJSStackFrame(JSContext* cx, uint32_t frameno, const char* text)
         return false;
     }
 
-    JS::AutoSaveExceptionState exceptionState(cx);
+    JSExceptionState* exceptionState = JS_SaveExceptionState(cx);
     JSErrorReporter older = JS_SetErrorReporter(cx, xpcDumpEvalErrorReporter);
 
     JS::RootedValue rval(cx);
     JSString* str;
     JSAutoByteString bytes;
     if (frame.evaluateInStackFrame(cx, text, strlen(text), "eval", 1, &rval) &&
-        nullptr != (str = ToString(cx, rval)) &&
+        nullptr != (str = JS_ValueToString(cx, rval)) &&
         bytes.encodeLatin1(cx, str)) {
         DebugDump("%s\n", bytes.ptr());
-    } else {
+    } else
         DebugDump("%s", "eval failed!\n");
-    }
-
     JS_SetErrorReporter(cx, older);
-    exceptionState.restore();
+    JS_RestoreExceptionState(cx, exceptionState);
     return true;
 }
 
@@ -128,7 +129,7 @@ xpc_DebuggerKeywordHandler(JSContext *cx, JSScript *script, jsbytecode *pc,
     return JSTRAP_CONTINUE;
 }
 
-bool xpc_InstallJSDebuggerKeywordHandler(JSRuntime* rt)
+JSBool xpc_InstallJSDebuggerKeywordHandler(JSRuntime* rt)
 {
     return JS_SetDebuggerHandler(rt, xpc_DebuggerKeywordHandler, nullptr);
 }

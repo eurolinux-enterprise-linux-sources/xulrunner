@@ -1,4 +1,3 @@
-#filter substitution
 /* -*- Mode: Java; c-basic-offset: 4; tab-width: 20; indent-tabs-mode: nil; -*-
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -6,6 +5,7 @@
 
 package org.mozilla.gecko.mozglue;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -21,10 +21,6 @@ import java.util.Locale;
 public final class GeckoLoader {
     private static final String LOGTAG = "GeckoLoader";
 
-    // This matches AppConstants, but we're built earlier.
-    private static final String ANDROID_PACKAGE_NAME = "@ANDROID_PACKAGE_NAME@";
-
-    private static volatile Intent sIntent;
     private static File sCacheFile;
     private static File sGREDir;
 
@@ -63,7 +59,7 @@ public final class GeckoLoader {
                 return;
             }
 
-            StringBuilder pluginSearchPath = new StringBuilder();
+            StringBuffer pluginSearchPath = new StringBuffer();
             for (int i = 0; i < pluginDirs.length; i++) {
                 pluginSearchPath.append(pluginDirs[i]);
                 pluginSearchPath.append(":");
@@ -123,14 +119,10 @@ public final class GeckoLoader {
         return tmpDir;
     }
 
-    public static void setLastIntent(Intent intent) {
-        sIntent = intent;
-    }
-
-    public static void setupGeckoEnvironment(Context context, String[] pluginDirs, String profilePath) {
+    public static void setupGeckoEnvironment(Activity context, String[] pluginDirs, String profilePath) {
         // if we have an intent (we're being launched by an activity)
         // read in any environmental variables from it here
-        final Intent intent = sIntent;
+        Intent intent = context.getIntent();
         if (intent != null) {
             String env = intent.getStringExtra("env0");
             Log.d(LOGTAG, "Gecko environment env0: " + env);
@@ -189,9 +181,6 @@ public final class GeckoLoader {
         }
 
         setupLocaleEnvironment();
-
-        // We don't need this any more.
-        sIntent = null;
     }
 
     private static void loadLibsSetup(Context context) {
@@ -216,13 +205,6 @@ public final class GeckoLoader {
             putenv("MOZ_LINKER_CACHE=" + linkerCache);
         }
 
-        // Disable on-demand decompression of the linker on devices where it
-        // is known to cause crashes.
-        if ("HTC".equals(android.os.Build.MANUFACTURER) &&
-            "HTC Vision".equals(android.os.Build.MODEL)) {
-            putenv("MOZ_LINKER_ONDEMAND=0");
-        }
-
 #ifdef MOZ_LINKER_EXTRACT
         putenv("MOZ_LINKER_EXTRACT=1");
         // Ensure that the cache dir is world-writable
@@ -235,7 +217,6 @@ public final class GeckoLoader {
 #endif
     }
 
-    @RobocopTarget
     public static void loadSQLiteLibs(Context context, String apkName) {
         synchronized (sLibLoadingLock) {
             if (sSQLiteLibsLoaded) {
@@ -244,7 +225,7 @@ public final class GeckoLoader {
             sSQLiteLibsLoaded = true;
         }
 
-        loadMozGlue();
+        loadMozGlue(context);
         // the extract libs parameter is being removed in bug 732069
         loadLibsSetup(context);
         loadSQLiteLibsNative(apkName, false);
@@ -258,31 +239,12 @@ public final class GeckoLoader {
             sNSSLibsLoaded = true;
         }
 
-        loadMozGlue();
+        loadMozGlue(context);
         loadLibsSetup(context);
         loadNSSLibsNative(apkName, false);
     }
 
-    public static void doLoadLibrary(final String lib) {
-        try {
-            System.loadLibrary(lib);
-        } catch (UnsatisfiedLinkError e) {
-            Log.wtf(LOGTAG, "Couldn't load " + lib + ". Trying /data/app-lib path.");
-            try {
-                System.load("/data/app-lib/" + ANDROID_PACKAGE_NAME + "/lib" + lib + ".so");
-            } catch (Throwable ee) {
-                try {
-                    Log.wtf(LOGTAG, "Couldn't load " + lib + ": " + ee + ". Trying /data/data path.");
-                    System.load("/data/data/" + ANDROID_PACKAGE_NAME + "/lib/lib" + lib + ".so");
-                } catch (Throwable eee) {
-                    Log.wtf(LOGTAG, "Failed every attempt to load " + lib + ". Giving up.");
-                    throw new RuntimeException("Unable to load " + lib, eee);
-                }
-            }
-        }
-    }
-
-    public static void loadMozGlue() {
+    public static void loadMozGlue(Context context) {
         synchronized (sLibLoadingLock) {
             if (sMozGlueLoaded) {
                 return;
@@ -290,7 +252,7 @@ public final class GeckoLoader {
             sMozGlueLoaded = true;
         }
 
-        doLoadLibrary("mozglue");
+        System.loadLibrary("mozglue");
     }
 
     public static void loadGeckoLibs(Context context, String apkName) {

@@ -103,7 +103,6 @@ const char *gInaccessibleProperties[] = {
     "-x-lang",
     "-x-span",
     "-x-system-font",
-    "-x-text-zoom",
     "border-end-color-value",
     "border-end-style-value",
     "border-end-width-value",
@@ -144,12 +143,9 @@ const char *gInaccessibleProperties[] = {
     "padding-left-rtl-source",
     "padding-right-ltr-source",
     "padding-right-rtl-source",
-    "-moz-control-character-visibility",
     "-moz-script-level", // parsed by UA sheets only
     "-moz-script-size-multiplier",
-    "-moz-script-min-size",
-    "-moz-math-variant",
-    "-moz-math-display" // parsed by UA sheets only
+    "-moz-script-min-size"
 };
 
 inline int

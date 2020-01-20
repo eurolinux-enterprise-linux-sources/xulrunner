@@ -5,12 +5,13 @@
 
 #include "mozilla/dom/SVGGradientElement.h"
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGRadialGradientElementBinding.h"
 #include "mozilla/dom/SVGLinearGradientElementBinding.h"
+#include "mozilla/Util.h"
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
+#include "nsIDOMSVGAnimatedEnum.h"
 #include "nsSVGElement.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(LinearGradient)
@@ -48,7 +49,7 @@ nsSVGElement::StringInfo SVGGradientElement::sStringInfo[1] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGGradientElement::SVGGradientElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGGradientElement::SVGGradientElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGGradientElementBase(aNodeInfo)
 {
 }
@@ -70,7 +71,7 @@ SVGGradientElement::GetStringInfo()
                               ArrayLength(sStringInfo));
 }
 
-already_AddRefed<SVGAnimatedEnumeration>
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
 SVGGradientElement::GradientUnits()
 {
   return mEnumAttributes[GRADIENTUNITS].ToDOMAnimatedEnum(this);
@@ -86,7 +87,7 @@ SVGGradientElement::GradientTransform()
            GetAnimatedTransformList(DO_ALLOCATE), this);
 }
 
-already_AddRefed<SVGAnimatedEnumeration>
+already_AddRefed<nsIDOMSVGAnimatedEnumeration>
 SVGGradientElement::SpreadMethod()
 {
   return mEnumAttributes[SPREADMETHOD].ToDOMAnimatedEnum(this);
@@ -116,9 +117,9 @@ SVGGradientElement::IsAttributeMapped(const nsIAtom* name) const
 //---------------------Linear Gradients------------------------
 
 JSObject*
-SVGLinearGradientElement::WrapNode(JSContext* aCx)
+SVGLinearGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGLinearGradientElementBinding::Wrap(aCx, this);
+  return SVGLinearGradientElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::LengthInfo SVGLinearGradientElement::sLengthInfo[4] =
@@ -132,7 +133,7 @@ nsSVGElement::LengthInfo SVGLinearGradientElement::sLengthInfo[4] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGLinearGradientElement::SVGLinearGradientElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGLinearGradientElement::SVGLinearGradientElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGLinearGradientElementBase(aNodeInfo)
 {
 }
@@ -190,9 +191,9 @@ SVGLinearGradientElement::GetLengthInfo()
 //-------------------------- Radial Gradients ----------------------------
 
 JSObject*
-SVGRadialGradientElement::WrapNode(JSContext* aCx)
+SVGRadialGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGRadialGradientElementBinding::Wrap(aCx, this);
+  return SVGRadialGradientElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::LengthInfo SVGRadialGradientElement::sLengthInfo[5] =
@@ -207,7 +208,7 @@ nsSVGElement::LengthInfo SVGRadialGradientElement::sLengthInfo[5] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGRadialGradientElement::SVGRadialGradientElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGRadialGradientElement::SVGRadialGradientElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGRadialGradientElementBase(aNodeInfo)
 {
 }

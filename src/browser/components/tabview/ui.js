@@ -214,7 +214,7 @@ let UI = {
       });
 
       // ___ setup event listener to save canvas images
-      let onWindowClosing = function () {
+      gWindow.addEventListener("SSWindowClosing", function onWindowClosing() {
         gWindow.removeEventListener("SSWindowClosing", onWindowClosing, false);
 
         // XXX bug #635975 - don't unlink the tab if the dom window is closing.
@@ -226,12 +226,7 @@ let UI = {
         TabItems.saveAll();
 
         self._save();
-      };
-
-      gWindow.addEventListener("SSWindowClosing", onWindowClosing);
-      this._cleanupFunctions.push(function () {
-        gWindow.removeEventListener("SSWindowClosing", onWindowClosing);
-      });
+      }, false);
 
       // ___ load frame script
       let frameScript = "chrome://browser/content/tabview-content.js";
@@ -527,15 +522,11 @@ let UI = {
     if (!this.isTabViewVisible() || this._isChangingVisibility)
       return;
 
+    this._isChangingVisibility = true;
+
     // another tab might be select if user decides to stay on a page when
     // a onclose confirmation prompts.
     GroupItems.removeHiddenGroups();
-
-    // We need to set this after removing the hidden groups because doing so
-    // might show prompts which will cause us to be called again, and we'd get
-    // stuck if we prevent re-entrancy before doing that.
-    this._isChangingVisibility = true;
-
     TabItems.pausePainting();
 
     this._reorderTabsOnHide.forEach(function(groupItem) {
@@ -1103,6 +1094,7 @@ let UI = {
               self.exit();
             break;
           case KeyEvent.DOM_VK_RETURN:
+          case KeyEvent.DOM_VK_ENTER:
             activeGroupItem = GroupItems.getActiveGroupItem();
             if (activeGroupItem) {
               activeTab = self.getActiveTab();

@@ -33,8 +33,7 @@ void NS_ShutdownLocalFile()
 NS_IMETHODIMP
 nsLocalFile::InitWithFile(nsIFile *aFile)
 {
-    if (NS_WARN_IF(!aFile))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG(aFile);
     
     nsAutoCString path;
     aFile->GetNativePath(path);
@@ -79,7 +78,7 @@ nsLocalFile::CreateUnique(uint32_t type, uint32_t attributes)
     if (NS_FAILED(rv))
         return rv;
 
-    const int32_t lastDot = leafName.RFindChar(char16_t('.'));
+    const int32_t lastDot = leafName.RFindChar(PRUnichar('.'));
 #else
     rv = GetNativeLeafName(leafName);
     if (NS_FAILED(rv))
@@ -155,25 +154,25 @@ nsLocalFile::CreateUnique(uint32_t type, uint32_t attributes)
     return NS_ERROR_FILE_TOO_BIG;
 }
 
-#if defined(XP_WIN)
-static const char16_t kPathSeparatorChar       = '\\';
+#if defined(XP_WIN) || defined(XP_OS2)
+static const PRUnichar kPathSeparatorChar       = '\\';
 #elif defined(XP_UNIX)
-static const char16_t kPathSeparatorChar       = '/';
+static const PRUnichar kPathSeparatorChar       = '/';
 #else
 #error Need to define file path separator for your platform
 #endif
 
-static int32_t SplitPath(char16_t *path, char16_t **nodeArray, int32_t arrayLen)
+static int32_t SplitPath(PRUnichar *path, PRUnichar **nodeArray, int32_t arrayLen)
 {
     if (*path == 0)
       return 0;
 
-    char16_t **nodePtr = nodeArray;
+    PRUnichar **nodePtr = nodeArray;
     if (*path == kPathSeparatorChar)
       path++;    
     *nodePtr++ = path;
     
-    for (char16_t *cp = path; *cp != 0; cp++) {
+    for (PRUnichar *cp = path; *cp != 0; cp++) {
       if (*cp == kPathSeparatorChar) {
         *cp++ = 0;
         if (*cp == 0)
@@ -190,8 +189,7 @@ static int32_t SplitPath(char16_t *path, char16_t **nodeArray, int32_t arrayLen)
 NS_IMETHODIMP
 nsLocalFile::GetRelativeDescriptor(nsIFile *fromFile, nsACString& _retval)
 {
-    if (NS_WARN_IF(!fromFile))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG_POINTER(fromFile);
     const int32_t kMaxNodesInPath = 32;
 
     //
@@ -202,7 +200,7 @@ nsLocalFile::GetRelativeDescriptor(nsIFile *fromFile, nsACString& _retval)
     _retval.Truncate(0);
 
     nsAutoString thisPath, fromPath;
-    char16_t *thisNodes[kMaxNodesInPath], *fromNodes[kMaxNodesInPath];
+    PRUnichar *thisNodes[kMaxNodesInPath], *fromNodes[kMaxNodesInPath];
     int32_t  thisNodeCnt, fromNodeCnt, nodeIndex;
     
     rv = GetPath(thisPath);
@@ -213,8 +211,8 @@ nsLocalFile::GetRelativeDescriptor(nsIFile *fromFile, nsACString& _retval)
         return rv;
 
     // get raw pointer to mutable string buffer
-    char16_t *thisPathPtr; thisPath.BeginWriting(thisPathPtr);
-    char16_t *fromPathPtr; fromPath.BeginWriting(fromPathPtr);
+    PRUnichar *thisPathPtr; thisPath.BeginWriting(thisPathPtr);
+    PRUnichar *fromPathPtr; fromPath.BeginWriting(fromPathPtr);
     
     thisNodeCnt = SplitPath(thisPathPtr, thisNodes, kMaxNodesInPath);
     fromNodeCnt = SplitPath(fromPathPtr, fromNodes, kMaxNodesInPath);
@@ -223,7 +221,7 @@ nsLocalFile::GetRelativeDescriptor(nsIFile *fromFile, nsACString& _retval)
     
     for (nodeIndex = 0; nodeIndex < thisNodeCnt && nodeIndex < fromNodeCnt; ++nodeIndex) {
 #ifdef XP_WIN
-      if (_wcsicmp(char16ptr_t(thisNodes[nodeIndex]), char16ptr_t(fromNodes[nodeIndex])))
+      if (_wcsicmp(thisNodes[nodeIndex], fromNodes[nodeIndex]))
         break;
 #else
       if (nsCRT::strcmp(thisNodes[nodeIndex], fromNodes[nodeIndex]))

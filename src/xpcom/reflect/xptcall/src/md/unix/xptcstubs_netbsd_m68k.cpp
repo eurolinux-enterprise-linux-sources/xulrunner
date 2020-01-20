@@ -12,14 +12,14 @@
 #endif
 
 extern "C" {
-    static nsresult ATTRIBUTE_USED
+    static nsresult
     PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
     {
 #define PARAM_BUFFER_COUNT     16
 
         nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-        nsXPTCMiniVariant* dispatchParams = nullptr;
-        nsIInterfaceInfo* iface_info = nullptr;
+        nsXPTCMiniVariant* dispatchParams = NULL;
+        nsIInterfaceInfo* iface_info = NULL;
         const nsXPTMethodInfo* info;
         uint8_t paramCount;
         uint8_t i;

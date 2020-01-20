@@ -12,10 +12,10 @@
 ///
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Last changed  : $Date: 2014-01-05 15:40:22 -0600 (Sun, 05 Jan 2014) $
+// Last changed  : $Date$
 // File revision : $Revision: 4 $
 //
-// $Id: AAFilter.cpp 177 2014-01-05 21:40:22Z oparviai $
+// $Id$
 //
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -51,30 +51,6 @@ using namespace soundtouch;
 
 #define PI        3.141592655357989
 #define TWOPI    (2 * PI)
-
-// define this to save AA filter coefficients to a file
-// #define _DEBUG_SAVE_AAFILTER_COEFFICIENTS   1
-
-#ifdef _DEBUG_SAVE_AAFILTER_COEFFICIENTS
-    #include <stdio.h>
-
-    static void _DEBUG_SAVE_AAFIR_COEFFS(SAMPLETYPE *coeffs, int len)
-    {
-        FILE *fptr = fopen("aa_filter_coeffs.txt", "wt");
-        if (fptr == NULL) return;
-
-        for (int i = 0; i < len; i ++)
-        {
-            double temp = coeffs[i];
-            fprintf(fptr, "%lf\n", temp);
-        }
-        fclose(fptr);
-    }
-
-#else
-    #define _DEBUG_SAVE_AAFIR_COEFFS(x, y)
-#endif
-
 
 /*****************************************************************************
  *
@@ -123,7 +99,7 @@ void AAFilter::calculateCoeffs()
 {
     uint i;
     double cntTemp, temp, tempCoeff,h, w;
-    double wc;
+    double fc2, wc;
     double scaleCoeff, sum;
     double *work;
     SAMPLETYPE *coeffs;
@@ -136,7 +112,8 @@ void AAFilter::calculateCoeffs()
     work = new double[length];
     coeffs = new SAMPLETYPE[length];
 
-    wc = 2.0 * PI * cutoffFreq;
+    fc2 = 2.0 * cutoffFreq; 
+    wc = PI * fc2;
     tempCoeff = TWOPI / (double)length;
 
     sum = 0;
@@ -147,7 +124,7 @@ void AAFilter::calculateCoeffs()
         temp = cntTemp * wc;
         if (temp != 0) 
         {
-            h = sin(temp) / temp;                     // sinc function
+            h = fc2 * sin(temp) / temp;                     // sinc function
         } 
         else 
         {
@@ -176,20 +153,16 @@ void AAFilter::calculateCoeffs()
 
     for (i = 0; i < length; i ++) 
     {
-        temp = work[i] * scaleCoeff;
-//#if SOUNDTOUCH_INTEGER_SAMPLES
         // scale & round to nearest integer
+        temp = work[i] * scaleCoeff;
         temp += (temp >= 0) ? 0.5 : -0.5;
         // ensure no overfloods
         assert(temp >= -32768 && temp <= 32767);
-//#endif
         coeffs[i] = (SAMPLETYPE)temp;
     }
 
     // Set coefficients. Use divide factor 14 => divide result by 2^14 = 16384
     pFIR->setCoefficients(coeffs, length, 14);
-
-    _DEBUG_SAVE_AAFIR_COEFFS(coeffs, length);
 
     delete[] work;
     delete[] coeffs;
@@ -202,31 +175,6 @@ void AAFilter::calculateCoeffs()
 uint AAFilter::evaluate(SAMPLETYPE *dest, const SAMPLETYPE *src, uint numSamples, uint numChannels) const
 {
     return pFIR->evaluate(dest, src, numSamples, numChannels);
-}
-
-
-/// Applies the filter to the given src & dest pipes, so that processed amount of
-/// samples get removed from src, and produced amount added to dest 
-/// Note : The amount of outputted samples is by value of 'filter length' 
-/// smaller than the amount of input samples.
-uint AAFilter::evaluate(FIFOSampleBuffer &dest, FIFOSampleBuffer &src) const
-{
-    SAMPLETYPE *pdest;
-    const SAMPLETYPE *psrc;
-    uint numSrcSamples;
-    uint result;
-    int numChannels = src.getChannels();
-
-    assert(numChannels == dest.getChannels());
-
-    numSrcSamples = src.numSamples();
-    psrc = src.ptrBegin();
-    pdest = dest.ptrEnd(numSrcSamples);
-    result = pFIR->evaluate(pdest, psrc, numSrcSamples, numChannels);
-    src.receiveSamples(result);
-    dest.putSamples(result);
-
-    return result;
 }
 
 

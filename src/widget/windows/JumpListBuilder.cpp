@@ -40,15 +40,15 @@ extern const wchar_t *gMozillaJumpListIDGeneric;
 bool JumpListBuilder::sBuildingList = false;
 const char kPrefTaskbarEnabled[] = "browser.taskbar.lists.enabled";
 
-NS_IMPL_ISUPPORTS(JumpListBuilder, nsIJumpListBuilder, nsIObserver)
+NS_IMPL_ISUPPORTS2(JumpListBuilder, nsIJumpListBuilder, nsIObserver)
 
 JumpListBuilder::JumpListBuilder() :
   mMaxItems(0),
   mHasCommit(false)
 {
-  ::CoInitialize(nullptr);
+  ::CoInitialize(NULL);
   
-  CoCreateInstance(CLSID_DestinationList, nullptr, CLSCTX_INPROC_SERVER,
+  CoCreateInstance(CLSID_DestinationList, NULL, CLSCTX_INPROC_SERVER,
                    IID_ICustomDestinationList, getter_AddRefs(mJumpListMgr));
 
   // Make a lazy thread for any IO
@@ -257,9 +257,8 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
 
       HRESULT hr;
       nsRefPtr<IObjectCollection> collection;
-      hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
-                            CLSCTX_INPROC_SERVER, IID_IObjectCollection,
-                            getter_AddRefs(collection));
+      hr = CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IObjectCollection, getter_AddRefs(collection));
       if (FAILED(hr))
         return NS_ERROR_UNEXPECTED;
 
@@ -323,9 +322,8 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
 
       HRESULT hr;
       nsRefPtr<IObjectCollection> collection;
-      hr = CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
-                            CLSCTX_INPROC_SERVER, IID_IObjectCollection,
-                            getter_AddRefs(collection));
+      hr = CoCreateInstance(CLSID_EnumerableObjectCollection, NULL, CLSCTX_INPROC_SERVER,
+                            IID_IObjectCollection, getter_AddRefs(collection));
       if (FAILED(hr))
         return NS_ERROR_UNEXPECTED;
 
@@ -376,7 +374,7 @@ NS_IMETHODIMP JumpListBuilder::AddListToBuild(int16_t aCatType, nsIArray *items,
         return NS_ERROR_UNEXPECTED;
 
       // Add the tasks
-      hr = mJumpListMgr->AppendCategory(reinterpret_cast<const wchar_t*>(catName.BeginReading()), pArray);
+      hr = mJumpListMgr->AppendCategory(catName.BeginReading(), pArray);
       if (SUCCEEDED(hr))
         *_retval = true;
       return NS_OK;
@@ -502,7 +500,7 @@ nsresult JumpListBuilder::TransferIObjectArrayToIMutableArray(IObjectArray *objA
 
 NS_IMETHODIMP JumpListBuilder::Observe(nsISupports* aSubject,
                                         const char* aTopic,
-                                        const char16_t* aData)
+                                        const PRUnichar* aData)
 {
   if (nsDependentString(aData).EqualsASCII(kPrefTaskbarEnabled)) {
     bool enabled = Preferences::GetBool(kPrefTaskbarEnabled, true);

@@ -4,22 +4,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGCircleElement.h"
-#include "mozilla/gfx/2D.h"
 #include "nsGkAtoms.h"
 #include "gfxContext.h"
 #include "mozilla/dom/SVGCircleElementBinding.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Circle)
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGCircleElement::WrapNode(JSContext *aCx)
+SVGCircleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGCircleElementBinding::Wrap(aCx, this);
+  return SVGCircleElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::LengthInfo SVGCircleElement::sLengthInfo[3] =
@@ -32,7 +29,7 @@ nsSVGElement::LengthInfo SVGCircleElement::sLengthInfo[3] =
 //----------------------------------------------------------------------
 // Implementation
 
-SVGCircleElement::SVGCircleElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+SVGCircleElement::SVGCircleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGCircleElementBase(aNodeInfo)
 {
 }
@@ -91,23 +88,6 @@ SVGCircleElement::ConstructPath(gfxContext *aCtx)
 
   if (r > 0.0f)
     aCtx->Arc(gfxPoint(x, y), r, 0, 2*M_PI);
-}
-
-TemporaryRef<Path>
-SVGCircleElement::BuildPath()
-{
-  float x, y, r;
-  GetAnimatedLengthValues(&x, &y, &r, nullptr);
-
-  if (r <= 0.0f) {
-    return nullptr;
-  }
-
-  RefPtr<PathBuilder> pathBuilder = CreatePathBuilder();
-
-  pathBuilder->Arc(Point(x, y), r, 0, Float(2*M_PI));
-
-  return pathBuilder->Finish();
 }
 
 } // namespace dom

@@ -5,20 +5,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ShadowLayerChild.h"
 #include "LayerTransactionChild.h"
-#include "mozilla/layers/CompositableClient.h"  // for CompositableChild
-#include "mozilla/layers/LayersSurfaces.h"  // for PGrallocBufferChild
-#include "mozilla/layers/PCompositableChild.h"  // for PCompositableChild
-#include "mozilla/layers/PLayerChild.h"  // for PLayerChild
-#include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
-#include "nsTArray.h"                   // for nsTArray
-#include "mozilla/layers/TextureClient.h"
+#include "ShadowLayerUtils.h"
+#include "mozilla/layers/CompositableClient.h"
 
 namespace mozilla {
 namespace layers {
-
-class PGrallocBufferChild;
 
 void
 LayerTransactionChild::Destroy()
@@ -30,10 +23,10 @@ LayerTransactionChild::Destroy()
 }
 
 PGrallocBufferChild*
-LayerTransactionChild::AllocPGrallocBufferChild(const IntSize&,
-                                                const uint32_t&,
-                                                const uint32_t&,
-                                                MaybeMagicGrallocBufferHandle*)
+LayerTransactionChild::AllocPGrallocBuffer(const gfxIntSize&,
+                                           const uint32_t&,
+                                           const uint32_t&,
+                                           MaybeMagicGrallocBufferHandle*)
 {
 #ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
   return GrallocBufferActor::Create();
@@ -44,7 +37,7 @@ LayerTransactionChild::AllocPGrallocBufferChild(const IntSize&,
 }
 
 bool
-LayerTransactionChild::DeallocPGrallocBufferChild(PGrallocBufferChild* actor)
+LayerTransactionChild::DeallocPGrallocBuffer(PGrallocBufferChild* actor)
 {
 #ifdef MOZ_HAVE_SURFACEDESCRIPTORGRALLOC
   delete actor;
@@ -56,7 +49,7 @@ LayerTransactionChild::DeallocPGrallocBufferChild(PGrallocBufferChild* actor)
 }
 
 PLayerChild*
-LayerTransactionChild::AllocPLayerChild()
+LayerTransactionChild::AllocPLayer()
 {
   // we always use the "power-user" ctor
   NS_RUNTIMEABORT("not reached");
@@ -64,49 +57,31 @@ LayerTransactionChild::AllocPLayerChild()
 }
 
 bool
-LayerTransactionChild::DeallocPLayerChild(PLayerChild* actor)
+LayerTransactionChild::DeallocPLayer(PLayerChild* actor)
 {
   delete actor;
   return true;
 }
 
 PCompositableChild*
-LayerTransactionChild::AllocPCompositableChild(const TextureInfo& aInfo)
+LayerTransactionChild::AllocPCompositable(const TextureInfo& aInfo)
 {
-  return CompositableClient::CreateIPDLActor();
+  return new CompositableChild();
 }
 
 bool
-LayerTransactionChild::DeallocPCompositableChild(PCompositableChild* actor)
+LayerTransactionChild::DeallocPCompositable(PCompositableChild* actor)
 {
-  return CompositableClient::DestroyIPDLActor(actor);
+  delete actor;
+  return true;
 }
 
 void
 LayerTransactionChild::ActorDestroy(ActorDestroyReason why)
 {
-#ifdef MOZ_B2G
-  // Due to poor lifetime management of gralloc (and possibly shmems) we will
-  // crash at some point in the future when we get destroyed due to abnormal
-  // shutdown. Its better just to crash here. On desktop though, we have a chance
-  // of recovering.
   if (why == AbnormalShutdown) {
     NS_RUNTIMEABORT("ActorDestroy by IPC channel failure at LayerTransactionChild");
   }
-#endif
-}
-
-PTextureChild*
-LayerTransactionChild::AllocPTextureChild(const SurfaceDescriptor&,
-                                          const TextureFlags&)
-{
-  return TextureClient::CreateIPDLActor();
-}
-
-bool
-LayerTransactionChild::DeallocPTextureChild(PTextureChild* actor)
-{
-  return TextureClient::DestroyIPDLActor(actor);
 }
 
 }  // namespace layers

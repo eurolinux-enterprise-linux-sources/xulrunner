@@ -908,7 +908,7 @@ void WebBrowserChromeUI::SetFocus(nsIWebBrowserChrome *chrome)
 //
 //  PURPOSE: Set the status bar text.
 //
-void WebBrowserChromeUI::UpdateStatusBarText(nsIWebBrowserChrome *aChrome, const char16_t* aStatusText)
+void WebBrowserChromeUI::UpdateStatusBarText(nsIWebBrowserChrome *aChrome, const PRUnichar* aStatusText)
 {
     HWND hwndDlg = GetBrowserDlgFromChrome(aChrome);
     nsCString status; 
@@ -1004,7 +1004,7 @@ void WebBrowserChromeUI::ShowContextMenu(nsIWebBrowserChrome *aChrome, uint32_t 
 //
 //  PURPOSE: Show a tooltip
 //
-void WebBrowserChromeUI::ShowTooltip(nsIWebBrowserChrome *aChrome, int32_t aXCoords, int32_t aYCoords, const char16_t *aTipText)
+void WebBrowserChromeUI::ShowTooltip(nsIWebBrowserChrome *aChrome, int32_t aXCoords, int32_t aYCoords, const PRUnichar *aTipText)
 {
     // TODO code to show a tooltip should go here
 }
@@ -1077,7 +1077,7 @@ nsresult AppCallbacks::CreateBrowserWindow(uint32_t aChromeFlags,
 
   // the interface to return and one addref, which we assume will be
   // immediately released
-  *aNewWindow = static_cast<nsIWebBrowserChrome*>(chrome);
+  CallQueryInterface(static_cast<nsIWebBrowserChrome*>(chrome), aNewWindow);
   // now an extra addref; the window owns itself (to be released by
   // WebBrowserChromeUI::Destroy)
   NS_ADDREF(*aNewWindow);

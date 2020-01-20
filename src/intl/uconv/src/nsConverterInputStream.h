@@ -3,16 +3,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsConverterInputStream_h
-#define nsConverterInputStream_h
-
 #include "nsIInputStream.h"
 #include "nsIConverterInputStream.h"
 #include "nsIUnicharLineInputStream.h"
-#include "nsTArray.h"
+#include "nsString.h"
+
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIUnicodeDecoder.h"
+#include "nsIByteBuffer.h"
+#include "nsIUnicharBuffer.h"
 #include "nsReadLine.h"
 
 #define NS_CONVERTERINPUTSTREAM_CONTRACTID "@mozilla.org/intl/converter-input-stream;1"
@@ -49,18 +49,15 @@ class nsConverterInputStream : public nsIConverterInputStream,
     uint32_t Fill(nsresult *aErrorCode);
     
     nsCOMPtr<nsIUnicodeDecoder> mConverter;
-    FallibleTArray<char> mByteData;
-    FallibleTArray<char16_t> mUnicharData;
+    nsCOMPtr<nsIByteBuffer> mByteData;
+    nsCOMPtr<nsIUnicharBuffer> mUnicharData;
     nsCOMPtr<nsIInputStream> mInput;
 
     nsresult  mLastErrorCode;
     uint32_t  mLeftOverBytes;
     uint32_t  mUnicharDataOffset;
     uint32_t  mUnicharDataLength;
-    char16_t mReplacementChar;
+    PRUnichar mReplacementChar;
 
-    nsAutoPtr<nsLineBuffer<char16_t> > mLineBuffer;
+    nsAutoPtr<nsLineBuffer<PRUnichar> > mLineBuffer;
 };
-
-#endif
-

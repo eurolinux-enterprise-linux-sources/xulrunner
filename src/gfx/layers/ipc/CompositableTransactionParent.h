@@ -5,18 +5,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef MOZILLA_LAYERS_COMPOSITABLETRANSACTIONPARENT_H
-#define MOZILLA_LAYERS_COMPOSITABLETRANSACTIONPARENT_H
-
-#include <vector>                       // for vector
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
-#include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
-#include "mozilla/layers/LayersMessages.h"  // for EditReply, etc
+#include "mozilla/layers/ISurfaceAllocator.h"
+#include "mozilla/layers/LayerTransaction.h"
 
 namespace mozilla {
 namespace layers {
-
-class CompositableHost;
 
 typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 
@@ -26,6 +19,8 @@ typedef std::vector<mozilla::layers::EditReply> EditReplyVector;
 // through this interface.
 class CompositableParentManager : public ISurfaceAllocator
 {
+public:
+
 protected:
   /**
    * Handle the IPDL messages that affect PCompositable actors.
@@ -33,23 +28,10 @@ protected:
   bool ReceiveCompositableUpdate(const CompositableOperation& aEdit,
                                  EditReplyVector& replyv);
   bool IsOnCompositorSide() const MOZ_OVERRIDE { return true; }
-
-  /**
-   * Return true if this protocol is asynchronous with respect to the content
-   * thread (ImageBridge for instance).
-   */
-  virtual bool IsAsync() const { return false; }
-
-  void ReturnTextureDataIfNecessary(CompositableHost* aCompositable,
-                                    EditReplyVector& replyv,
-                                    PCompositableParent* aParent);
-  void ClearPrevFenceHandles();
-
-protected:
-  std::vector<FenceHandle> mPrevFenceHandles;
 };
 
-} // namespace
-} // namespace
 
-#endif
+
+
+} // namespace
+} // namespace

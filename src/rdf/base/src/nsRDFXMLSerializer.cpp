@@ -113,7 +113,7 @@ nsRDFXMLSerializer::~nsRDFXMLSerializer()
     }
 }
 
-NS_IMPL_ISUPPORTS(nsRDFXMLSerializer, nsIRDFXMLSerializer, nsIRDFXMLSource)
+NS_IMPL_ISUPPORTS2(nsRDFXMLSerializer, nsIRDFXMLSerializer, nsIRDFXMLSource)
 
 NS_IMETHODIMP
 nsRDFXMLSerializer::Init(nsIRDFDataSource* aDataSource)
@@ -133,6 +133,7 @@ nsRDFXMLSerializer::Init(nsIRDFDataSource* aDataSource)
     prefix = do_GetAtom("NC");
     AddNameSpace(prefix, NS_LITERAL_STRING("http://home.netscape.com/NC-rdf#"));
 
+    mQNames.Init();
     mPrefixID = 0;
 
     return NS_OK;
@@ -371,7 +372,7 @@ nsRDFXMLSerializer::SerializeInlineAssertion(nsIOutputStream* aStream,
                            NS_LITERAL_CSTRING("\n                   "));
     if (NS_FAILED(rv)) return rv;
 
-    const char16_t* value;
+    const PRUnichar* value;
     aValue->GetValueConst(&value);
     NS_ConvertUTF16toUTF8 s(value);
 
@@ -424,7 +425,7 @@ nsRDFXMLSerializer::SerializeChildAssertion(nsIOutputStream* aStream,
         goto no_close_tag;
     }
     else if ((literal = do_QueryInterface(aValue)) != nullptr) {
-        const char16_t *value;
+        const PRUnichar *value;
         literal->GetValueConst(&value);
         NS_ConvertUTF16toUTF8 s(value);
 
@@ -515,12 +516,12 @@ nsRDFXMLSerializer::SerializeProperty(nsIOutputStream* aStream,
         if (!needsChild) {
             assertions->HasMoreElements(&needsChild);
             if (!needsChild) {
-                const char16_t* literalVal = nullptr;
+                const PRUnichar* literalVal = nullptr;
                 literal->GetValueConst(&literalVal);
                 if (literalVal) {
                     for (; *literalVal; literalVal++) {
-                        if (*literalVal == char16_t('\n') ||
-                            *literalVal == char16_t('\r')) {
+                        if (*literalVal == PRUnichar('\n') ||
+                            *literalVal == PRUnichar('\r')) {
                             needsChild = true;
                             break;
                         }
@@ -592,7 +593,7 @@ nsRDFXMLSerializer::SerializeDescription(nsIOutputStream* aStream,
                                sizeof(kRDFDescriptionOpen) - 1);
         if (NS_FAILED(rv)) return rv;
     }
-    if (uri[0] == char16_t('#')) {
+    if (uri[0] == PRUnichar('#')) {
         uri.Cut(0, 1);
         rv = rdf_BlockingWrite(aStream, kIDAttr, sizeof(kIDAttr) - 1);
     }
@@ -758,7 +759,7 @@ static const char kRDFLIOpen[] = "    <RDF:li";
         goto no_close_tag;
     }
     else if ((literal = do_QueryInterface(aMember)) != nullptr) {
-        const char16_t *value;
+        const PRUnichar *value;
         literal->GetValueConst(&value);
 static const char kRDFLIOpenGT[] = ">";
         // close the '<RDF:LI' before adding the literal
@@ -1016,7 +1017,7 @@ private:
     nsRDFXMLSerializer* mParent;
 };
 
-NS_IMPL_ISUPPORTS(QNameCollector, rdfITripleVisitor)
+NS_IMPL_ISUPPORTS1(QNameCollector, rdfITripleVisitor)
 nsresult
 QNameCollector::Visit(nsIRDFNode* aSubject, nsIRDFResource* aPredicate,
                       nsIRDFNode* aObject, bool aTruthValue)

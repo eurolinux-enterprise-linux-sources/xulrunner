@@ -1,3 +1,5 @@
+/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,7 +11,7 @@ module.metadata = {
 };
 
 const { on, once, off, setListeners } = require('./core');
-const { method, chainable } = require('../lang/functional');
+const { method, chain } = require('../lang/functional');
 const { Class } = require('../core/heritage');
 
 /**
@@ -43,7 +45,7 @@ const EventTarget = Class({
    *        console.log('data received: ' + data)
    *      })
    */
-  on: chainable(method(on)),
+  on: chain(method(on)),
   /**
    * Registers an event `listener` that is called once the next time an event
    * of the specified `type` is emitted.
@@ -52,7 +54,7 @@ const EventTarget = Class({
    * @param {Function} listener
    *    The listener function that processes the event.
    */
-  once: chainable(method(once)),
+  once: chain(method(once)),
   /**
    * Removes an event `listener` for the given event `type`.
    * @param {String} type

@@ -25,15 +25,13 @@
 #include "nsXULSortService.h"
 
 #include "mozIStorageService.h"
-#include "nsIChannel.h"
-#include "nsIDocument.h"
 
 //----------------------------------------------------------------------
 //
 // nsXULTemplateResultSetStorage
 //
 
-NS_IMPL_ISUPPORTS(nsXULTemplateResultSetStorage, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS1(nsXULTemplateResultSetStorage, nsISimpleEnumerator)
 
 
 nsXULTemplateResultSetStorage::nsXULTemplateResultSetStorage(mozIStorageStatement* aStatement)
@@ -142,8 +140,8 @@ nsXULTemplateResultSetStorage::FillColumnValues(nsCOMArray<nsIVariant>& aArray)
 // nsXULTemplateQueryProcessorStorage
 //
 
-NS_IMPL_ISUPPORTS(nsXULTemplateQueryProcessorStorage,
-                  nsIXULTemplateQueryProcessor)
+NS_IMPL_ISUPPORTS1(nsXULTemplateQueryProcessorStorage,
+                   nsIXULTemplateQueryProcessor)
 
 
 nsXULTemplateQueryProcessorStorage::nsXULTemplateQueryProcessorStorage() 
@@ -288,9 +286,7 @@ nsXULTemplateQueryProcessorStorage::CompileQuery(nsIXULTemplateBuilder* aBuilder
     nsAutoString sqlQuery;
 
     // Let's get all text nodes (which should be the query) 
-    if (!nsContentUtils::GetNodeTextContent(queryContent, false, sqlQuery)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
+    nsContentUtils::GetNodeTextContent(queryContent, false, sqlQuery);
 
     nsresult rv = mStorageConnection->CreateStatement(NS_ConvertUTF16toUTF8(sqlQuery),
                                                               getter_AddRefs(statement));
@@ -306,9 +302,7 @@ nsXULTemplateQueryProcessorStorage::CompileQuery(nsIXULTemplateBuilder* aBuilder
 
         if (child->NodeInfo()->Equals(nsGkAtoms::param, kNameSpaceID_XUL)) {
             nsAutoString value;
-            if (!nsContentUtils::GetNodeTextContent(child, false, value)) {
-              return NS_ERROR_OUT_OF_MEMORY;
-            }
+            nsContentUtils::GetNodeTextContent(child, false, value);
 
             uint32_t index = parameterCount;
             nsAutoString name, indexValue;

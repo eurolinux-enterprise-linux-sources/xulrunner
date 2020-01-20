@@ -25,9 +25,6 @@ GetThreadPoolLog()
   return sLog;
 }
 #endif
-#ifdef LOG
-#undef LOG
-#endif
 #define LOG(args) PR_LOG(GetThreadPoolLog(), PR_LOG_DEBUG, args)
 
 // DESIGN:
@@ -40,38 +37,34 @@ GetThreadPoolLog()
 #define DEFAULT_IDLE_THREAD_LIMIT 1
 #define DEFAULT_IDLE_THREAD_TIMEOUT PR_SecondsToInterval(60)
 
-NS_IMPL_ADDREF(nsThreadPool)
-NS_IMPL_RELEASE(nsThreadPool)
-NS_IMPL_CLASSINFO(nsThreadPool, nullptr, nsIClassInfo::THREADSAFE,
+NS_IMPL_THREADSAFE_ADDREF(nsThreadPool)
+NS_IMPL_THREADSAFE_RELEASE(nsThreadPool)
+NS_IMPL_CLASSINFO(nsThreadPool, NULL, nsIClassInfo::THREADSAFE,
                   NS_THREADPOOL_CID)
-NS_IMPL_QUERY_INTERFACE_CI(nsThreadPool, nsIThreadPool, nsIEventTarget,
-                           nsIRunnable)
-NS_IMPL_CI_INTERFACE_GETTER(nsThreadPool, nsIThreadPool, nsIEventTarget)
+NS_IMPL_QUERY_INTERFACE3_CI(nsThreadPool, nsIThreadPool, nsIEventTarget,
+                            nsIRunnable)
+NS_IMPL_CI_INTERFACE_GETTER2(nsThreadPool, nsIThreadPool, nsIEventTarget)
 
 nsThreadPool::nsThreadPool()
   : mThreadLimit(DEFAULT_THREAD_LIMIT)
   , mIdleThreadLimit(DEFAULT_IDLE_THREAD_LIMIT)
   , mIdleThreadTimeout(DEFAULT_IDLE_THREAD_TIMEOUT)
   , mIdleCount(0)
-  , mStackSize(nsIThreadManager::DEFAULT_STACK_SIZE)
   , mShutdown(false)
 {
 }
 
 nsThreadPool::~nsThreadPool()
 {
-  // Threads keep a reference to the nsThreadPool until they return from Run()
-  // after removing themselves from mThreads.
-  MOZ_ASSERT(mThreads.IsEmpty());
+  Shutdown();
 }
 
 nsresult
 nsThreadPool::PutEvent(nsIRunnable *event)
 {
   // Avoid spawning a new thread while holding the event queue lock...
-
+ 
   bool spawnThread = false;
-  uint32_t stackSize = 0;
   {
     ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
 
@@ -84,7 +77,6 @@ nsThreadPool::PutEvent(nsIRunnable *event)
       spawnThread = true;
 
     mEvents.PutEvent(event);
-    stackSize = mStackSize;
   }
 
   LOG(("THRD-P(%p) put [spawn=%d]\n", this, spawnThread));
@@ -93,10 +85,9 @@ nsThreadPool::PutEvent(nsIRunnable *event)
 
   nsCOMPtr<nsIThread> thread;
   nsThreadManager::get()->NewThread(0,
-                                    stackSize,
+                                    nsIThreadManager::DEFAULT_STACK_SIZE,
                                     getter_AddRefs(thread));
-  if (NS_WARN_IF(!thread))
-    return NS_ERROR_UNEXPECTED;
+  NS_ENSURE_STATE(thread);
 
   bool killThread = false;
   {
@@ -109,15 +100,7 @@ nsThreadPool::PutEvent(nsIRunnable *event)
   }
   LOG(("THRD-P(%p) put [%p kill=%d]\n", this, thread.get(), killThread));
   if (killThread) {
-    // Pending events are processed on the current thread during
-    // nsIThread::Shutdown() execution, so if nsThreadPool::Dispatch() is called
-    // under caller's lock then deadlock could occur. This happens e.g. in case
-    // of nsStreamCopier. To prevent this situation, dispatch a shutdown event
-    // to the current thread instead of calling nsIThread::Shutdown() directly.
-
-    nsRefPtr<nsIRunnable> r = NS_NewRunnableMethod(thread,
-                                                   &nsIThread::Shutdown);
-    NS_DispatchToCurrentThread(r);
+    thread->Shutdown();
   } else {
     thread->Dispatch(this, NS_DISPATCH_NORMAL);
   }
@@ -229,14 +212,12 @@ nsThreadPool::Dispatch(nsIRunnable *event, uint32_t flags)
 {
   LOG(("THRD-P(%p) dispatch [%p %x]\n", this, event, flags));
 
-  if (NS_WARN_IF(mShutdown))
-    return NS_ERROR_NOT_AVAILABLE;
+  NS_ENSURE_STATE(!mShutdown);
 
   if (flags & DISPATCH_SYNC) {
     nsCOMPtr<nsIThread> thread;
     nsThreadManager::get()->GetCurrentThread(getter_AddRefs(thread));
-    if (NS_WARN_IF(!thread))
-      return NS_ERROR_NOT_AVAILABLE;
+    NS_ENSURE_STATE(thread);
 
     nsRefPtr<nsThreadSyncDispatch> wrapper =
         new nsThreadSyncDispatch(thread, event);
@@ -254,14 +235,10 @@ nsThreadPool::Dispatch(nsIRunnable *event, uint32_t flags)
 NS_IMETHODIMP
 nsThreadPool::IsOnCurrentThread(bool *result)
 {
-  ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
-  nsIThread* thread = NS_GetCurrentThread();
-  for (uint32_t i = 0; i < static_cast<uint32_t>(mThreads.Count()); ++i) {
-    if (mThreads[i] == thread) {
-      *result = true;
-      return NS_OK;
-    }
-  }
+  // No one should be calling this method.  If this assertion gets hit, then we
+  // need to think carefully about what this method should be returning.
+  NS_NOTREACHED("implement me");
+
   *result = false;
   return NS_OK;
 }
@@ -355,22 +332,6 @@ nsThreadPool::SetIdleThreadTimeout(uint32_t value)
   if (mIdleThreadTimeout < oldTimeout && mIdleCount > 0) {
     mon.NotifyAll();  // wake up threads so they observe this change
   }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsThreadPool::GetThreadStackSize(uint32_t* value)
-{
-  ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
-  *value = mStackSize;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsThreadPool::SetThreadStackSize(uint32_t value)
-{
-  ReentrantMonitorAutoEnter mon(mEvents.GetReentrantMonitor());
-  mStackSize = value;
   return NS_OK;
 }
 

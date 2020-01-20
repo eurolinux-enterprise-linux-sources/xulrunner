@@ -15,12 +15,11 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Map)
 namespace mozilla {
 namespace dom {
 
-HTMLMapElement::HTMLMapElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLMapElement::HTMLMapElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
+  SetIsDOMBinding();
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLMapElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLMapElement,
                                                   nsGenericHTMLElement)
@@ -33,8 +32,10 @@ NS_IMPL_RELEASE_INHERITED(HTMLMapElement, Element)
 
 // QueryInterface implementation for HTMLMapElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLMapElement)
-  NS_INTERFACE_TABLE_INHERITED(HTMLMapElement, nsIDOMHTMLMapElement)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLMapElement, nsIDOMHTMLMapElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLMapElement)
 
@@ -67,9 +68,9 @@ NS_IMPL_STRING_ATTR(HTMLMapElement, Name, name)
 
 
 JSObject*
-HTMLMapElement::WrapNode(JSContext* aCx)
+HTMLMapElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLMapElementBinding::Wrap(aCx, this);
+  return HTMLMapElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

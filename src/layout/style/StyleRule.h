@@ -12,13 +12,15 @@
 #define mozilla_css_StyleRule_h__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
+
+#include "mozilla/Attributes.h"
 #include "mozilla/css/Rule.h"
 
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsCSSPseudoElements.h"
 #include "nsCSSPseudoClasses.h"
+#include "nsAutoPtr.h"
 
 class nsIAtom;
 class nsCSSStyleSheet;
@@ -34,7 +36,7 @@ public:
   /** Do a deep clone.  Should be used only on the first in the linked list. */
   nsAtomList* Clone() const { return Clone(true); }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
   nsCOMPtr<nsIAtom> mAtom;
   nsAtomList*       mNext;
@@ -48,7 +50,7 @@ private:
 struct nsPseudoClassList {
 public:
   nsPseudoClassList(nsCSSPseudoClasses::Type aType);
-  nsPseudoClassList(nsCSSPseudoClasses::Type aType, const char16_t *aString);
+  nsPseudoClassList(nsCSSPseudoClasses::Type aType, const PRUnichar *aString);
   nsPseudoClassList(nsCSSPseudoClasses::Type aType, const int32_t *aIntPair);
   nsPseudoClassList(nsCSSPseudoClasses::Type aType,
                     nsCSSSelectorList *aSelectorList /* takes ownership */);
@@ -57,7 +59,7 @@ public:
   /** Do a deep clone.  Should be used only on the first in the linked list. */
   nsPseudoClassList* Clone() const { return Clone(true); }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
   union {
     // For a given value of mType, we have either:
@@ -70,7 +72,7 @@ public:
     //   d. a selector list, which means mSelectors is non-null
     //      (if nsCSSPseudoClasses::HasSelectorListArg(mType))
     void*           mMemory; // mString and mNumbers use NS_Alloc/NS_Free
-    char16_t*      mString;
+    PRUnichar*      mString;
     int32_t*        mNumbers;
     nsCSSSelectorList* mSelectors;
   } u;
@@ -133,7 +135,7 @@ public:
   void AddID(const nsString& aID);
   void AddClass(const nsString& aClass);
   void AddPseudoClass(nsCSSPseudoClasses::Type aType);
-  void AddPseudoClass(nsCSSPseudoClasses::Type aType, const char16_t* aString);
+  void AddPseudoClass(nsCSSPseudoClasses::Type aType, const PRUnichar* aString);
   void AddPseudoClass(nsCSSPseudoClasses::Type aType, const int32_t* aIntPair);
   // takes ownership of aSelectorList
   void AddPseudoClass(nsCSSPseudoClasses::Type aType,
@@ -141,7 +143,7 @@ public:
   void AddAttribute(int32_t aNameSpace, const nsString& aAttr);
   void AddAttribute(int32_t aNameSpace, const nsString& aAttr, uint8_t aFunc, 
                     const nsString& aValue, bool aCaseSensitive);
-  void SetOperator(char16_t aOperator);
+  void SetOperator(PRUnichar aOperator);
 
   inline bool HasTagSelector() const {
     return !!mCasedTag;
@@ -187,7 +189,7 @@ public:
     mPseudoType = static_cast<int16_t>(aType);
   }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
   // For case-sensitive documents, mLowercaseTag is the same as mCasedTag,
   // but in case-insensitive documents (HTML) mLowercaseTag is lowercase.
@@ -203,7 +205,7 @@ public:
   nsCSSSelector*  mNegations;
   nsCSSSelector*  mNext;
   int32_t         mNameSpace;
-  char16_t       mOperator;
+  PRUnichar       mOperator;
 private:
   // int16_t to make sure it packs well with mOperator
   int16_t        mPseudoType;
@@ -228,12 +230,12 @@ struct nsCSSSelectorList {
    * Create a new selector and push it onto the beginning of |mSelectors|,
    * setting its |mNext| to the current value of |mSelectors|.  If there is an
    * earlier selector, set its |mOperator| to |aOperator|; else |aOperator|
-   * must be char16_t(0).
+   * must be PRUnichar(0).
    * Returns the new selector.
    * The list owns the new selector.
    * The caller is responsible for updating |mWeight|.
    */
-  nsCSSSelector* AddSelector(char16_t aOperator);
+  nsCSSSelector* AddSelector(PRUnichar aOperator);
 
   /**
    * Should be used only on the first in the list
@@ -245,7 +247,7 @@ struct nsCSSSelectorList {
    */
   nsCSSSelectorList* Clone() const { return Clone(true); }
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
   nsCSSSelector*     mSelectors;
   int32_t            mWeight;
@@ -363,7 +365,7 @@ public:
   virtual void List(FILE* out = stdout, int32_t aIndent = 0) const MOZ_OVERRIDE;
 #endif
 
-  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
 
 private:
   ~StyleRule();
@@ -382,9 +384,9 @@ private:
   StyleRule& operator=(const StyleRule& aCopy) MOZ_DELETE;
 };
 
-NS_DEFINE_STATIC_IID_ACCESSOR(StyleRule, NS_CSS_STYLE_RULE_IMPL_CID)
-
 } // namespace css
 } // namespace mozilla
+
+NS_DEFINE_STATIC_IID_ACCESSOR(mozilla::css::StyleRule, NS_CSS_STYLE_RULE_IMPL_CID)
 
 #endif /* mozilla_css_StyleRule_h__ */

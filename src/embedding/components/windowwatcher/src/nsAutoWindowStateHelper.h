@@ -7,19 +7,18 @@
 #define __nsAutoWindowStateHelper_h
 
 #include "nsCOMPtr.h"
-#include "nsPIDOMWindow.h"
 
 /**
  * Helper class for dealing with notifications around opening modal
  * windows.
  */
 
-class nsPIDOMWindow;
+class nsIDOMWindow;
 
 class nsAutoWindowStateHelper
 {
 public:
-  nsAutoWindowStateHelper(nsPIDOMWindow *aWindow);
+  nsAutoWindowStateHelper(nsIDOMWindow *aWindow);
   ~nsAutoWindowStateHelper();
 
   bool DefaultEnabled()
@@ -30,7 +29,8 @@ public:
 protected:
   bool DispatchEventToChrome(const char *aEventName);
 
-  nsCOMPtr<nsPIDOMWindow> mWindow;
+  nsIDOMWindow *mWindow;
+  nsCOMPtr<nsIDOMWindow> mCallerWindow;
   bool mDefaultEnabled;
 };
 

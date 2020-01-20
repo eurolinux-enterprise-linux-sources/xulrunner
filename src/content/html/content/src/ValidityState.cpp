@@ -7,6 +7,7 @@
 #include "mozilla/dom/ValidityStateBinding.h"
 
 #include "nsCycleCollectionParticipant.h"
+#include "nsContentUtils.h"
 
 namespace mozilla {
 namespace dom {
@@ -77,13 +78,6 @@ ValidityState::GetStepMismatch(bool* aStepMismatch)
 }
 
 NS_IMETHODIMP
-ValidityState::GetBadInput(bool* aBadInput)
-{
-  *aBadInput = BadInput();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 ValidityState::GetCustomError(bool* aCustomError)
 {
   *aCustomError = CustomError();
@@ -98,9 +92,9 @@ ValidityState::GetValid(bool* aValid)
 }
 
 JSObject*
-ValidityState::WrapObject(JSContext* aCx)
+ValidityState::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return ValidityStateBinding::Wrap(aCx, this);
+  return ValidityStateBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

@@ -7,22 +7,37 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
+#include "nsIDOMHTMLDataListElement.h"
 #include "nsContentList.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLDataListElement MOZ_FINAL : public nsGenericHTMLElement
+class HTMLDataListElement : public nsGenericHTMLElement,
+                            public nsIDOMHTMLDataListElement
 {
 public:
-  HTMLDataListElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  HTMLDataListElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
+    SetIsDOMBinding();
   }
   virtual ~HTMLDataListElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLDataListElement
+  NS_DECL_NSIDOMHTMLDATALISTELEMENT
 
   nsContentList* Options()
   {
@@ -42,8 +57,11 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLDataListElement,
                                            nsGenericHTMLElement)
+
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   // <option>'s list inside the datalist element.
   nsRefPtr<nsContentList> mOptions;

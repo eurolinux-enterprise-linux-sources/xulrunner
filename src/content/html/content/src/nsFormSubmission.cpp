@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Util.h"
+
 #include "nsFormSubmission.h"
 
 #include "nsCOMPtr.h"
@@ -25,6 +27,7 @@
 #include "nsIURL.h"
 #include "nsNetUtil.h"
 #include "nsLinebreakConverter.h"
+#include "nsICharsetConverterManager.h"
 #include "nsEscape.h"
 #include "nsUnicharUtils.h"
 #include "nsIMultiplexInputStream.h"
@@ -45,10 +48,10 @@ using mozilla::dom::EncodingUtils;
 static void
 SendJSWarning(nsIDocument* aDocument,
               const char* aWarningName,
-              const char16_t** aWarningArgs, uint32_t aWarningArgsLen)
+              const PRUnichar** aWarningArgs, uint32_t aWarningArgsLen)
 {
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  NS_LITERAL_CSTRING("HTML"), aDocument,
+                                  "HTML", aDocument,
                                   nsContentUtils::eFORMS_PROPERTIES,
                                   aWarningName,
                                   aWarningArgs, aWarningArgsLen);
@@ -232,7 +235,7 @@ HandleMailtoSubject(nsCString& aPath) {
                                          "brandShortName", brandName);
     if (NS_FAILED(rv))
       return;
-    const char16_t *formatStrings[] = { brandName.get() };
+    const PRUnichar *formatStrings[] = { brandName.get() };
     nsXPIDLString subjectStr;
     rv = nsContentUtils::FormatLocalizedString(
                                            nsContentUtils::eFORMS_PROPERTIES,
@@ -354,7 +357,7 @@ nsresult
 nsFSURLEncoded::URLEncode(const nsAString& aStr, nsCString& aEncoded)
 {
   // convert to CRLF breaks
-  char16_t* convertedBuf =
+  PRUnichar* convertedBuf =
     nsLinebreakConverter::ConvertUnicharLineBreaks(PromiseFlatString(aStr).get(),
                                                    nsLinebreakConverter::eLinebreakAny,
                                                    nsLinebreakConverter::eLinebreakNet);
@@ -467,14 +470,6 @@ nsFSMultipartFormData::AddNameFilePair(const nsAString& aName,
 
       if (filename16.IsEmpty()) {
         filename16.AssignLiteral("blob");
-      } else {
-        nsAutoString filepath16;
-        rv = file->GetPath(filepath16);
-        NS_ENSURE_SUCCESS(rv, rv);
-        if (!filepath16.IsEmpty()) {
-          // File.path includes trailing "/"
-          filename16 = filepath16 + filename16;
-        }
       }
 
       rv = EncodeVal(filename16, filename, true);
@@ -561,7 +556,7 @@ nsFSMultipartFormData::GetEncodedSubmission(nsIURI* aURI,
   uint64_t unused;
   mimeStream->SetData(GetSubmissionBody(&unused));
 
-  mimeStream.forget(aPostDataStream);
+  *aPostDataStream = mimeStream.forget().get();
 
   return NS_OK;
 }
@@ -712,7 +707,7 @@ nsEncodingFormSubmission::nsEncodingFormSubmission(const nsACString& aCharset,
 
   if (!(charset.EqualsLiteral("UTF-8") || charset.EqualsLiteral("gb18030"))) {
     NS_ConvertUTF8toUTF16 charsetUtf16(charset);
-    const char16_t* charsetPtr = charsetUtf16.get();
+    const PRUnichar* charsetPtr = charsetUtf16.get();
     SendJSWarning(aOriginatingElement ? aOriginatingElement->GetOwnerDocument()
                                       : nullptr,
                   "CannotEncodeAllUnicode",
@@ -784,7 +779,7 @@ GetSubmitCharset(nsGenericHTMLElement* aForm,
     int32_t spPos=0;
     // get charset from charsets one by one
     do {
-      spPos = acceptCharsetValue.FindChar(char16_t(' '), offset);
+      spPos = acceptCharsetValue.FindChar(PRUnichar(' '), offset);
       int32_t cnt = ((-1==spPos)?(charsetLen-offset):(spPos-offset));
       if (cnt > 0) {
         nsAutoString uCharset;
@@ -874,7 +869,7 @@ GetSubmissionFromForm(nsGenericHTMLElement* aForm,
       } else {
         aForm->GetAttr(kNameSpaceID_None, nsGkAtoms::enctype, enctypeStr);
       }
-      const char16_t* enctypeStrPtr = enctypeStr.get();
+      const PRUnichar* enctypeStrPtr = enctypeStr.get();
       SendJSWarning(doc, "ForgotPostWarning",
                     &enctypeStrPtr, 1);
     }

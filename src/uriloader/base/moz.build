@@ -16,20 +16,17 @@ XPIDL_SOURCES += [
     'nsIWebProgressListener2.idl',
 ]
 
-XPIDL_MODULE = 'uriloader'
+MODULE = 'uriloader'
 
 EXPORTS += [
     'nsDocLoader.h',
     'nsURILoader.h',
 ]
 
-UNIFIED_SOURCES += [
+CPP_SOURCES += [
     'nsDocLoader.cpp',
     'nsURILoader.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'uriloaderbase_s'
 
-MSVC_ENABLE_PGO = True
-
-FINAL_LIBRARY = 'xul'

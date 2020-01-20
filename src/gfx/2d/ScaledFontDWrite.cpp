@@ -213,7 +213,7 @@ DoGrayscale(IDWriteFontFace *aDWFace, Float ppem)
   return true;
 }
 
-IDWriteFontFileLoader* DWriteFontFileLoader::mInstance = nullptr;
+IDWriteFontFileLoader* DWriteFontFileLoader::mInstance = NULL;
 
 HRESULT STDMETHODCALLTYPE
 DWriteFontFileLoader::CreateStreamFromKey(const void *fontFileReferenceKey, 
@@ -275,7 +275,7 @@ DWriteFontFileStream::ReadFileFragment(const void **fragmentStart,
 
   // We should be alive for the duration of this.
   *fragmentStart = &mData[index];
-  *fragmentContext = nullptr;
+  *fragmentContext = NULL;
   return S_OK;
 }
 
@@ -309,7 +309,7 @@ ScaledFontDWrite::ScaledFontDWrite(uint8_t *aData, uint32_t aSize,
 TemporaryRef<Path>
 ScaledFontDWrite::GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget *aTarget)
 {
-  if (aTarget->GetType() != BackendType::DIRECT2D) {
+  if (aTarget->GetType() != BACKEND_DIRECT2D) {
     return ScaledFontBase::GetPathForGlyphs(aBuffer, aTarget);
   }
 
@@ -324,13 +324,9 @@ ScaledFontDWrite::GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget 
 }
 
 void
-ScaledFontDWrite::CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, BackendType aBackendType, const Matrix *aTransformHint)
+ScaledFontDWrite::CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder)
 {
-  if (aBackendType != BackendType::DIRECT2D) {
-    ScaledFontBase::CopyGlyphsToBuilder(aBuffer, aBuilder, aBackendType, aTransformHint);
-    return;
-  }
-
+  // XXX - Check path builder type!
   PathBuilderD2D *pathBuilderD2D =
     static_cast<PathBuilderD2D*>(aBuilder);
 
@@ -409,23 +405,23 @@ ScaledFontDWrite::GetFontFileData(FontFileDataOutput aDataCallback, void *aBaton
 AntialiasMode
 ScaledFontDWrite::GetDefaultAAMode()
 {
-  AntialiasMode defaultMode = AntialiasMode::SUBPIXEL;
+  AntialiasMode defaultMode = AA_SUBPIXEL;
 
   switch (GetSystemTextQuality()) {
   case CLEARTYPE_QUALITY:
-    defaultMode = AntialiasMode::SUBPIXEL;
+    defaultMode = AA_SUBPIXEL;
     break;
   case ANTIALIASED_QUALITY:
-    defaultMode = AntialiasMode::GRAY;
+    defaultMode = AA_GRAY;
     break;
   case DEFAULT_QUALITY:
-    defaultMode = AntialiasMode::NONE;
+    defaultMode = AA_NONE;
     break;
   }
 
-  if (defaultMode == AntialiasMode::GRAY) {
+  if (defaultMode == AA_GRAY) {
     if (!DoGrayscale(mFontFace, mSize)) {
-      defaultMode = AntialiasMode::NONE;
+      defaultMode = AA_NONE;
     }
   }
   return defaultMode;

@@ -5,7 +5,10 @@
 
 /* base class for rendering objects that do not have child lists */
 
+#include "nsCOMPtr.h"
 #include "nsLeafFrame.h"
+#include "nsContainerFrame.h"
+#include "nsHTMLParts.h"
 #include "nsPresContext.h"
 
 nsLeafFrame::~nsLeafFrame()
@@ -42,7 +45,7 @@ nsLeafFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
   return nsSize(GetIntrinsicWidth(), GetIntrinsicHeight());
 }
 
-nsresult
+NS_IMETHODIMP
 nsLeafFrame::Reflow(nsPresContext* aPresContext,
                     nsHTMLReflowMetrics& aMetrics,
                     const nsHTMLReflowState& aReflowState,
@@ -51,7 +54,7 @@ nsLeafFrame::Reflow(nsPresContext* aPresContext,
   DO_GLOBAL_REFLOW_COUNT("nsLeafFrame");
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("enter nsLeafFrame::Reflow: aMaxSize=%d,%d",
-                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+                  aReflowState.availableWidth, aReflowState.availableHeight));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
@@ -61,7 +64,7 @@ nsLeafFrame::Reflow(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 nsLeafFrame::DoReflow(nsPresContext* aPresContext,
                       nsHTMLReflowMetrics& aMetrics,
                       const nsHTMLReflowState& aReflowState,
@@ -74,15 +77,15 @@ nsLeafFrame::DoReflow(nsPresContext* aPresContext,
                "Shouldn't have unconstrained stuff here "
                "thanks to ComputeAutoSize");  
 
-  aMetrics.Width() = aReflowState.ComputedWidth();
-  aMetrics.Height() = aReflowState.ComputedHeight();
+  aMetrics.width = aReflowState.ComputedWidth();
+  aMetrics.height = aReflowState.ComputedHeight();
   
   AddBordersAndPadding(aReflowState, aMetrics);
   aStatus = NS_FRAME_COMPLETE;
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                  ("exit nsLeafFrame::DoReflow: size=%d,%d",
-                  aMetrics.Width(), aMetrics.Height()));
+                  aMetrics.width, aMetrics.height));
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 
   aMetrics.SetOverflowAreasToDesiredBounds();
@@ -103,16 +106,16 @@ void
 nsLeafFrame::AddBordersAndPadding(const nsHTMLReflowState& aReflowState,
                                   nsHTMLReflowMetrics& aMetrics)
 {
-  aMetrics.Width() += aReflowState.ComputedPhysicalBorderPadding().LeftRight();
-  aMetrics.Height() += aReflowState.ComputedPhysicalBorderPadding().TopBottom();
+  aMetrics.width += aReflowState.mComputedBorderPadding.LeftRight();
+  aMetrics.height += aReflowState.mComputedBorderPadding.TopBottom();
 }
 
 void
 nsLeafFrame::SizeToAvailSize(const nsHTMLReflowState& aReflowState,
                              nsHTMLReflowMetrics& aDesiredSize)
 {
-  aDesiredSize.Width() = aReflowState.AvailableWidth(); // FRAME
-  aDesiredSize.Height() = aReflowState.AvailableHeight();
+  aDesiredSize.width  = aReflowState.availableWidth; // FRAME
+  aDesiredSize.height = aReflowState.availableHeight;
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aDesiredSize);  
 }

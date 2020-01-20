@@ -13,8 +13,6 @@
 #include "Accessible-inl.h"
 #include "IUnknownImpl.h"
 
-#include "mozilla/FloatingPoint.h"
-
 using namespace mozilla::a11y;
 
 // IUnknown
@@ -22,9 +20,6 @@ using namespace mozilla::a11y;
 STDMETHODIMP
 ia2AccessibleValue::QueryInterface(REFIID iid, void** ppv)
 {
-  if (!ppv)
-    return E_INVALIDARG;
-
   *ppv = nullptr;
 
   if (IID_IAccessibleValue == iid) {
@@ -48,18 +43,16 @@ ia2AccessibleValue::get_currentValue(VARIANT* aCurrentValue)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  if (!aCurrentValue)
-    return E_INVALIDARG;
-
   VariantInit(aCurrentValue);
 
   AccessibleWrap* valueAcc = static_cast<AccessibleWrap*>(this);
   if (valueAcc->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  double currentValue = valueAcc->CurValue();
-  if (IsNaN(currentValue))
-    return S_FALSE;
+  double currentValue = 0;
+  nsresult rv = valueAcc->GetCurrentValue(&currentValue);
+  if (NS_FAILED(rv))
+    return GetHRESULT(rv);
 
   aCurrentValue->vt = VT_R8;
   aCurrentValue->dblVal = currentValue;
@@ -80,7 +73,8 @@ ia2AccessibleValue::setCurrentValue(VARIANT aValue)
   if (aValue.vt != VT_R8)
     return E_INVALIDARG;
 
-  return valueAcc->SetCurValue(aValue.dblVal) ? S_OK : E_FAIL;
+  nsresult rv = valueAcc->SetCurrentValue(aValue.dblVal);
+  return GetHRESULT(rv);
 
   A11Y_TRYBLOCK_END
 }
@@ -90,18 +84,16 @@ ia2AccessibleValue::get_maximumValue(VARIANT* aMaximumValue)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  if (!aMaximumValue)
-    return E_INVALIDARG;
-
   VariantInit(aMaximumValue);
 
   AccessibleWrap* valueAcc = static_cast<AccessibleWrap*>(this);
   if (valueAcc->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  double maximumValue = valueAcc->MaxValue();
-  if (IsNaN(maximumValue))
-    return S_FALSE;
+  double maximumValue = 0;
+  nsresult rv = valueAcc->GetMaximumValue(&maximumValue);
+  if (NS_FAILED(rv))
+    return GetHRESULT(rv);
 
   aMaximumValue->vt = VT_R8;
   aMaximumValue->dblVal = maximumValue;
@@ -115,18 +107,16 @@ ia2AccessibleValue::get_minimumValue(VARIANT* aMinimumValue)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  if (!aMinimumValue)
-    return E_INVALIDARG;
-
   VariantInit(aMinimumValue);
 
   AccessibleWrap* valueAcc = static_cast<AccessibleWrap*>(this);
   if (valueAcc->IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  double minimumValue = valueAcc->MinValue();
-  if (IsNaN(minimumValue))
-    return S_FALSE;
+  double minimumValue = 0;
+  nsresult rv = valueAcc->GetMinimumValue(&minimumValue);
+  if (NS_FAILED(rv))
+    return GetHRESULT(rv);
 
   aMinimumValue->vt = VT_R8;
   aMinimumValue->dblVal = minimumValue;

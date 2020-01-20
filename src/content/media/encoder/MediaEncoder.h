@@ -51,10 +51,9 @@ class MediaEncoder : public MediaStreamListener
 {
 public :
   enum {
-    ENCODE_METADDATA,
+    ENCODE_HEADER,
     ENCODE_TRACK,
     ENCODE_DONE,
-    ENCODE_ERROR,
   };
 
   MediaEncoder(ContainerWriter* aWriter,
@@ -64,9 +63,8 @@ public :
     : mWriter(aWriter)
     , mAudioEncoder(aAudioEncoder)
     , mVideoEncoder(aVideoEncoder)
-    , mStartTime(TimeStamp::Now())
     , mMIMEType(aMIMEType)
-    , mState(MediaEncoder::ENCODE_METADDATA)
+    , mState(MediaEncoder::ENCODE_HEADER)
     , mShutdown(false)
   {}
 
@@ -92,8 +90,8 @@ public :
    * to create the encoder. For now, default aMIMEType to "audio/ogg" and use
    * Ogg+Opus if it is empty.
    */
-  static already_AddRefed<MediaEncoder> CreateEncoder(const nsAString& aMIMEType,
-                                                      uint8_t aTrackTypes = ContainerWriter::CREATE_AUDIO_TRACK);
+  static already_AddRefed<MediaEncoder> CreateEncoder(const nsAString& aMIMEType);
+
   /**
    * Encodes the raw track data and returns the final container data. Assuming
    * it is called on a single worker thread. The buffer of container data is
@@ -121,43 +119,15 @@ public :
     if (mAudioEncoder) {
       mAudioEncoder->NotifyCancel();
     }
-    if (mVideoEncoder) {
-      mVideoEncoder->NotifyCancel();
-    }
   }
-
-  bool HasError()
-  {
-    return mState == ENCODE_ERROR;
-  }
-
-#ifdef MOZ_WEBM_ENCODER
-  static bool IsWebMEncoderEnabled();
-#endif
-
-#ifdef MOZ_OMX_ENCODER
-  static bool IsOMXEncoderEnabled();
-#endif
 
 private:
-  // Get encoded data from trackEncoder and write to muxer
-  nsresult WriteEncodedDataToMuxer(TrackEncoder *aTrackEncoder);
-  // Get metadata from trackEncoder and copy to muxer
-  nsresult CopyMetadataToMuxer(TrackEncoder* aTrackEncoder);
   nsAutoPtr<ContainerWriter> mWriter;
   nsAutoPtr<AudioTrackEncoder> mAudioEncoder;
   nsAutoPtr<VideoTrackEncoder> mVideoEncoder;
-  TimeStamp mStartTime;
   nsString mMIMEType;
   int mState;
   bool mShutdown;
-  // Get duration from create encoder, for logging purpose
-  double GetEncodeTimeStamp()
-  {
-    TimeDuration decodeTime;
-    decodeTime = TimeStamp::Now() - mStartTime;
-    return decodeTime.ToMilliseconds();
-  }
 };
 
 }

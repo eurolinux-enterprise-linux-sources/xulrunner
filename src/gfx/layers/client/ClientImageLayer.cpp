@@ -3,20 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ClientLayerManager.h"         // for ClientLayerManager, etc
-#include "ImageContainer.h"             // for AutoLockImage, etc
-#include "ImageLayers.h"                // for ImageLayer
-#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
-#include "mozilla/RefPtr.h"             // for RefPtr
-#include "mozilla/layers/CompositorTypes.h"
-#include "mozilla/layers/ImageClient.h"  // for ImageClient, etc
-#include "mozilla/layers/LayersMessages.h"  // for ImageLayerAttributes, etc
-#include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
-#include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsDebug.h"                    // for NS_ASSERTION
-#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
-#include "nsRegion.h"                   // for nsIntRegion
+#include "ClientLayerManager.h"
+#include "mozilla/layers/LayerTransaction.h"
+#include "mozilla/layers/ImageClient.h"
+#include "ImageContainer.h"
 
 using namespace mozilla::gfx;
 
@@ -27,8 +17,7 @@ class ClientImageLayer : public ImageLayer,
                          public ClientLayer {
 public:
   ClientImageLayer(ClientLayerManager* aLayerManager)
-    : ImageLayer(aLayerManager,
-                 static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
+    : ImageLayer(aLayerManager, static_cast<ClientLayer*>(this))
     , mImageClientTypeContainer(BUFFER_UNKNOWN)
   {
     MOZ_COUNT_CTOR(ClientImageLayer);
@@ -75,10 +64,7 @@ public:
 
   void DestroyBackBuffer()
   {
-    if (mImageClient) {
-      mImageClient->OnDetach();
-      mImageClient = nullptr;
-    }
+    mImageClient = nullptr;
   }
 
   virtual CompositableClient* GetCompositableClient() MOZ_OVERRIDE
@@ -103,18 +89,11 @@ protected:
       return mImageClientTypeContainer;
     }
 
-    RefPtr<gfx::SourceSurface> surface;
-    AutoLockImage autoLock(mContainer, &surface);
+    nsRefPtr<gfxASurface> surface;
+    AutoLockImage autoLock(mContainer, getter_AddRefs(surface));
 
-#ifdef MOZ_WIDGET_GONK
-    // gralloc buffer needs BUFFER_IMAGE_BUFFERED to prevent
-    // the buffer's usage conflict.
-    mImageClientTypeContainer = autoLock.GetImage() ?
-                                  BUFFER_IMAGE_BUFFERED : BUFFER_UNKNOWN;
-#else
     mImageClientTypeContainer = autoLock.GetImage() ?
                                   BUFFER_IMAGE_SINGLE : BUFFER_UNKNOWN;
-#endif
     return mImageClientTypeContainer;
   }
 
@@ -133,23 +112,17 @@ ClientImageLayer::RenderLayer()
      return;
   }
 
-  if (mImageClient) {
-    mImageClient->OnTransaction();
-  }
-
   if (!mImageClient ||
       !mImageClient->UpdateImage(mContainer, GetContentFlags())) {
     CompositableType type = GetImageClientType();
     if (type == BUFFER_UNKNOWN) {
       return;
     }
-    TextureFlags flags = TEXTURE_FRONT;
-    if (mDisallowBigImage) {
-      flags |= TEXTURE_DISALLOW_BIGIMAGE;
-    }
     mImageClient = ImageClient::CreateImageClient(type,
-                                                  ClientManager()->AsShadowForwarder(),
-                                                  flags);
+                                                  ClientManager(),
+                                                  mForceSingleTile
+                                                    ? ForceSingleTile
+                                                    : 0);
     if (type == BUFFER_BRIDGE) {
       static_cast<ImageClientBridge*>(mImageClient.get())->SetLayer(this);
     }
@@ -159,14 +132,11 @@ ClientImageLayer::RenderLayer()
     }
     if (HasShadow() && !mContainer->IsAsync()) {
       mImageClient->Connect();
-      ClientManager()->AsShadowForwarder()->Attach(mImageClient, this);
+      ClientManager()->Attach(mImageClient, this);
     }
     if (!mImageClient->UpdateImage(mContainer, GetContentFlags())) {
       return;
     }
-  }
-  if (mImageClient) {
-    mImageClient->OnTransaction();
   }
   ClientManager()->Hold(this);
 }

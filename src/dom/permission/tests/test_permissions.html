@@ -19,8 +19,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=815105
 var gData = [
   {
     perm: ["permissions"],
+    // nsIDOMPermissionSettings isn't include in Android builds yet
+    // exception on accessing Ci.nsIDOMPermissionSettings
+    skip: ["Android"],
     obj: "mozPermissionSettings",
-    webidl: "PermissionSettings",
+    idl: "nsIDOMPermissionSettings",
     settings: [["dom.mozPermissionSettings.enabled", true]],
   },
 ]

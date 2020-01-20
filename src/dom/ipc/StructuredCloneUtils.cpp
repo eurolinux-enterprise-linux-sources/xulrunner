@@ -13,9 +13,8 @@
 
 #include "nsContentUtils.h"
 #include "nsJSEnvironment.h"
-#include "MainThreadUtils.h"
+#include "nsThreadUtils.h"
 #include "StructuredCloneTags.h"
-#include "jsapi.h"
 
 using namespace mozilla::dom;
 
@@ -49,14 +48,20 @@ Read(JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
       // File should not be mutable.
       nsCOMPtr<nsIMutable> mutableFile = do_QueryInterface(file);
       bool isMutable;
-      MOZ_ASSERT(NS_SUCCEEDED(mutableFile->GetMutable(&isMutable)));
-      MOZ_ASSERT(!isMutable);
+      if (NS_FAILED(mutableFile->GetMutable(&isMutable))) {
+        MOZ_NOT_REACHED("GetMutable failed!");
+      }
+      else {
+        MOZ_ASSERT(!isMutable);
+      }
     }
 #endif
 
     JS::Rooted<JS::Value> wrappedFile(aCx);
-    nsresult rv = nsContentUtils::WrapNative(aCx, file, &NS_GET_IID(nsIDOMFile),
-                                             &wrappedFile);
+    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    nsresult rv = nsContentUtils::WrapNative(aCx, global, file,
+                                             &NS_GET_IID(nsIDOMFile),
+                                             wrappedFile.address());
     if (NS_FAILED(rv)) {
       Error(aCx, nsIDOMDOMException::DATA_CLONE_ERR);
       return nullptr;
@@ -76,14 +81,20 @@ Read(JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
       // Blob should not be mutable.
       nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(blob);
       bool isMutable;
-      MOZ_ASSERT(NS_SUCCEEDED(mutableBlob->GetMutable(&isMutable)));
-      MOZ_ASSERT(!isMutable);
+      if (NS_FAILED(mutableBlob->GetMutable(&isMutable))) {
+        MOZ_NOT_REACHED("GetMutable failed!");
+      }
+      else {
+        MOZ_ASSERT(!isMutable);
+      }
     }
 #endif
 
     JS::Rooted<JS::Value> wrappedBlob(aCx);
-    nsresult rv = nsContentUtils::WrapNative(aCx, blob, &NS_GET_IID(nsIDOMBlob),
-                                             &wrappedBlob);
+    JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+    nsresult rv = nsContentUtils::WrapNative(aCx, global, blob,
+                                             &NS_GET_IID(nsIDOMBlob),
+                                             wrappedBlob.address());
     if (NS_FAILED(rv)) {
       Error(aCx, nsIDOMDOMException::DATA_CLONE_ERR);
       return nullptr;
@@ -95,7 +106,7 @@ Read(JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
   return NS_DOMReadStructuredClone(aCx, aReader, aTag, aData, nullptr);
 }
 
-bool
+JSBool
 Write(JSContext* aCx, JSStructuredCloneWriter* aWriter,
       JS::Handle<JSObject*> aObj, void* aClosure)
 {
@@ -148,10 +159,7 @@ Write(JSContext* aCx, JSStructuredCloneWriter* aWriter,
 JSStructuredCloneCallbacks gCallbacks = {
   Read,
   Write,
-  Error,
-  nullptr,
-  nullptr,
-  nullptr
+  Error
 };
 
 } // anonymous namespace
@@ -161,8 +169,7 @@ namespace dom {
 
 bool
 ReadStructuredClone(JSContext* aCx, uint64_t* aData, size_t aDataLength,
-                    const StructuredCloneClosure& aClosure,
-                    JS::MutableHandle<JS::Value> aClone)
+                    const StructuredCloneClosure& aClosure, JS::Value* aClone)
 {
   void* closure = &const_cast<StructuredCloneClosure&>(aClosure);
   return !!JS_ReadStructuredClone(aCx, aData, aDataLength,
@@ -171,7 +178,7 @@ ReadStructuredClone(JSContext* aCx, uint64_t* aData, size_t aDataLength,
 }
 
 bool
-WriteStructuredClone(JSContext* aCx, JS::Handle<JS::Value> aSource,
+WriteStructuredClone(JSContext* aCx, const JS::Value& aSource,
                      JSAutoStructuredCloneBuffer& aBuffer,
                      StructuredCloneClosure& aClosure)
 {

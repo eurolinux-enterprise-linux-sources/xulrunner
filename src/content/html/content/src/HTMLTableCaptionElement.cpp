@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Util.h"
+
 #include "mozilla/dom/HTMLTableCaptionElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsMappedAttributes.h"
@@ -19,13 +21,21 @@ HTMLTableCaptionElement::~HTMLTableCaptionElement()
 }
 
 JSObject*
-HTMLTableCaptionElement::WrapNode(JSContext *aCx)
+HTMLTableCaptionElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLTableCaptionElementBinding::Wrap(aCx, this);
+  return HTMLTableCaptionElementBinding::Wrap(aCx, aScope, this);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLTableCaptionElement, nsGenericHTMLElement,
-                            nsIDOMHTMLTableCaptionElement)
+NS_IMPL_ADDREF_INHERITED(HTMLTableCaptionElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLTableCaptionElement, Element)
+
+// QueryInterface implementation for HTMLTableCaptionElement
+NS_INTERFACE_TABLE_HEAD(HTMLTableCaptionElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLTableCaptionElement,
+                                nsIDOMHTMLTableCaptionElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableCaptionElement)
 
@@ -53,9 +63,8 @@ HTMLTableCaptionElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-void
-HTMLTableCaptionElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                               nsRuleData* aData)
+static 
+void MapAttributesIntoRule(const nsMappedAttributes* aAttributes, nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(TableBorder)) {
     nsCSSValue* captionSide = aData->ValueForCaptionSide();

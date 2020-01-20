@@ -3,224 +3,199 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ipc/AutoOpenSurface.h"
 #include "ImageHost.h"
-#include "LayersLogging.h"              // for AppendToString
-#include "composite/CompositableHost.h"  // for CompositableHost, etc
-#include "ipc/IPCMessageUtils.h"        // for null_t
-#include "mozilla/layers/Compositor.h"  // for Compositor
-#include "mozilla/layers/Effects.h"     // for TexturedEffect, Effect, etc
-#include "nsAString.h"
-#include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
-#include "nsPrintfCString.h"            // for nsPrintfCString
-#include "nsString.h"                   // for nsAutoCString
 
-class nsIntRegion;
+#include "mozilla/layers/Effects.h"
+#include "LayersLogging.h"
+#include "nsPrintfCString.h"
 
 namespace mozilla {
-namespace gfx {
-class Matrix4x4;
-}
 
 using namespace gfx;
 
 namespace layers {
 
-class ISurfaceAllocator;
-
-ImageHost::ImageHost(const TextureInfo& aTextureInfo)
-  : CompositableHost(aTextureInfo)
-  , mFrontBuffer(nullptr)
-  , mHasPictureRect(false)
-{}
-
-ImageHost::~ImageHost() {}
-
 void
-ImageHost::UseTextureHost(TextureHost* aTexture)
-{
-  CompositableHost::UseTextureHost(aTexture);
-  mFrontBuffer = aTexture;
-}
-
-void
-ImageHost::RemoveTextureHost(TextureHost* aTexture)
-{
-  CompositableHost::RemoveTextureHost(aTexture);
-  if (aTexture && mFrontBuffer == aTexture) {
-    aTexture->SetCompositableBackendSpecificData(nullptr);
-    mFrontBuffer = nullptr;
+ImageHostSingle::SetCompositor(Compositor* aCompositor) {
+  CompositableHost::SetCompositor(aCompositor);
+  if (mTextureHost) {
+    mTextureHost->SetCompositor(aCompositor);
   }
 }
 
-TextureHost*
-ImageHost::GetAsTextureHost()
+void
+ImageHostSingle::EnsureTextureHost(TextureIdentifier aTextureId,
+                                   const SurfaceDescriptor& aSurface,
+                                   ISurfaceAllocator* aAllocator,
+                                   const TextureInfo& aTextureInfo)
 {
-  return mFrontBuffer;
+  if (mTextureHost &&
+      mTextureHost->GetBuffer() &&
+      mTextureHost->GetBuffer()->type() == aSurface.type()) {
+    return;
+  }
+
+  MakeTextureHost(aTextureId,
+                  aSurface,
+                  aAllocator,
+                  aTextureInfo);
 }
 
 void
-ImageHost::Composite(EffectChain& aEffectChain,
-                     float aOpacity,
-                     const gfx::Matrix4x4& aTransform,
-                     const gfx::Filter& aFilter,
-                     const gfx::Rect& aClipRect,
-                     const nsIntRegion* aVisibleRegion,
-                     TiledLayerProperties* aLayerProperties)
+ImageHostSingle::MakeTextureHost(TextureIdentifier aTextureId,
+                                 const SurfaceDescriptor& aSurface,
+                                 ISurfaceAllocator* aAllocator,
+                                 const TextureInfo& aTextureInfo)
 {
+  mTextureHost = TextureHost::CreateTextureHost(aSurface.type(),
+                                                mTextureInfo.mTextureHostFlags,
+                                                mTextureInfo.mTextureFlags);
+
+  NS_ASSERTION(mTextureHost, "Failed to create texture host");
+
+  Compositor* compositor = GetCompositor();
+  if (compositor && mTextureHost) {
+    mTextureHost->SetCompositor(compositor);
+  }
+}
+
+void
+ImageHostSingle::Composite(EffectChain& aEffectChain,
+                           float aOpacity,
+                           const gfx::Matrix4x4& aTransform,
+                           const gfx::Point& aOffset,
+                           const gfx::Filter& aFilter,
+                           const gfx::Rect& aClipRect,
+                           const nsIntRegion* aVisibleRegion,
+                           TiledLayerProperties* aLayerProperties)
+{
+  if (!mTextureHost) {
+    NS_WARNING("Can't composite an invalid or null TextureHost");
+    return;
+  }
+
+  if (!mTextureHost->IsValid()) {
+    NS_WARNING("Can't composite an invalid TextureHost");
+    return;
+  }
+
   if (!GetCompositor()) {
-    // should only happen when a tab is dragged to another window and
-    // async-video is still sending frames but we haven't attached the
-    // set the new compositor yet.
-    return;
-  }
-  if (!mFrontBuffer) {
+    // should only happen during tabswitch if async-video is still sending frames.
     return;
   }
 
-  // Make sure the front buffer has a compositor
-  mFrontBuffer->SetCompositor(GetCompositor());
-  mFrontBuffer->SetCompositableBackendSpecificData(GetCompositableBackendSpecificData());
+  if (!mTextureHost->Lock()) {
+    NS_ASSERTION(false, "failed to lock texture host");
+    return;
+  }
 
-  AutoLockTextureHost autoLock(mFrontBuffer);
-  if (autoLock.Failed()) {
-    NS_WARNING("failed to lock front buffer");
-    return;
-  }
-  RefPtr<NewTextureSource> source = mFrontBuffer->GetTextureSources();
-  if (!source) {
-    return;
-  }
-  RefPtr<TexturedEffect> effect = CreateTexturedEffect(mFrontBuffer->GetFormat(),
-                                                       source,
-                                                       aFilter);
-  if (!effect) {
-    return;
-  }
+  RefPtr<TexturedEffect> effect =
+    CreateTexturedEffect(mTextureHost, aFilter);
 
   aEffectChain.mPrimaryEffect = effect;
-  IntSize textureSize = source->GetSize();
-  gfx::Rect gfxPictureRect
-    = mHasPictureRect ? gfx::Rect(0, 0, mPictureRect.width, mPictureRect.height)
-                      : gfx::Rect(0, 0, textureSize.width, textureSize.height);
 
-  gfx::Rect pictureRect(0, 0,
-                        mPictureRect.width,
-                        mPictureRect.height);
-  //XXX: We might have multiple texture sources here (e.g. 3 YCbCr textures), and we're
-  // only iterating over the tiles of the first one. Are we assuming that the tiling
-  // will be identical? Can we ensure that somehow?
-  TileIterator* it = source->AsTileIterator();
+  TileIterator* it = mTextureHost->AsTileIterator();
   if (it) {
     it->BeginTileIteration();
     do {
       nsIntRect tileRect = it->GetTileRect();
       gfx::Rect rect(tileRect.x, tileRect.y, tileRect.width, tileRect.height);
-      if (mHasPictureRect) {
-        rect = rect.Intersect(pictureRect);
-        effect->mTextureCoords = Rect(Float(rect.x - tileRect.x)/ tileRect.width,
-                                      Float(rect.y - tileRect.y) / tileRect.height,
-                                      Float(rect.width) / tileRect.width,
-                                      Float(rect.height) / tileRect.height);
-      } else {
-        effect->mTextureCoords = Rect(0, 0, 1, 1);
-      }
       GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain,
-                                aOpacity, aTransform);
-      GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE|DIAGNOSTIC_BIGIMAGE,
-                                       rect, aClipRect, aTransform, mFlashCounter);
+                                aOpacity, aTransform, aOffset);
+      GetCompositor()->DrawDiagnostics(gfx::Color(0.5,0.0,0.0,1.0),
+                                       rect, aClipRect, aTransform, aOffset);
     } while (it->NextTile());
     it->EndTileIteration();
-    // layer border
-    GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE,
-                                     gfxPictureRect, aClipRect,
-                                     aTransform, mFlashCounter);
   } else {
-    IntSize textureSize = source->GetSize();
-    gfx::Rect rect;
+    IntSize textureSize = mTextureHost->GetSize();
+    gfx::Rect rect(0, 0,
+                   mPictureRect.width,
+                   mPictureRect.height);
     if (mHasPictureRect) {
       effect->mTextureCoords = Rect(Float(mPictureRect.x) / textureSize.width,
                                     Float(mPictureRect.y) / textureSize.height,
                                     Float(mPictureRect.width) / textureSize.width,
                                     Float(mPictureRect.height) / textureSize.height);
-      rect = pictureRect;
     } else {
       effect->mTextureCoords = Rect(0, 0, 1, 1);
       rect = gfx::Rect(0, 0, textureSize.width, textureSize.height);
     }
 
-    if (mFrontBuffer->GetFlags() & TEXTURE_NEEDS_Y_FLIP) {
+    if (mTextureHost->GetFlags() & NeedsYFlip) {
       effect->mTextureCoords.y = effect->mTextureCoords.YMost();
       effect->mTextureCoords.height = -effect->mTextureCoords.height;
     }
 
     GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain,
-                              aOpacity, aTransform);
-    GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE,
-                                     rect, aClipRect,
-                                     aTransform, mFlashCounter);
+                              aOpacity, aTransform, aOffset);
+    GetCompositor()->DrawDiagnostics(gfx::Color(1.0,0.1,0.1,1.0),
+                                     rect, aClipRect, aTransform, aOffset);
   }
+
+  mTextureHost->Unlock();
 }
 
+#ifdef MOZ_LAYERS_HAVE_LOG
 void
-ImageHost::SetCompositor(Compositor* aCompositor)
-{
-  if (mFrontBuffer && mCompositor != aCompositor) {
-    mFrontBuffer->SetCompositor(aCompositor);
-  }
-  CompositableHost::SetCompositor(aCompositor);
-}
-
-void
-ImageHost::PrintInfo(nsACString& aTo, const char* aPrefix)
+ImageHostSingle::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
   aTo += aPrefix;
-  aTo += nsPrintfCString("ImageHost (0x%p)", this);
+  aTo += nsPrintfCString("ImageHostSingle (0x%p)", this);
 
   AppendToString(aTo, mPictureRect, " [picture-rect=", "]");
 
-  if (mFrontBuffer) {
+  if (mTextureHost) {
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
     aTo += "\n";
-    mFrontBuffer->PrintInfo(aTo, pfx.get());
+    mTextureHost->PrintInfo(aTo, pfx.get());
+  }
+}
+#endif
+
+bool
+ImageHostBuffered::Update(const SurfaceDescriptor& aImage,
+                          SurfaceDescriptor* aResult) {
+  if (!GetTextureHost()) {
+    *aResult = aImage;
+    return false;
+  }
+  GetTextureHost()->SwapTextures(aImage, aResult);
+  return GetTextureHost()->IsValid();
+}
+
+void
+ImageHostBuffered::MakeTextureHost(TextureIdentifier aTextureId,
+                                   const SurfaceDescriptor& aSurface,
+                                   ISurfaceAllocator* aAllocator,
+                                   const TextureInfo& aTextureInfo)
+{
+  ImageHostSingle::MakeTextureHost(aTextureId,
+                                   aSurface,
+                                   aAllocator,
+                                   aTextureInfo);
+  if (mTextureHost) {
+    mTextureHost->SetBuffer(new SurfaceDescriptor(null_t()), aAllocator);
   }
 }
 
-#ifdef MOZ_DUMP_PAINTING
 void
-ImageHost::Dump(FILE* aFile,
-                const char* aPrefix,
-                bool aDumpHtml)
+ImageHostSingle::Dump(FILE* aFile,
+                      const char* aPrefix,
+                      bool aDumpHtml)
 {
   if (!aFile) {
     aFile = stderr;
   }
-  if (mFrontBuffer) {
-    fprintf_stderr(aFile, "%s", aPrefix);
-    fprintf_stderr(aFile, aDumpHtml ? "<ul><li>TextureHost: "
+  if (mTextureHost) {
+    fprintf(aFile, "%s", aPrefix);
+    fprintf(aFile, aDumpHtml ? "<ul><li>TextureHost: "
                              : "TextureHost: ");
-    DumpTextureHost(aFile, mFrontBuffer);
-    fprintf_stderr(aFile, aDumpHtml ? " </li></ul> " : " ");
+    DumpTextureHost(aFile, mTextureHost);
+    fprintf(aFile, aDumpHtml ? " </li></ul> " : " ");
   }
 }
-#endif
-
-LayerRenderState
-ImageHost::GetRenderState()
-{
-  if (mFrontBuffer) {
-    return mFrontBuffer->GetRenderState();
-  }
-  return LayerRenderState();
-}
-
-#ifdef MOZ_DUMP_PAINTING
-TemporaryRef<gfx::DataSourceSurface>
-ImageHost::GetAsSurface()
-{
-  return mFrontBuffer->GetAsSurface();
-}
-#endif
 
 }
 }

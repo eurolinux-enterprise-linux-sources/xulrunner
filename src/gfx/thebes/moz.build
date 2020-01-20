@@ -4,12 +4,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+MODULE = 'thebes'
+
 EXPORTS += [
-    'DrawMode.h',
+    'RoundedRect.h',
     'gfx2DGlue.h',
     'gfx3DMatrix.h',
-    'gfxAlphaRecovery.h',
     'gfxASurface.h',
+    'gfxAlphaRecovery.h',
     'gfxBaseSharedMemorySurface.h',
     'gfxBlur.h',
     'gfxCachedTempSurface.h',
@@ -20,13 +22,10 @@ EXPORTS += [
     'gfxFont.h',
     'gfxFontConstants.h',
     'gfxFontFeatures.h',
-    'gfxFontInfoLoader.h',
     'gfxFontTest.h',
     'gfxFontUtils.h',
-    'gfxGradientCache.h',
     'gfxImageSurface.h',
     'gfxLineSegment.h',
-    'gfxMathTable.h',
     'gfxMatrix.h',
     'gfxPath.h',
     'gfxPattern.h',
@@ -34,24 +33,19 @@ EXPORTS += [
     'gfxPoint.h',
     'gfxPoint3D.h',
     'gfxPointH3D.h',
-    'gfxPrefs.h',
     'gfxQuad.h',
     'gfxQuaternion.h',
     'gfxRect.h',
-    'gfxReusableImageSurfaceWrapper.h',
-    'gfxReusableSharedImageSurfaceWrapper.h',
     'gfxReusableSurfaceWrapper.h',
+    'gfxSVGGlyphs.h',
     'gfxSharedImageSurface.h',
     'gfxSharedQuartzSurface.h',
     'gfxSkipChars.h',
-    'gfxSVGGlyphs.h',
     'gfxTeeSurface.h',
     'gfxTypes.h',
     'gfxUserFontSet.h',
     'gfxUtils.h',
-    'GraphicsFilter.h',
     'nsSurfaceTexture.h',
-    'RoundedRect.h',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
@@ -61,13 +55,14 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
         'gfxFT2Fonts.h',
         'gfxPDFSurface.h',
     ]
-    SOURCES += [
+    CPP_SOURCES += [
         'gfxAndroidPlatform.cpp',
-        'gfxFT2FontBase.cpp',
-        'gfxFT2FontList.cpp',
         'gfxFT2Fonts.cpp',
+        'gfxFT2FontBase.cpp',
         'gfxFT2Utils.cpp',
+        'gfxFT2FontList.cpp',
         'gfxPDFSurface.cpp',
+        'nsUnicodeRange.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     EXPORTS += [
@@ -76,13 +71,14 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
         'gfxFT2Fonts.h',
         'gfxPDFSurface.h',
     ]
-    SOURCES += [
+    CPP_SOURCES += [
         'gfxAndroidPlatform.cpp',
-        'gfxFT2FontBase.cpp',
-        'gfxFT2FontList.cpp',
         'gfxFT2Fonts.cpp',
+        'gfxFT2FontBase.cpp',
         'gfxFT2Utils.cpp',
+        'gfxFT2FontList.cpp',
         'gfxPDFSurface.cpp',
+        'nsUnicodeRange.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     EXPORTS += [
@@ -91,33 +87,33 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'gfxQuartzNativeDrawing.h',
         'gfxQuartzSurface.h',
     ]
-    SOURCES += [
-        'gfxCoreTextShaper.cpp',
-        'gfxMacFont.cpp',
-        'gfxPlatformMac.cpp',
-        'gfxQuartzImageSurface.cpp',
-        'gfxQuartzNativeDrawing.cpp',
+    CPP_SOURCES += [
         'gfxQuartzSurface.cpp',
+        'gfxQuartzImageSurface.cpp',
+        'gfxPlatformMac.cpp',
+        'gfxMacFont.cpp',
+        'gfxCoreTextShaper.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxQuartzNativeDrawing.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_GTK']:
     EXPORTS += [
         'gfxFT2FontBase.h',
         'gfxGdkNativeRenderer.h',
-        'gfxPangoFonts.h',
         'gfxPDFSurface.h',
-        'gfxPlatformGtk.h',
         'gfxPSSurface.h',
+        'gfxPlatformGtk.h',
     ]
 
-    SOURCES += [
+    CPP_SOURCES += [
+        'gfxPlatformGtk.cpp',
+        'gfxGdkNativeRenderer.cpp',
+        'gfxPDFSurface.cpp',
+        'gfxPSSurface.cpp',
         'gfxFontconfigUtils.cpp',
         'gfxFT2FontBase.cpp',
         'gfxFT2Utils.cpp',
-        'gfxGdkNativeRenderer.cpp',
-        'gfxPangoFonts.cpp',
-        'gfxPDFSurface.cpp',
-        'gfxPlatformGtk.cpp',
-        'gfxPSSurface.cpp',
+        'nsUnicodeRange.cpp',
     ]
 
     if CONFIG['MOZ_X11']:
@@ -125,39 +121,73 @@ elif CONFIG['MOZ_WIDGET_GTK']:
             'gfxXlibNativeRenderer.h',
             'gfxXlibSurface.h',
         ]
-        SOURCES += [
-            'gfxXlibNativeRenderer.cpp',
+        CPP_SOURCES += [
             'gfxXlibSurface.cpp',
+            'gfxXlibNativeRenderer.cpp',
         ]
 
+    if CONFIG['MOZ_PANGO']:
+        EXPORTS += ['gfxPangoFonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+    else:
+        EXPORTS += ['gfxFT2Fonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    EXPORTS += [
+        'gfxOS2Fonts.h',
+        'gfxOS2Platform.h',
+        'gfxOS2Surface.h',
+        'gfxPDFSurface.h',
+    ]
+    CPP_SOURCES += [
+        'gfxOS2Fonts.cpp',
+        'gfxOS2Platform.cpp',
+        'gfxOS2Surface.cpp',
+        'nsUnicodeRange.cpp',
+        'gfxFontconfigUtils.cpp',
+        'gfxPDFSurface.cpp'
+    ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
     EXPORTS += [
         'gfxFT2FontBase.h',
-        'gfxPangoFonts.h',
         'gfxPDFSurface.h',
         'gfxQPainterSurface.h',
         'gfxQtNativeRenderer.h',
         'gfxQtPlatform.h',
     ]
-    SOURCES += [
-        'gfxFontconfigUtils.cpp',
+    CPP_SOURCES += [
+        'gfxQtPlatform.cpp',
+        'gfxQPainterSurface.cpp',
         'gfxFT2FontBase.cpp',
         'gfxFT2Utils.cpp',
-        'gfxPangoFonts.cpp',
+        'gfxFontconfigUtils.cpp',
+        'nsUnicodeRange.cpp',
         'gfxPDFSurface.cpp',
-        'gfxQPainterSurface.cpp',
-        'gfxQtPlatform.cpp',
     ]
 
     if CONFIG['MOZ_X11']:
         EXPORTS += [
             'gfxXlibSurface.h',
         ]
-        SOURCES += [
-            'gfxQtNativeRenderer.cpp',
+        CPP_SOURCES += [
             'gfxXlibSurface.cpp',
+            'gfxQtNativeRenderer.cpp',
         ]
 
+    if CONFIG['MOZ_PANGO']:
+        EXPORTS += ['gfxPangoFonts.h']
+        CPP_SOURCES += [
+            'gfxPangoFonts.cpp',
+        ]
+    else:
+        EXPORTS += ['gfxFT2Fonts.h']
+        CPP_SOURCES += [
+            'gfxFT2Fonts.cpp',
+        ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     EXPORTS += [
         'gfxD2DSurface.h',
@@ -170,126 +200,63 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'gfxWindowsPlatform.h',
         'gfxWindowsSurface.h',
     ]
-    # gfxGDIFontList.cpp and gfxGDIShaper.cpp force NSPR logging, so they cannot be built in unified mode.
-    SOURCES += [
+    CPP_SOURCES += [
+        'gfxWindowsPlatform.cpp',
+        'gfxWindowsSurface.cpp',
+        'gfxWindowsNativeDrawing.cpp',
+        'nsUnicodeRange.cpp',
         'gfxGDIFont.cpp',
         'gfxGDIFontList.cpp',
         'gfxGDIShaper.cpp',
-        'gfxPDFSurface.cpp',
         'gfxUniscribeShaper.cpp',
-        'gfxWindowsNativeDrawing.cpp',
-        'gfxWindowsPlatform.cpp',
-        'gfxWindowsSurface.cpp',
+        'gfxPDFSurface.cpp',
     ]
     if CONFIG['MOZ_ENABLE_DWRITE_FONT']:
-        # gfxDWriteFontList.cpp forces NSPR logging, so it cannot be built in unified mode.
-        SOURCES += [
-            'gfxD2DSurface.cpp',
-            'gfxDWriteCommon.cpp',
-            'gfxDWriteFontList.cpp',
+        CPP_SOURCES += [
             'gfxDWriteFonts.cpp',
             'gfxDWriteShaper.cpp',
             'gfxDWriteTextAnalysis.cpp',
+            'gfxDWriteCommon.cpp',
+            'gfxD2DSurface.cpp',
+            'gfxDWriteFontList.cpp',
         ]
 
 # Are we targeting x86 or x64?  If so, build gfxAlphaRecoverySSE2.cpp.
 if CONFIG['INTEL_ARCHITECTURE']:
-    SOURCES += ['gfxAlphaRecoverySSE2.cpp']
-    # The file uses SSE2 intrinsics, so it needs special compile flags on some
-    # compilers.
-    SOURCES['gfxAlphaRecoverySSE2.cpp'].flags += CONFIG['SSE2_FLAGS']
+    CPP_SOURCES += [
+        'gfxAlphaRecoverySSE2.cpp',
+    ]
 
-SOURCES += [
-    # Includes mac system header conflicting with point/size,
-    # and includes glxXlibSurface.h which drags in Xrender.h
-    'gfxASurface.cpp',
-    # on X11, gfxDrawable.cpp includes X headers for an old workaround which
-    # we could consider removing soon (affects Ubuntus older than 10.04 LTS)
-    # which currently prevent it from joining UNIFIED_SOURCES.
-    'gfxDrawable.cpp',
-    # Uses FORCE_PR_LOG
-    'gfxFont.cpp',
-    # Uses FORCE_PR_LOG
-    'gfxFontUtils.cpp',
-    # Includes mac system header conflicting with point/size, and also uses FORCE_PR_LOG
-    'gfxPlatform.cpp',
-    # Uses FORCE_PR_LOG
-    'gfxPlatformFontList.cpp',
-    'gfxPrefs.cpp',
-    # Uses FORCE_PR_LOG
-    'gfxUserFontSet.cpp',
-]
-
-UNIFIED_SOURCES += [
-    'CJKCompatSVS.cpp',
+CPP_SOURCES += [
     'gfx3DMatrix.cpp',
+    'gfxASurface.cpp',
     'gfxAlphaRecovery.cpp',
     'gfxBaseSharedMemorySurface.cpp',
     'gfxBlur.cpp',
     'gfxCachedTempSurface.cpp',
     'gfxContext.cpp',
+    'gfxDrawable.cpp',
+    'gfxFont.cpp',
     'gfxFontFeatures.cpp',
-    'gfxFontInfoLoader.cpp',
     'gfxFontMissingGlyphs.cpp',
     'gfxFontTest.cpp',
-    'gfxGradientCache.cpp',
+    'gfxFontUtils.cpp',
     'gfxGraphiteShaper.cpp',
     'gfxHarfBuzzShaper.cpp',
     'gfxImageSurface.cpp',
-    'gfxMathTable.cpp',
     'gfxMatrix.cpp',
     'gfxPath.cpp',
     'gfxPattern.cpp',
+    'gfxPlatform.cpp',
+    'gfxPlatformFontList.cpp',
     'gfxRect.cpp',
-    'gfxReusableImageSurfaceWrapper.cpp',
-    'gfxReusableSharedImageSurfaceWrapper.cpp',
+    'gfxReusableSurfaceWrapper.cpp',
+    'gfxSVGGlyphs.cpp',
     'gfxScriptItemizer.cpp',
     'gfxSkipChars.cpp',
-    'gfxSVGGlyphs.cpp',
     'gfxTeeSurface.cpp',
+    'gfxUserFontSet.cpp',
     'gfxUtils.cpp',
     'nsSurfaceTexture.cpp',
-    'nsUnicodeRange.cpp',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    # gfxMacPlatformFontList.mm forces NSPR logging so it cannot be built in unified mode.
-    SOURCES += [
-        'gfxMacPlatformFontList.mm',
-    ]
-
-FAIL_ON_WARNINGS = not CONFIG['_MSC_VER']
-
-MSVC_ENABLE_PGO = True
-
-LIBRARY_NAME = 'thebes'
-
-include('/ipc/chromium/chromium-config.mozbuild')
-
-FINAL_LIBRARY = 'xul'
-
-GENERATED_FILES = [
-    'DeprecatedPremultiplyTables.h',
-]
-
-LOCAL_INCLUDES += [
-    '/content/xml/document/src',
-]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gtk3', 'gonk', 'qt'):
-    DEFINES['MOZ_ENABLE_FREETYPE'] = True
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-    for var in ('MOZ_ENABLE_D3D9_LAYER', 'MOZ_ENABLE_D3D10_LAYER'):
-        if CONFIG[var]:
-            DEFINES[var] = True
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    # This is set for "normal Android", that is, when Gecko is running on
-    # top of the android java runtime.
-    DEFINES['MOZ_USING_ANDROID_JAVA_WIDGETS'] = True
-
-DEFINES['GRAPHITE2_STATIC'] = True
-
-if CONFIG['OS_TARGET'] == 'WINNT':
-    DEFINES['OTS_DLL'] = True

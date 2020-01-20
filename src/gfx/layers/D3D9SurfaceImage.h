@@ -18,8 +18,7 @@ namespace layers {
 // passed into SetData(), so that it can be accessed from other D3D devices.
 // This class also manages the synchronization of the copy, to ensure the
 // resource is ready to use.
-class D3D9SurfaceImage : public Image
-                       , public ISharedImage {
+class D3D9SurfaceImage : public Image {
 public:
 
   struct Data {
@@ -29,10 +28,8 @@ public:
     nsIntRect mRegion;
   };
 
-  D3D9SurfaceImage();
-  virtual ~D3D9SurfaceImage();
-
-  virtual ISharedImage* AsSharedImage() MOZ_OVERRIDE { return this; }
+  D3D9SurfaceImage() : Image(NULL, D3D9_RGB32_TEXTURE), mSize(0, 0) {}
+  virtual ~D3D9SurfaceImage() {}
 
   // Copies the surface into a sharable texture's surface, and initializes
   // the image.
@@ -47,12 +44,9 @@ public:
   // complete.
   HANDLE GetShareHandle();
 
-  gfx::IntSize GetSize() MOZ_OVERRIDE;
+  gfxIntSize GetSize() MOZ_OVERRIDE;
 
-  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE;
-
-  virtual TextureClient* GetTextureClient(CompositableClient* aClient) MOZ_OVERRIDE;
-  virtual uint8_t* GetBuffer() MOZ_OVERRIDE { return nullptr; }
+  already_AddRefed<gfxASurface> GetAsSurface() MOZ_OVERRIDE;
 
 private:
 
@@ -60,10 +54,9 @@ private:
   // is complete, whereupon the texture is safe to use.
   void EnsureSynchronized();
 
-  gfx::IntSize mSize;
+  gfxIntSize mSize;
   RefPtr<IDirect3DTexture9> mTexture;
   RefPtr<IDirect3DQuery9> mQuery;
-  RefPtr<TextureClient> mTextureClient;
   HANDLE mShareHandle;
   D3DSURFACE_DESC mDesc;
 };

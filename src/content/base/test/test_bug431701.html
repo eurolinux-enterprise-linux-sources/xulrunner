@@ -4,7 +4,6 @@
 https://bugzilla.mozilla.org/show_bug.cgi?id=431701
 -->
 <head>
-  <meta charset="windows-1252">
   <title>Test for Bug 431701</title>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
@@ -52,7 +51,7 @@ function createDoc() {
 function xhrDoc(idx) {
   return function() {
     // Defy same-origin restrictions!
-    var xhr = new XMLHttpRequest({mozAnon: true, mozSystem: true});
+    var xhr = SpecialPowers.createSystemXHR();
     xhr.open("GET", docSources[idx], false);
     xhr.send();
     return xhr.responseXML;
@@ -88,10 +87,6 @@ function doTest(idx) {
 }
 
 addLoadEvent(function() {
-   SpecialPowers.pushPermissions([{'type': 'systemXHR', 'allow': true, 'context': document}], startTest);
-});
-
-function startTest() {
   // sanity check
   isnot("", null, "Shouldn't be equal!");
 
@@ -109,7 +104,7 @@ function startTest() {
   xhr.abort();
                      
   SimpleTest.finish();
-};
+});
 
 
 

@@ -38,17 +38,19 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULTreeAccessible, Accessible)
 
-  // Accessible
+  // nsAccessNode
   virtual void Shutdown();
+
+  // Accessible
   virtual void Value(nsString& aValue);
   virtual a11y::role NativeRole();
   virtual uint64_t NativeState();
   virtual Accessible* ChildAtPoint(int32_t aX, int32_t aY,
                                    EWhichChildAtPoint aWhichChild);
 
-  virtual Accessible* GetChildAt(uint32_t aIndex) const MOZ_OVERRIDE;
-  virtual uint32_t ChildCount() const MOZ_OVERRIDE;
-  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
+  virtual Accessible* GetChildAt(uint32_t aIndex);
+  virtual uint32_t ChildCount() const;
+  virtual Relation RelationByType(uint32_t aType);
 
   // SelectAccessible
   virtual already_AddRefed<nsIArray> SelectedItems();
@@ -77,7 +79,7 @@ public:
    *
    * @param aRow         [in] the given row index
    */
-  Accessible* GetTreeItemAccessible(int32_t aRow) const;
+  Accessible* GetTreeItemAccessible(int32_t aRow);
 
   /**
    * Invalidates the number of cached treeitem accessibles.
@@ -110,12 +112,11 @@ protected:
   /**
    * Creates tree item accessible for the given row index.
    */
-  virtual already_AddRefed<Accessible>
-    CreateTreeItemAccessible(int32_t aRow) const;
+  virtual already_AddRefed<Accessible> CreateTreeItemAccessible(int32_t aRow);
 
   nsCOMPtr<nsITreeBoxObject> mTree;
   nsITreeView* mTreeView;
-  mutable AccessibleHashtable mAccessibleCache;
+  AccessibleHashtable mAccessibleCache;
 };
 
 /**
@@ -154,13 +155,15 @@ public:
   NS_IMETHOD GetActionName(uint8_t aIndex, nsAString& aName);
   NS_IMETHOD DoAction(uint8_t aIndex);
 
-  // Accessible
+  // nsAccessNode
   virtual void Shutdown();
+
+  // Accessible
   virtual GroupPos GroupPosition();
   virtual uint64_t NativeState();
   virtual uint64_t NativeInteractiveState() const;
   virtual int32_t IndexInParent() const;
-  virtual Relation RelationByType(RelationType aType) MOZ_OVERRIDE;
+  virtual Relation RelationByType(uint32_t aType);
   virtual Accessible* FocusedChild();
 
   // ActionAccessible
@@ -181,7 +184,7 @@ public:
    * Return cell accessible for the given column. If XUL tree accessible is not
    * accessible table then return null.
    */
-  virtual Accessible* GetCellAccessible(nsITreeColumn* aColumn) const
+  virtual Accessible* GetCellAccessible(nsITreeColumn* aColumn)
     { return nullptr; }
 
   /**
@@ -233,8 +236,10 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(XULTreeItemAccessible,
                                            XULTreeItemAccessibleBase)
 
-  // Accessible
+  // nsAccessNode
   virtual void Shutdown();
+
+  // Accessible
   virtual ENameValueFlag Name(nsString& aName);
   virtual a11y::role NativeRole();
 

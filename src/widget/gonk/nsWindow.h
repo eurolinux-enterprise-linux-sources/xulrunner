@@ -17,7 +17,6 @@
 #define nsWindow_h
 
 #include "nsBaseWidget.h"
-#include "nsRegion.h"
 #include "nsIIdleServiceInternal.h"
 
 extern nsIntRect gScreenBounds;
@@ -47,7 +46,7 @@ public:
     virtual ~nsWindow();
 
     static void DoDraw(void);
-    static nsEventStatus DispatchInputEvent(mozilla::WidgetGUIEvent& aEvent,
+    static nsEventStatus DispatchInputEvent(nsGUIEvent &aEvent,
                                             bool* aWasCaptured = nullptr);
 
     NS_IMETHOD Create(nsIWidget *aParent,
@@ -83,8 +82,7 @@ public:
         return NS_OK;
     }
     virtual nsIntPoint WidgetToScreenOffset();
-    NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
-                             nsEventStatus& aStatus);
+    NS_IMETHOD DispatchEvent(nsGUIEvent *aEvent, nsEventStatus &aStatus);
     NS_IMETHOD CaptureRollupEvents(nsIRollupListener *aListener,
                                    bool aDoCapture)
     {
@@ -98,7 +96,7 @@ public:
     virtual double GetDefaultScaleInternal();
     virtual mozilla::layers::LayerManager*
         GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
-                        LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
+                        LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                         LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                         bool* aAllowRetaining = nullptr);
     gfxASurface* GetThebesSurface();
@@ -117,6 +115,7 @@ public:
 protected:
     nsWindow* mParent;
     bool mVisible;
+    nsIntRegion mDirtyRegion;
     InputContext mInputContext;
     nsCOMPtr<nsIIdleServiceInternal> mIdleService;
 

@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict";
-
 Array.prototype.clone = function() { return this.slice(0); }
 
 function makeSample(frames, extraInfo, lines) {
@@ -53,7 +51,8 @@ function WorkerRequest(worker) {
     var startTime = Date.now();
     var data = msg.data;
     var readTime = Date.now() - startTime;
-
+    if (readTime > 10)
+      console.log("reading data from worker message: " + readTime + "ms");
     if (data.requestID == requestID || !data.requestID) {
       switch(data.type) {
         case "error":
@@ -126,6 +125,8 @@ WorkerRequest.prototype = {
       taskData: taskData
     });
     var postTime = Date.now() - startTime;
+    if (true || postTime > 10)
+      console.log("posting message to worker: " + postTime + "ms");
     this._sendChunkReporter.finish();
     this._executeReporter.begin("Processing worker request...");
   },
@@ -163,6 +164,8 @@ WorkerRequest.prototype = {
       var startTime = Date.now();
       self._worker.postMessage(msg);
       var postTime = Date.now() - startTime;
+      if (postTime > 10)
+        console.log("posting message to worker: " + postTime + "ms");
       self._sendChunkReporter.setProgress((msgIndex + 1) / totalMessages);
     }
     var messagePostingTimer = 0;
@@ -211,6 +214,7 @@ WorkerRequest.prototype = {
 
 var Parser = {
   parse: function Parser_parse(data, params) {
+    console.log("profile num chars: " + data.length);
     var request = new WorkerRequest(gParserWorker);
     request.sendInChunks("parseRawProfile", data, params, 3000000);
     return request;

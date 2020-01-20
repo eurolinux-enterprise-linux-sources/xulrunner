@@ -8,6 +8,9 @@
 #ifdef WIN32
 #include <windows.h>
 #endif
+#ifdef OS2
+#include <os2.h>
+#endif
 
 #include "nspr.h"
 #include "nscore.h"
@@ -56,9 +59,9 @@ public:
     NS_DECL_NSISTREAMLISTENER
 };
 
-NS_IMPL_ISUPPORTS(TestListener,
-                  nsIRequestObserver,
-                  nsIStreamListener);
+NS_IMPL_ISUPPORTS2(TestListener,
+                   nsIRequestObserver,
+                   nsIStreamListener);
 
 NS_IMETHODIMP
 TestListener::OnStartRequest(nsIRequest* request, nsISupports* context)
@@ -117,9 +120,9 @@ protected:
     nsCOMPtr<nsIByteArrayInputStream> mData;
 };
 
-NS_IMPL_ISUPPORTS(TestProvider,
-                  nsIStreamProvider,
-                  nsIRequestObserver)
+NS_IMPL_ISUPPORTS2(TestProvider,
+                   nsIStreamProvider,
+                   nsIRequestObserver)
 
 TestProvider::TestProvider(char *data)
 {

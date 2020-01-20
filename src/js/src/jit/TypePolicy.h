@@ -7,8 +7,7 @@
 #ifndef jit_TypePolicy_h
 #define jit_TypePolicy_h
 
-#include "jit/IonAllocPolicy.h"
-#include "jit/IonTypes.h"
+#include "IonTypes.h"
 
 namespace js {
 namespace jit {
@@ -27,17 +26,16 @@ class TypePolicy
     //  * If untyped, optionally ask the input to try and specialize its value.
     //  * Replace the operand with a conversion instruction.
     //  * Insert an unconditional deoptimization (no conversion possible).
-    virtual bool adjustInputs(TempAllocator &alloc, MInstruction *def) = 0;
+    virtual bool adjustInputs(MInstruction *def) = 0;
 };
 
 class BoxInputsPolicy : public TypePolicy
 {
   protected:
-    static MDefinition *boxAt(TempAllocator &alloc, MInstruction *at, MDefinition *operand);
+    static MDefinition *boxAt(MInstruction *at, MDefinition *operand);
 
   public:
-    static MDefinition *alwaysBoxAt(TempAllocator &alloc, MInstruction *at, MDefinition *operand);
-    virtual bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    virtual bool adjustInputs(MInstruction *def);
 };
 
 class ArithPolicy : public BoxInputsPolicy
@@ -50,7 +48,13 @@ class ArithPolicy : public BoxInputsPolicy
     MIRType specialization_;
 
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
+};
+
+class BinaryStringPolicy : public BoxInputsPolicy
+{
+  public:
+    bool adjustInputs(MInstruction *def);
 };
 
 class BitwisePolicy : public BoxInputsPolicy
@@ -63,7 +67,7 @@ class BitwisePolicy : public BoxInputsPolicy
     MIRType specialization_;
 
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
 
     MIRType specialization() const {
         return specialization_;
@@ -72,26 +76,20 @@ class BitwisePolicy : public BoxInputsPolicy
 
 class ComparePolicy : public BoxInputsPolicy
 {
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
 };
 
 // Policy for MTest instructions.
 class TestPolicy : public BoxInputsPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
-};
-
-class TypeBarrierPolicy : public BoxInputsPolicy
-{
-  public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 class CallPolicy : public BoxInputsPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
 };
 
 // Policy for MPow. First operand Double; second Double or Int32.
@@ -104,7 +102,7 @@ class PowPolicy : public BoxInputsPolicy
       : specialization_(specialization)
     { }
 
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 // Expect a string for operand Op. If the input is a Value, it is unboxed.
@@ -112,20 +110,9 @@ template <unsigned Op>
 class StringPolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
-    }
-};
-
-// Expect a string for operand Op. Else a ToString instruction is inserted.
-template <unsigned Op>
-class ConvertToStringPolicy : public BoxInputsPolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
+    static bool staticAdjustInputs(MInstruction *def);
+    bool adjustInputs(MInstruction *def) {
+        return staticAdjustInputs(def);
     }
 };
 
@@ -134,20 +121,9 @@ template <unsigned Op>
 class IntPolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
-    }
-};
-
-// Expect an Int for operand Op. Else a ToInt32 instruction is inserted.
-template <unsigned Op>
-class ConvertToInt32Policy : public BoxInputsPolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
+    static bool staticAdjustInputs(MInstruction *def);
+    bool adjustInputs(MInstruction *def) {
+        return staticAdjustInputs(def);
     }
 };
 
@@ -156,48 +132,9 @@ template <unsigned Op>
 class DoublePolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
-    }
-};
-
-// Expect a float32 for operand Op. If the input is a Value, it is unboxed.
-template <unsigned Op>
-class Float32Policy : public BoxInputsPolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
-    }
-};
-
-// Expect a float32 OR a double for operand Op, but will prioritize Float32
-// if the result type is set as such. If the input is a Value, it is unboxed.
-template <unsigned Op>
-class FloatingPointPolicy : public TypePolicy
-{
-    MIRType policyType_;
-
-  public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        if (policyType_ == MIRType_Double)
-            return DoublePolicy<Op>::staticAdjustInputs(alloc, def);
-        return Float32Policy<Op>::staticAdjustInputs(alloc, def);
-    }
-    void setPolicyType(MIRType type) {
-        policyType_ = type;
-    }
-};
-
-template <unsigned Op>
-class NoFloatPolicy : public TypePolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
+    static bool staticAdjustInputs(MInstruction *def);
+    bool adjustInputs(MInstruction *def) {
+        return staticAdjustInputs(def);
     }
 };
 
@@ -205,19 +142,9 @@ class NoFloatPolicy : public TypePolicy
 class ToDoublePolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
-    }
-};
-
-// Box objects, strings and undefined as input to a ToInt32 instruction.
-class ToInt32Policy : public BoxInputsPolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *def);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def) {
-        return staticAdjustInputs(alloc, def);
+    static bool staticAdjustInputs(MInstruction *def);
+    bool adjustInputs(MInstruction *def) {
+        return staticAdjustInputs(def);
     }
 };
 
@@ -225,9 +152,9 @@ template <unsigned Op>
 class ObjectPolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return staticAdjustInputs(alloc, ins);
+    static bool staticAdjustInputs(MInstruction *ins);
+    bool adjustInputs(MInstruction *ins) {
+        return staticAdjustInputs(ins);
     }
 };
 
@@ -240,20 +167,9 @@ template <unsigned Op>
 class BoxPolicy : public BoxInputsPolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return staticAdjustInputs(alloc, ins);
-    }
-};
-
-// Boxes everything except inputs of type Type.
-template <unsigned Op, MIRType Type>
-class BoxExceptPolicy : public TypePolicy
-{
-  public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *ins);
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return staticAdjustInputs(alloc, ins);
+    static bool staticAdjustInputs(MInstruction *ins);
+    bool adjustInputs(MInstruction *ins) {
+        return staticAdjustInputs(ins);
     }
 };
 
@@ -262,11 +178,11 @@ template <class Lhs, class Rhs>
 class MixPolicy : public TypePolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return Lhs::staticAdjustInputs(alloc, ins) && Rhs::staticAdjustInputs(alloc, ins);
+    static bool staticAdjustInputs(MInstruction *ins) {
+        return Lhs::staticAdjustInputs(ins) && Rhs::staticAdjustInputs(ins);
     }
-    virtual bool adjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return staticAdjustInputs(alloc, ins);
+    virtual bool adjustInputs(MInstruction *ins) {
+        return staticAdjustInputs(ins);
     }
 };
 
@@ -275,20 +191,19 @@ template <class Policy1, class Policy2, class Policy3>
 class Mix3Policy : public TypePolicy
 {
   public:
-    static bool staticAdjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return Policy1::staticAdjustInputs(alloc, ins) &&
-               Policy2::staticAdjustInputs(alloc, ins) &&
-               Policy3::staticAdjustInputs(alloc, ins);
+    static bool staticAdjustInputs(MInstruction *ins) {
+        return Policy1::staticAdjustInputs(ins) && Policy2::staticAdjustInputs(ins) &&
+               Policy3::staticAdjustInputs(ins);
     }
-    virtual bool adjustInputs(TempAllocator &alloc, MInstruction *ins) {
-        return staticAdjustInputs(alloc, ins);
+    virtual bool adjustInputs(MInstruction *ins) {
+        return staticAdjustInputs(ins);
     }
 };
 
 class CallSetElementPolicy : public SingleObjectPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
 };
 
 // First operand will be boxed to a Value (except for an object)
@@ -296,47 +211,41 @@ class CallSetElementPolicy : public SingleObjectPolicy
 class InstanceOfPolicy : public TypePolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *def);
+    bool adjustInputs(MInstruction *def);
 };
 
 class StoreTypedArrayPolicy : public BoxInputsPolicy
 {
   protected:
-    bool adjustValueInput(TempAllocator &alloc, MInstruction *ins, int arrayType, MDefinition *value, int valueOperand);
+    bool adjustValueInput(MInstruction *ins, int arrayType, MDefinition *value, int valueOperand);
 
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 class StoreTypedArrayHolePolicy : public StoreTypedArrayPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 class StoreTypedArrayElementStaticPolicy : public StoreTypedArrayPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 // Accepts integers and doubles. Everything else is boxed.
 class ClampPolicy : public BoxInputsPolicy
 {
   public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
-};
-
-class FilterTypeSetPolicy : public BoxInputsPolicy
-{
-  public:
-    bool adjustInputs(TempAllocator &alloc, MInstruction *ins);
+    bool adjustInputs(MInstruction *ins);
 };
 
 static inline bool
 CoercesToDouble(MIRType type)
 {
-    if (type == MIRType_Undefined || IsFloatingPointType(type))
+    if (type == MIRType_Undefined || type == MIRType_Double)
         return true;
     return false;
 }

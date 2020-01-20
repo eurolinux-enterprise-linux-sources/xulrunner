@@ -29,7 +29,7 @@ nsDOMTokenList::nsDOMTokenList(Element* aElement, nsIAtom* aAttrAtom)
 
 nsDOMTokenList::~nsDOMTokenList() { }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsDOMTokenList, mElement)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsDOMTokenList)
 
 NS_INTERFACE_MAP_BEGIN(nsDOMTokenList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -39,6 +39,12 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMTokenList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMTokenList)
+
+void
+nsDOMTokenList::DropReference()
+{
+  mElement = nullptr;
+}
 
 const nsAttrValue*
 nsDOMTokenList::GetParsedAttr()
@@ -93,19 +99,6 @@ nsDOMTokenList::CheckToken(const nsAString& aStr)
   return NS_OK;
 }
 
-nsresult
-nsDOMTokenList::CheckTokens(const nsTArray<nsString>& aTokens)
-{
-  for (uint32_t i = 0, l = aTokens.Length(); i < l; ++i) {
-    nsresult rv = CheckToken(aTokens[i]);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-  }
-
-  return NS_OK;
-}
-
 bool
 nsDOMTokenList::Contains(const nsAString& aToken, ErrorResult& aError)
 {
@@ -120,7 +113,7 @@ nsDOMTokenList::Contains(const nsAString& aToken, ErrorResult& aError)
 
 void
 nsDOMTokenList::AddInternal(const nsAttrValue* aAttr,
-                            const nsTArray<nsString>& aTokens)
+                            const nsAString& aToken)
 {
   if (!mElement) {
     return;
@@ -132,55 +125,36 @@ nsDOMTokenList::AddInternal(const nsAttrValue* aAttr,
     aAttr->ToString(resultStr);
   }
 
-  bool oneWasAdded = false;
-  nsAutoTArray<nsString, 10> addedClasses;
-
-  for (uint32_t i = 0, l = aTokens.Length(); i < l; ++i) {
-    const nsString& aToken = aTokens[i];
-
-    if ((aAttr && aAttr->Contains(aToken)) ||
-        addedClasses.Contains(aToken)) {
-      continue;
-    }
-
-    if (oneWasAdded ||
-        (!resultStr.IsEmpty() &&
-        !nsContentUtils::IsHTMLWhitespace(resultStr.Last()))) {
-      resultStr.Append(NS_LITERAL_STRING(" ") + aToken);
-    } else {
-      resultStr.Append(aToken);
-    }
-
-    oneWasAdded = true;
-    addedClasses.AppendElement(aToken);
+  if (!resultStr.IsEmpty() &&
+      !nsContentUtils::IsHTMLWhitespace(
+          resultStr.CharAt(resultStr.Length() - 1))) {
+    resultStr.Append(NS_LITERAL_STRING(" ") + aToken);
+  } else {
+    resultStr.Append(aToken);
   }
-
   mElement->SetAttr(kNameSpaceID_None, mAttrAtom, resultStr, true);
 }
 
 void
-nsDOMTokenList::Add(const nsTArray<nsString>& aTokens, ErrorResult& aError)
+nsDOMTokenList::Add(const nsAString& aToken, ErrorResult& aError)
 {
-  aError = CheckTokens(aTokens);
+  aError = CheckToken(aToken);
   if (aError.Failed()) {
     return;
   }
 
   const nsAttrValue* attr = GetParsedAttr();
-  AddInternal(attr, aTokens);
-}
 
-void
-nsDOMTokenList::Add(const nsAString& aToken, mozilla::ErrorResult& aError)
-{
-  nsAutoTArray<nsString, 1> tokens;
-  tokens.AppendElement(aToken);
-  Add(tokens, aError);
+  if (attr && attr->Contains(aToken)) {
+    return;
+  }
+
+  AddInternal(attr, aToken);
 }
 
 void
 nsDOMTokenList::RemoveInternal(const nsAttrValue* aAttr,
-                               const nsTArray<nsString>& aTokens)
+                               const nsAString& aToken)
 {
   NS_ABORT_IF_FALSE(aAttr, "Need an attribute");
 
@@ -215,7 +189,7 @@ nsDOMTokenList::RemoveInternal(const nsAttrValue* aAttr,
       ++iter;
     } while (iter != end && !nsContentUtils::IsHTMLWhitespace(*iter));
 
-    if (aTokens.Contains(Substring(tokenStart, iter))) {
+    if (Substring(tokenStart, iter).Equals(aToken)) {
 
       // Skip whitespace after the token, it will be collapsed.
       while (iter != end && nsContentUtils::IsHTMLWhitespace(*iter)) {
@@ -228,8 +202,8 @@ nsDOMTokenList::RemoveInternal(const nsAttrValue* aAttr,
 
       if (lastTokenRemoved && !output.IsEmpty()) {
         NS_ABORT_IF_FALSE(!nsContentUtils::IsHTMLWhitespace(
-          output.Last()), "Invalid last output token");
-        output.Append(char16_t(' '));
+          output.CharAt(output.Length() - 1)), "Invalid last output token");
+        output.Append(PRUnichar(' '));
       }
       lastTokenRemoved = false;
       output.Append(Substring(copyStart, iter));
@@ -241,27 +215,19 @@ nsDOMTokenList::RemoveInternal(const nsAttrValue* aAttr,
 }
 
 void
-nsDOMTokenList::Remove(const nsTArray<nsString>& aTokens, ErrorResult& aError)
+nsDOMTokenList::Remove(const nsAString& aToken, ErrorResult& aError)
 {
-  aError = CheckTokens(aTokens);
+  aError = CheckToken(aToken);
   if (aError.Failed()) {
     return;
   }
 
   const nsAttrValue* attr = GetParsedAttr();
-  if (!attr) {
+  if (!attr || !attr->Contains(aToken)) {
     return;
   }
 
-  RemoveInternal(attr, aTokens);
-}
-
-void
-nsDOMTokenList::Remove(const nsAString& aToken, mozilla::ErrorResult& aError)
-{
-  nsAutoTArray<nsString, 1> tokens;
-  tokens.AppendElement(aToken);
-  Remove(tokens, aError);
+  RemoveInternal(attr, aToken);
 }
 
 bool
@@ -279,17 +245,15 @@ nsDOMTokenList::Toggle(const nsAString& aToken,
   const bool forceOff = aForce.WasPassed() && !aForce.Value();
 
   bool isPresent = attr && attr->Contains(aToken);
-  nsAutoTArray<nsString, 1> tokens;
-  (*tokens.AppendElement()).Rebind(aToken.Data(), aToken.Length());
 
   if (isPresent) {
     if (!forceOn) {
-      RemoveInternal(attr, tokens);
+      RemoveInternal(attr, aToken);
       isPresent = false;
     }
   } else {
     if (!forceOff) {
-      AddInternal(attr, tokens);
+      AddInternal(attr, aToken);
       isPresent = true;
     }
   }
@@ -309,8 +273,8 @@ nsDOMTokenList::Stringify(nsAString& aResult)
 }
 
 JSObject*
-nsDOMTokenList::WrapObject(JSContext *cx)
+nsDOMTokenList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
-  return DOMTokenListBinding::Wrap(cx, this);
+  return DOMTokenListBinding::Wrap(cx, scope, this);
 }
 

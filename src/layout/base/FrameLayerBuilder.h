@@ -11,27 +11,26 @@
 #include "nsTArray.h"
 #include "nsRegion.h"
 #include "nsIFrame.h"
+#include "nsDisplayListInvalidation.h"
+#include "LayerTreeInvalidation.h"
 #include "ImageLayers.h"
 #include "DisplayItemClip.h"
-#include "mozilla/layers/LayersTypes.h"
 
 class nsDisplayListBuilder;
 class nsDisplayList;
 class nsDisplayItem;
 class gfxContext;
-class nsDisplayItemGeometry;
+class nsRootPresContext;
 
 namespace mozilla {
 namespace layers {
 class ContainerLayer;
 class LayerManager;
-class BasicLayerManager;
 class ThebesLayer;
 }
 
 class FrameLayerBuilder;
 class LayerManagerData;
-class ThebesLayerData;
 
 enum LayerState {
   LAYER_NONE,
@@ -46,60 +45,11 @@ enum LayerState {
   LAYER_SVG_EFFECTS
 };
 
-class RefCountedRegion {
+class RefCountedRegion : public RefCounted<RefCountedRegion> {
 public:
-  NS_INLINE_DECL_REFCOUNTING(RefCountedRegion)
-
   RefCountedRegion() : mIsInfinite(false) {}
   nsRegion mRegion;
   bool mIsInfinite;
-};
-
-struct ContainerLayerParameters {
-  ContainerLayerParameters() :
-    mXScale(1), mYScale(1), mAncestorClipRect(nullptr),
-    mInTransformedSubtree(false), mInActiveTransformedSubtree(false),
-    mDisableSubpixelAntialiasingInDescendants(false)
-  {}
-  ContainerLayerParameters(float aXScale, float aYScale) :
-    mXScale(aXScale), mYScale(aYScale), mAncestorClipRect(nullptr),
-    mInTransformedSubtree(false), mInActiveTransformedSubtree(false),
-    mDisableSubpixelAntialiasingInDescendants(false)
-  {}
-  ContainerLayerParameters(float aXScale, float aYScale,
-                           const nsIntPoint& aOffset,
-                           const ContainerLayerParameters& aParent) :
-    mXScale(aXScale), mYScale(aYScale), mAncestorClipRect(nullptr),
-    mOffset(aOffset),
-    mInTransformedSubtree(aParent.mInTransformedSubtree),
-    mInActiveTransformedSubtree(aParent.mInActiveTransformedSubtree),
-    mDisableSubpixelAntialiasingInDescendants(aParent.mDisableSubpixelAntialiasingInDescendants)
-  {}
-  float mXScale, mYScale;
-  /**
-   * An ancestor clip rect that can be applied to restrict the visibility
-   * of this container. Null if none available.
-   */
-  const nsIntRect* mAncestorClipRect;
-  /**
-   * An offset to append to the transform set on all child layers created.
-   */
-  nsIntPoint mOffset;
-
-  bool mInTransformedSubtree;
-  bool mInActiveTransformedSubtree;
-  bool mDisableSubpixelAntialiasingInDescendants;
-  /**
-   * When this is false, ThebesLayer coordinates are drawn to with an integer
-   * translation and the scale in mXScale/mYScale.
-   */
-  bool AllowResidualTranslation()
-  {
-    // If we're in a transformed subtree, but no ancestor transform is actively
-    // changing, we'll use the residual translation when drawing into the
-    // ThebesLayer to ensure that snapping exactly matches the ideal transform.
-    return mInTransformedSubtree && !mInActiveTransformedSubtree;
-  }
 };
 
 /**
@@ -127,7 +77,7 @@ struct ContainerLayerParameters {
  * return it as a candidate for recycling.
  * 
  * FrameLayerBuilder sets up ThebesLayers so that 0,0 in the Thebes layer
- * corresponds to the (pixel-snapped) top-left of the aAnimatedGeometryRoot.
+ * corresponds to the (pixel-snapped) top-left of the aActiveScrolledRoot.
  * It sets up ContainerLayers so that 0,0 in the container layer
  * corresponds to the snapped top-left of the display item reference frame.
  *
@@ -147,18 +97,16 @@ public:
   typedef layers::ThebesLayer ThebesLayer;
   typedef layers::ImageLayer ImageLayer;
   typedef layers::LayerManager LayerManager;
-  typedef layers::BasicLayerManager BasicLayerManager;
-  typedef layers::EventRegions EventRegions;
 
   FrameLayerBuilder() :
     mRetainingManager(nullptr),
     mDetectedDOMModification(false),
     mInvalidateAllLayers(false),
-    mInLayerTreeCompressionMode(false),
     mContainerLayerGeneration(0),
     mMaxContainerLayerGeneration(0)
   {
     MOZ_COUNT_CTOR(FrameLayerBuilder);
+    mThebesLayerItems.Init();
   }
   ~FrameLayerBuilder()
   {
@@ -167,8 +115,7 @@ public:
 
   static void Shutdown();
 
-  void Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-            ThebesLayerData* aLayerData = nullptr);
+  void Init(nsDisplayListBuilder* aBuilder, LayerManager* aManager);
 
   /**
    * Call this to notify that we have just started a transaction on the
@@ -186,6 +133,52 @@ public:
    */
   void DidEndTransaction();
 
+  struct ContainerParameters {
+    ContainerParameters() :
+      mXScale(1), mYScale(1), mAncestorClipRect(nullptr),
+      mInTransformedSubtree(false), mInActiveTransformedSubtree(false),
+      mDisableSubpixelAntialiasingInDescendants(false)
+    {}
+    ContainerParameters(float aXScale, float aYScale) :
+      mXScale(aXScale), mYScale(aYScale), mAncestorClipRect(nullptr),
+      mInTransformedSubtree(false), mInActiveTransformedSubtree(false),
+      mDisableSubpixelAntialiasingInDescendants(false)
+    {}
+    ContainerParameters(float aXScale, float aYScale,
+                        const nsIntPoint& aOffset,
+                        const ContainerParameters& aParent) :
+      mXScale(aXScale), mYScale(aYScale), mAncestorClipRect(nullptr),
+      mOffset(aOffset),
+      mInTransformedSubtree(aParent.mInTransformedSubtree),
+      mInActiveTransformedSubtree(aParent.mInActiveTransformedSubtree),
+      mDisableSubpixelAntialiasingInDescendants(aParent.mDisableSubpixelAntialiasingInDescendants)
+    {}
+    float mXScale, mYScale;
+    /**
+     * An ancestor clip rect that can be applied to restrict the visibility
+     * of this container. Null if none available.
+     */
+    const nsIntRect* mAncestorClipRect;
+    /**
+     * An offset to append to the transform set on all child layers created.
+     */
+    nsIntPoint mOffset;
+
+    bool mInTransformedSubtree;
+    bool mInActiveTransformedSubtree;
+    bool mDisableSubpixelAntialiasingInDescendants;
+    /**
+     * When this is false, ThebesLayer coordinates are drawn to with an integer
+     * translation and the scale in mXScale/mYScale.
+     */
+    bool AllowResidualTranslation()
+    {
+      // If we're in a transformed subtree, but no ancestor transform is actively
+      // changing, we'll use the residual translation when drawing into the
+      // ThebesLayer to ensure that snapping exactly matches the ideal transform.
+      return mInTransformedSubtree && !mInActiveTransformedSubtree;
+    }
+  };
   enum {
     CONTAINER_NOT_CLIPPED_BY_ANCESTORS = 0x01
   };
@@ -212,7 +205,7 @@ public:
                          nsIFrame* aContainerFrame,
                          nsDisplayItem* aContainerItem,
                          const nsDisplayList& aChildren,
-                         const ContainerLayerParameters& aContainerParameters,
+                         const ContainerParameters& aContainerParameters,
                          const gfx3DMatrix* aTransform,
                          uint32_t aFlags = 0);
 
@@ -252,7 +245,6 @@ public:
   static void DrawThebesLayer(ThebesLayer* aLayer,
                               gfxContext* aContext,
                               const nsIntRegion& aRegionToDraw,
-                              mozilla::layers::DrawRegionClip aClip,
                               const nsIntRegion& aRegionToInvalidate,
                               void* aCallbackData);
 
@@ -284,7 +276,7 @@ public:
                            const DisplayItemClip& aClip,
                            LayerState aLayerState,
                            const nsPoint& aTopLeft,
-                           BasicLayerManager* aManager,
+                           LayerManager* aManager,
                            nsAutoPtr<nsDisplayItemGeometry> aGeometry);
 
   /**
@@ -294,7 +286,7 @@ public:
    * aItem must have an underlying frame.
    * @param aTopLeft offset from active scrolled root to reference frame
    */
-  void AddThebesDisplayItem(ThebesLayerData* aLayer,
+  void AddThebesDisplayItem(ThebesLayer* aLayer,
                             nsDisplayItem* aItem,
                             const DisplayItemClip& aClip,
                             nsIFrame* aContainerLayerFrame,
@@ -389,15 +381,15 @@ public:
   /**
    * Retained data for a display item.
    */
-  class DisplayItemData MOZ_FINAL {
+  class DisplayItemData {
   public:
     friend class FrameLayerBuilder;
 
     uint32_t GetDisplayItemKey() { return mDisplayItemKey; }
     Layer* GetLayer() { return mLayer; }
     void Invalidate() { mIsInvalid = true; }
+  protected:
 
-  private:
     DisplayItemData(LayerManagerData* aParent, uint32_t aKey, Layer* aLayer, LayerState aLayerState, uint32_t aGeneration);
     DisplayItemData(DisplayItemData &toCopy);
 
@@ -431,7 +423,7 @@ public:
     LayerManagerData* mParent;
     nsRefPtr<Layer> mLayer;
     nsRefPtr<Layer> mOptLayer;
-    nsRefPtr<BasicLayerManager> mInactiveManager;
+    nsRefPtr<LayerManager> mInactiveManager;
     nsAutoTArray<nsIFrame*, 1> mFrameList;
     nsAutoPtr<nsDisplayItemGeometry> mGeometry;
     DisplayItemClip mClip;
@@ -529,24 +521,6 @@ protected:
     uint32_t mContainerLayerGeneration;
   };
 
-  static void RecomputeVisibilityForItems(nsTArray<ClippedDisplayItem>& aItems,
-                                          nsDisplayListBuilder* aBuilder,
-                                          const nsIntRegion& aRegionToDraw,
-                                          const nsIntPoint& aOffset,
-                                          int32_t aAppUnitsPerDevPixel,
-                                          float aXScale,
-                                          float aYScale);
-
-  void PaintItems(nsTArray<ClippedDisplayItem>& aItems,
-                  const nsIntRect& aRect,
-                  gfxContext* aContext,
-                  nsRenderingContext* aRC,
-                  nsDisplayListBuilder* aBuilder,
-                  nsPresContext* aPresContext,
-                  const nsIntPoint& aOffset,
-                  float aXScale, float aYScale,
-                  int32_t aCommonClipCount);
-
   /**
    * We accumulate ClippedDisplayItem elements in a hashtable during
    * the paint process. This is the hashentry for that hashtable.
@@ -589,18 +563,6 @@ public:
     return mThebesLayerItems.GetEntry(aLayer);
   }
 
-  ThebesLayerData* GetContainingThebesLayerData()
-  {
-    return mContainingThebesLayer;
-  }
-
-  /**
-   * Attempt to build the most compressed layer tree possible, even if it means
-   * throwing away existing retained buffers.
-   */
-  void SetLayerTreeCompressionMode() { mInLayerTreeCompressionMode = true; }
-  bool CheckInLayerTreeCompressionMode();
-
 protected:
   void RemoveThebesItemsAndOwnerDataForLayerSubtree(Layer* aLayer,
                                                     bool aRemoveThebesItems,
@@ -640,13 +602,6 @@ protected:
    * clipping data) to be rendered in the layer.
    */
   nsTHashtable<ThebesLayerItemsEntry> mThebesLayerItems;
-
-  /**
-   * When building layers for an inactive layer, this is where the
-   * inactive layer will be placed.
-   */
-  ThebesLayerData*                    mContainingThebesLayer;
-
   /**
    * Saved generation counter so we can detect DOM changes.
    */
@@ -661,8 +616,6 @@ protected:
    * during this paint.
    */
   bool                                mInvalidateAllLayers;
-
-  bool                                mInLayerTreeCompressionMode;
 
   uint32_t                            mContainerLayerGeneration;
   uint32_t                            mMaxContainerLayerGeneration;

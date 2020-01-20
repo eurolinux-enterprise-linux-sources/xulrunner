@@ -26,6 +26,7 @@ class nsIDOMNode;
 class nsIDocumentEncoder;
 class nsIEditRules;
 class nsIOutputStream;
+class nsIPrivateTextRangeList;
 class nsISelection;
 class nsISelectionController;
 class nsITransferable;
@@ -73,9 +74,7 @@ public:
                                          bool aSuppressTransaction);
 
   /** prepare the editor for use */
-  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot,
-                  nsISelectionController *aSelCon, uint32_t aFlags,
-                  const nsAString& aValue);
+  NS_IMETHOD Init(nsIDOMDocument *aDoc, nsIContent *aRoot, nsISelectionController *aSelCon, uint32_t aFlags);
   
   NS_IMETHOD GetDocumentIsEmpty(bool *aDocumentIsEmpty);
   NS_IMETHOD GetIsDocumentEditable(bool *aIsDocumentEditable);
@@ -121,10 +120,11 @@ public:
 
   virtual nsresult HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent);
 
-  virtual already_AddRefed<mozilla::dom::EventTarget> GetDOMEventTarget();
+  virtual already_AddRefed<nsIDOMEventTarget> GetDOMEventTarget();
 
-  virtual nsresult BeginIMEComposition(mozilla::WidgetCompositionEvent* aEvent);
-  virtual nsresult UpdateIMEComposition(nsIDOMEvent* aTextEvent) MOZ_OVERRIDE;
+  virtual nsresult BeginIMEComposition();
+  virtual nsresult UpdateIMEComposition(const nsAString &aCompositionString,
+                                        nsIPrivateTextRangeList *aTextRange);
 
   virtual already_AddRefed<nsIContent> GetInputEventTargetContent();
 
@@ -136,7 +136,7 @@ public:
                         int32_t aDestOffset,
                         bool aDoDeleteSelection);
 
-  virtual nsresult InsertFromDataTransfer(mozilla::dom::DataTransfer *aDataTransfer,
+  virtual nsresult InsertFromDataTransfer(nsIDOMDataTransfer *aDataTransfer,
                                           int32_t aIndex,
                                           nsIDOMDocument *aSourceDoc,
                                           nsIDOMNode *aDestinationNode,
@@ -196,7 +196,7 @@ protected:
   bool IsModifiable();
 
   bool CanCutOrCopy();
-  bool FireClipboardEvent(int32_t aType, int32_t aSelectionType);
+  bool FireClipboardEvent(int32_t aType);
 
   bool UpdateMetaCharset(nsIDOMDocument* aDocument,
                          const nsACString& aCharacterSet);

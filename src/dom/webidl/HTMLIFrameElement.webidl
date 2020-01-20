@@ -14,11 +14,12 @@
 interface HTMLIFrameElement : HTMLElement {
   [SetterThrows, Pure]
            attribute DOMString src;
-  [SetterThrows, Pure]
-           attribute DOMString srcdoc;
+           // attribute DOMString srcdoc;
   [SetterThrows, Pure]
            attribute DOMString name;
-  [PutForwards=value] readonly attribute DOMSettableTokenList sandbox;
+  // [PutForwards=value] readonly attribute DOMSettableTokenList sandbox;
+  // We're implementing sandbox as a string for now, see bug 845057.
+  attribute DOMString sandbox;
            // attribute boolean seamless;
   [SetterThrows, Pure]
            attribute boolean allowFullscreen;

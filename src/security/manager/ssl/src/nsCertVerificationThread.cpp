@@ -10,7 +10,7 @@ using namespace mozilla;
 
 nsCertVerificationThread *nsCertVerificationThread::verification_thread_singleton;
 
-NS_IMPL_ISUPPORTS(nsCertVerificationResult, nsICertVerificationResult)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsCertVerificationResult, nsICertVerificationResult)
 
 namespace {
 class DispatchCertVerificationResult : public nsRunnable
@@ -43,7 +43,7 @@ void nsCertVerificationJob::Run()
 
   uint32_t verified;
   uint32_t count;
-  char16_t **usages;
+  PRUnichar **usages;
 
   nsCOMPtr<nsICertVerificationResult> ires;
   RefPtr<nsCertVerificationResult> vres(new nsCertVerificationResult);
@@ -176,7 +176,7 @@ nsCertVerificationResult::~nsCertVerificationResult()
 NS_IMETHODIMP
 nsCertVerificationResult::GetUsagesArrayResult(uint32_t *aVerified,
                                                uint32_t *aCount,
-                                               char16_t ***aUsages)
+                                               PRUnichar ***aUsages)
 {
   if (NS_FAILED(mRV))
     return mRV;

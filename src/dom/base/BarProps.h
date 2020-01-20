@@ -13,18 +13,17 @@
 #define mozilla_dom_BarProps_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsIWeakReference.h"
 #include "nsWrapperCache.h"
 #include "nsAutoPtr.h"
-#include "nsPIDOMWindow.h"
 
 class nsGlobalWindow;
 class nsIWebBrowserChrome;
+class nsPIDOMWindow;
 
 namespace mozilla {
-
-class ErrorResult;
-
 namespace dom {
 
 // Script "BarProp" object
@@ -41,7 +40,7 @@ public:
   nsPIDOMWindow* GetParentObject() const;
 
   virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   virtual bool GetVisible(ErrorResult& aRv) = 0;
   virtual void SetVisible(bool aVisible, ErrorResult& aRv) = 0;

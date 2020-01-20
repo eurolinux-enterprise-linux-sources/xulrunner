@@ -6,23 +6,26 @@
 #ifndef nsSegmentedBuffer_h__
 #define nsSegmentedBuffer_h__
 
-#include "nsIMemory.h"
+#include "nsMemory.h"
+#include "prclist.h"
 
 class nsSegmentedBuffer
 {
 public:
     nsSegmentedBuffer()
         : mSegmentSize(0), mMaxSize(0), 
-          mSegmentArray(nullptr),
+          mSegAllocator(nullptr), mSegmentArray(nullptr),
           mSegmentArrayCount(0),
           mFirstSegmentIndex(0), mLastSegmentIndex(0) {}
 
     ~nsSegmentedBuffer() {
         Empty();
+        NS_IF_RELEASE(mSegAllocator);
     }
 
 
-    nsresult Init(uint32_t segmentSize, uint32_t maxSize);
+    nsresult Init(uint32_t segmentSize, uint32_t maxSize,
+                  nsIMemory* allocator = nullptr);
 
     char* AppendNewSegment();   // pushes at end
 
@@ -70,6 +73,7 @@ protected:
 protected:
     uint32_t            mSegmentSize;
     uint32_t            mMaxSize;
+    nsIMemory*       mSegAllocator;
     char**              mSegmentArray;
     uint32_t            mSegmentArrayCount;
     int32_t             mFirstSegmentIndex;

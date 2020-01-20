@@ -5,7 +5,6 @@
 
 #include "gfxQuartzSurface.h"
 #include "gfxContext.h"
-#include "gfxImageSurface.h"
 
 #include "cairo-quartz.h"
 
@@ -17,7 +16,7 @@ gfxQuartzSurface::MakeInvalid()
 
 gfxQuartzSurface::gfxQuartzSurface(const gfxSize& desiredSize, gfxImageFormat format,
                                    bool aForPrinting)
-    : mCGContext(nullptr), mSize(desiredSize), mForPrinting(aForPrinting)
+    : mCGContext(NULL), mSize(desiredSize), mForPrinting(aForPrinting)
 {
     gfxIntSize size((unsigned int) floor(desiredSize.width),
                     (unsigned int) floor(desiredSize.height));
@@ -89,9 +88,8 @@ gfxQuartzSurface::gfxQuartzSurface(CGContextRef context,
 }
 
 gfxQuartzSurface::gfxQuartzSurface(cairo_surface_t *csurf,
-                                   const gfxIntSize& aSize,
                                    bool aForPrinting) :
-    mSize(aSize), mForPrinting(aForPrinting)
+    mSize(-1.0, -1.0), mForPrinting(aForPrinting)
 {
     mCGContext = cairo_quartz_surface_get_cg_context (csurf);
     CGContextRetain (mCGContext);
@@ -162,7 +160,7 @@ gfxQuartzSurface::CreateSimilarSurface(gfxContentType aType,
         return nullptr;
     }
 
-    nsRefPtr<gfxASurface> result = Wrap(surface, aSize);
+    nsRefPtr<gfxASurface> result = Wrap(surface);
     cairo_surface_destroy(surface);
     return result.forget();
 }
@@ -195,8 +193,6 @@ already_AddRefed<gfxImageSurface> gfxQuartzSurface::GetAsImageSurface()
     // reference to the image. We need to remove one of these references
     // explicitly so we don't leak.
     img->Release();
-
-    img->SetOpaqueRect(GetOpaqueRect());
 
     return img.forget().downcast<gfxImageSurface>();
 }

@@ -6,37 +6,32 @@
 
 TEST_DIRS += ['tests']
 
-UNIFIED_SOURCES += [
+MODULE = 'editor'
+
+CPP_SOURCES += [
+    'TextEditorTest.cpp',
+    'TypeInState.cpp',
     'nsEditProperty.cpp',
     'nsHTMLAbsPosition.cpp',
     'nsHTMLAnonymousUtils.cpp',
     'nsHTMLCSSUtils.cpp',
     'nsHTMLDataTransfer.cpp',
+    'nsHTMLEditRules.cpp',
+    'nsHTMLEditUtils.cpp',
     'nsHTMLEditor.cpp',
     'nsHTMLEditorEventListener.cpp',
     'nsHTMLEditorStyle.cpp',
-    'nsHTMLEditRules.cpp',
-    'nsHTMLEditUtils.cpp',
     'nsHTMLInlineTableEditor.cpp',
     'nsHTMLObjectResizer.cpp',
     'nsHTMLURIRefObject.cpp',
     'nsTableEditor.cpp',
     'nsWSRunObject.cpp',
-    'TextEditorTest.cpp',
-    'TypeInState.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+if CONFIG['ENABLE_EDITOR_API_LOG']:
+    CPP_SOURCES += [
+        'nsEditorTxnLog.cpp',
+    ]
 
-LOCAL_INCLUDES += [
-    '../base',
-    '../text',
-    '/content/base/src',
-    '/editor/txmgr/src',
-    '/layout/generic',
-    '/layout/style',
-    '/layout/tables',
-    '/layout/xul',
-]
+LIBRARY_NAME = 'htmleditor_s'
 
-FINAL_LIBRARY = 'gklayout'

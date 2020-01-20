@@ -6,9 +6,13 @@
 
 #include "nsStringBundleTextOverride.h"
 #include "nsString.h"
+#include "nsEscape.h"
 
 #include "nsNetUtil.h"
 #include "nsAppDirectoryServiceDefs.h"
+
+static NS_DEFINE_CID(kPersistentPropertiesCID, NS_IPERSISTENTPROPERTIES_CID);
+
 
 // first we need a simple class which wraps a nsIPropertyElement and
 // cuts out the leading URL from the key
@@ -29,7 +33,7 @@ private:
     uint32_t mURLLength;
 };
 
-NS_IMPL_ISUPPORTS(URLPropertyElement, nsIPropertyElement)
+NS_IMPL_ISUPPORTS1(URLPropertyElement, nsIPropertyElement)
 
 // we'll tweak the key on the way through, and remove the url prefix
 NS_IMETHODIMP
@@ -107,8 +111,8 @@ private:
 //
 // nsStringBundleTextOverride implementation
 //
-NS_IMPL_ISUPPORTS(nsStringBundleTextOverride,
-                  nsIStringBundleOverride)
+NS_IMPL_ISUPPORTS1(nsStringBundleTextOverride,
+                   nsIStringBundleOverride)
 
 nsresult
 nsStringBundleTextOverride::Init()
@@ -149,7 +153,6 @@ nsStringBundleTextOverride::Init()
     rv = NS_OpenURI(getter_AddRefs(in), uri);
     if (NS_FAILED(rv)) return rv;
 
-    static NS_DEFINE_CID(kPersistentPropertiesCID, NS_IPERSISTENTPROPERTIES_CID);
     mValues = do_CreateInstance(kPersistentPropertiesCID, &rv);
     if (NS_FAILED(rv)) return rv;
 
@@ -225,7 +228,7 @@ nsStringBundleTextOverride::EnumerateKeysInBundle(const nsACString& aURL,
 //
 
 
-NS_IMPL_ISUPPORTS(nsPropertyEnumeratorByURL, nsISimpleEnumerator)
+NS_IMPL_ISUPPORTS1(nsPropertyEnumeratorByURL, nsISimpleEnumerator)
 
 NS_IMETHODIMP
 nsPropertyEnumeratorByURL::GetNext(nsISupports **aResult)

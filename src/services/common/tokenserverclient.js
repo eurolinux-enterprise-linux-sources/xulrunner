@@ -14,10 +14,9 @@ this.EXPORTED_SYMBOLS = [
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/Preferences.jsm");
-Cu.import("resource://gre/modules/Log.jsm");
+Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-common/rest.js");
 Cu.import("resource://services-common/utils.js");
-Cu.import("resource://services-common/observers.js");
 
 const Prefs = new Preferences("services.common.tokenserverclient.");
 
@@ -35,12 +34,6 @@ this.TokenServerClientError = function TokenServerClientError(message) {
 }
 TokenServerClientError.prototype = new Error();
 TokenServerClientError.prototype.constructor = TokenServerClientError;
-TokenServerClientError.prototype._toStringFields = function() {
-  return {message: this.message};
-}
-TokenServerClientError.prototype.toString = function() {
-  return this.name + "(" + JSON.stringify(this._toStringFields()) + ")";
-}
 
 /**
  * Represents a TokenServerClient error that occurred in the network layer.
@@ -56,9 +49,6 @@ this.TokenServerClientNetworkError =
 TokenServerClientNetworkError.prototype = new TokenServerClientError();
 TokenServerClientNetworkError.prototype.constructor =
   TokenServerClientNetworkError;
-TokenServerClientNetworkError.prototype._toStringFields = function() {
-  return {error: this.error};
-}
 
 /**
  * Represents a TokenServerClient error that occurred on the server.
@@ -92,7 +82,6 @@ TokenServerClientNetworkError.prototype._toStringFields = function() {
  */
 this.TokenServerClientServerError =
  function TokenServerClientServerError(message, cause="general") {
-  this.now = new Date().toISOString(); // may be useful to diagnose time-skew issues.
   this.name = "TokenServerClientServerError";
   this.message = message || "Server error.";
   this.cause = cause;
@@ -100,20 +89,6 @@ this.TokenServerClientServerError =
 TokenServerClientServerError.prototype = new TokenServerClientError();
 TokenServerClientServerError.prototype.constructor =
   TokenServerClientServerError;
-
-TokenServerClientServerError.prototype._toStringFields = function() {
-  let fields = {
-    now: this.now,
-    message: this.message,
-    cause: this.cause,
-  };
-  if (this.response) {
-    fields.response_body = this.response.body;
-    fields.response_headers = this.response.headers;
-    fields.response_status = this.response.status;
-  }
-  return fields;
-};
 
 /**
  * Represents a client to the Token Server.
@@ -139,8 +114,8 @@ TokenServerClientServerError.prototype._toStringFields = function() {
  *    at fault (e.g. differentiating a 503 from a 401).
  */
 this.TokenServerClient = function TokenServerClient() {
-  this._log = Log.repository.getLogger("Common.TokenServerClient");
-  this._log.level = Log.Level[Prefs.get("logger.level")];
+  this._log = Log4Moz.repository.getLogger("Common.TokenServerClient");
+  this._log.level = Log4Moz.Level[Prefs.get("logger.level")];
 }
 TokenServerClient.prototype = {
   /**
@@ -231,7 +206,8 @@ TokenServerClient.prototype = {
    *         (bool) Whether to send acceptance to service conditions.
    */
   getTokenFromBrowserIDAssertion:
-    function getTokenFromBrowserIDAssertion(url, assertion, cb, addHeaders={}) {
+    function getTokenFromBrowserIDAssertion(url, assertion, cb,
+                                            conditionsAccepted=false) {
     if (!url) {
       throw new TokenServerClientError("url argument is not valid.");
     }
@@ -246,12 +222,13 @@ TokenServerClient.prototype = {
 
     this._log.debug("Beginning BID assertion exchange: " + url);
 
-    let req = this.newRESTRequest(url);
+    let req = new RESTRequest(url);
     req.setHeader("Accept", "application/json");
-    req.setHeader("Authorization", "BrowserID " + assertion);
+    req.setHeader("Authorization", "Browser-ID " + assertion);
 
-    for (let header in addHeaders) {
-      req.setHeader(header, addHeaders[header]);
+    if (conditionsAccepted) {
+      // Value is irrelevant.
+      req.setHeader("X-Conditions-Accepted", "1");
     }
 
     let client = this;
@@ -329,10 +306,6 @@ TokenServerClient.prototype = {
       return;
     }
 
-    // Any response status can have X-Backoff or X-Weave-Backoff headers.
-    this._maybeNotifyBackoff(response, "x-weave-backoff");
-    this._maybeNotifyBackoff(response, "x-backoff");
-
     // The service shouldn't have any 3xx, so we don't need to handle those.
     if (response.status != 200) {
       // We /should/ have a Cornice error report in the JSON. We log that to
@@ -353,10 +326,8 @@ TokenServerClient.prototype = {
         error.message = "Malformed request.";
         error.cause = "malformed-request";
       } else if (response.status == 401) {
-        // Cause can be invalid-credentials, invalid-timestamp, or
-        // invalid-generation.
-        error.message = "Authentication failed.";
-        error.cause = result.status;
+        error.message("Authentication failed.");
+        error.cause = "invalid-credentials";
       }
 
       // 403 should represent a "condition acceptance needed" response.
@@ -384,15 +355,11 @@ TokenServerClient.prototype = {
         error.cause = "unknown-service";
       }
 
-      // A Retry-After header should theoretically only appear on a 503, but
-      // we'll look for it on any error response.
-      this._maybeNotifyBackoff(response, "retry-after");
-
       cb(error, null);
       return;
     }
 
-    for (let k of ["id", "key", "api_endpoint", "uid", "duration"]) {
+    for (let k of ["id", "key", "api_endpoint", "uid"]) {
       if (!(k in result)) {
         let error = new TokenServerClientServerError("Expected key not " +
                                                      " present in result: " +
@@ -410,41 +377,6 @@ TokenServerClient.prototype = {
       key:      result.key,
       endpoint: result.api_endpoint,
       uid:      result.uid,
-      duration: result.duration,
     });
-  },
-
-  /*
-   * The prefix used for all notifications sent by this module.  This
-   * allows the handler of notifications to be sure they are handling
-   * notifications for the service they expect.
-   *
-   * If not set, no notifications will be sent.
-   */
-  observerPrefix: null,
-
-  // Given an optional header value, notify that a backoff has been requested.
-  _maybeNotifyBackoff: function (response, headerName) {
-    if (!this.observerPrefix) {
-      return;
-    }
-    let headerVal = response.headers[headerName];
-    if (!headerVal) {
-      return;
-    }
-    let backoffInterval;
-    try {
-      backoffInterval = parseInt(headerVal, 10);
-    } catch (ex) {
-      this._log.error("TokenServer response had invalid backoff value in '" +
-                      headerName + "' header: " + headerVal);
-      return;
-    }
-    Observers.notify(this.observerPrefix + ":backoff:interval", backoffInterval);
-  },
-
-  // override points for testing.
-  newRESTRequest: function(url) {
-    return new RESTRequest(url);
   }
 };

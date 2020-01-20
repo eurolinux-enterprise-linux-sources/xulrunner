@@ -7,11 +7,17 @@
 /* class that a parent frame uses to reflow a block frame */
 
 #include "nsBlockReflowContext.h"
-#include "nsBlockReflowState.h"
+#include "nsLineLayout.h"
 #include "nsFloatManager.h"
+#include "nsPresContext.h"
+#include "nsFrameManager.h"
+#include "nsIContent.h"
+#include "nsStyleContext.h"
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsLineBox.h"
+#include "nsGkAtoms.h"
+#include "nsCOMPtr.h"
 #include "nsLayoutUtils.h"
 
 #ifdef DEBUG
@@ -28,7 +34,7 @@ nsBlockReflowContext::nsBlockReflowContext(nsPresContext* aPresContext,
                                            const nsHTMLReflowState& aParentRS)
   : mPresContext(aPresContext),
     mOuterReflowState(aParentRS),
-    mMetrics(aParentRS.GetWritingMode())
+    mMetrics()
 {
 }
 
@@ -46,7 +52,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
   bool* aMayNeedRetry, bool* aBlockIsEmpty)
 {
   // Include frame's top margin
-  aMargin->Include(aRS.ComputedPhysicalMargin().top);
+  aMargin->Include(aRS.mComputedMargin.top);
 
   // The inclusion of the bottom margin when empty is done by the caller
   // since it doesn't need to be done by the top-level (non-recursive)
@@ -54,7 +60,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
 
 #ifdef NOISY_VERTICAL_MARGINS
   nsFrame::ListTag(stdout, aRS.frame);
-  printf(": %d => %d\n", aRS.ComputedPhysicalMargin().top, aMargin->get());
+  printf(": %d => %d\n", aRS.mComputedMargin.top, aMargin->get());
 #endif
 
   bool dirtiedLine = false;
@@ -68,7 +74,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
   nsIFrame* frame = DescendIntoBlockLevelFrame(aRS.frame);
   nsPresContext* prescontext = frame->PresContext();
   nsBlockFrame* block = nullptr;
-  if (0 == aRS.ComputedPhysicalBorderPadding().top) {
+  if (0 == aRS.mComputedBorderPadding.top) {
     block = nsLayoutUtils::GetAsBlock(frame);
     if (block) {
       bool topMarginRoot, unused;
@@ -158,7 +164,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
               dirtiedLine = true;
             }
             if (isEmpty)
-              aMargin->Include(innerReflowState.ComputedPhysicalMargin().bottom);
+              aMargin->Include(innerReflowState.mComputedMargin.bottom);
           }
           if (outerReflowState != &aRS) {
             delete const_cast<nsHTMLReflowState*>(outerReflowState);
@@ -226,8 +232,8 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
 
     // Adjust the available height if its constrained so that the
     // child frame doesn't think it can reflow into its margin area.
-    if (NS_UNCONSTRAINEDSIZE != aFrameRS.AvailableHeight()) {
-      aFrameRS.AvailableHeight() -= mTopMargin.get() + aClearance;
+    if (NS_UNCONSTRAINEDSIZE != aFrameRS.availableHeight) {
+      aFrameRS.availableHeight -= mTopMargin.get() + aClearance;
     }
   }
 
@@ -241,20 +247,19 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
     // from 10.3.3 to determine what to apply. At this point in the
     // reflow auto left/right margins will have a zero value.
 
-    mX = tx = mSpace.x + aFrameRS.ComputedPhysicalMargin().left;
+    mX = tx = mSpace.x + aFrameRS.mComputedMargin.left;
     mY = ty = mSpace.y + mTopMargin.get() + aClearance;
 
     if ((mFrame->GetStateBits() & NS_BLOCK_FLOAT_MGR) == 0)
-      aFrameRS.mBlockDelta =
-        mOuterReflowState.mBlockDelta + ty - aLine->BStart();
+      aFrameRS.mBlockDelta = mOuterReflowState.mBlockDelta + ty - aLine->mBounds.y;
   }
 
   // Let frame know that we are reflowing it
   mFrame->WillReflow(mPresContext);
 
 #ifdef DEBUG
-  mMetrics.Width() = nscoord(0xdeadbeef);
-  mMetrics.Height() = nscoord(0xdeadbeef);
+  mMetrics.width = nscoord(0xdeadbeef);
+  mMetrics.height = nscoord(0xdeadbeef);
 #endif
 
   mOuterReflowState.mFloatManager->Translate(tx, ty);
@@ -263,16 +268,16 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
 
 #ifdef DEBUG
   if (!NS_INLINE_IS_BREAK_BEFORE(aFrameReflowStatus)) {
-    if (CRAZY_SIZE(mMetrics.Width()) || CRAZY_SIZE(mMetrics.Height())) {
+    if (CRAZY_WIDTH(mMetrics.width) || CRAZY_HEIGHT(mMetrics.height)) {
       printf("nsBlockReflowContext: ");
       nsFrame::ListTag(stdout, mFrame);
-      printf(" metrics=%d,%d!\n", mMetrics.Width(), mMetrics.Height());
+      printf(" metrics=%d,%d!\n", mMetrics.width, mMetrics.height);
     }
-    if ((mMetrics.Width() == nscoord(0xdeadbeef)) ||
-        (mMetrics.Height() == nscoord(0xdeadbeef))) {
+    if ((mMetrics.width == nscoord(0xdeadbeef)) ||
+        (mMetrics.height == nscoord(0xdeadbeef))) {
       printf("nsBlockReflowContext: ");
       nsFrame::ListTag(stdout, mFrame);
-      printf(" didn't set w/h %d,%d!\n", mMetrics.Width(), mMetrics.Height());
+      printf(" didn't set w/h %d,%d!\n", mMetrics.width, mMetrics.height);
     }
   }
 #endif
@@ -297,7 +302,7 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
         // which detaches the placeholder from the float.
         nsOverflowContinuationTracker::AutoFinish fini(aState.mOverflowTracker, mFrame);
         static_cast<nsContainerFrame*>(kidNextInFlow->GetParent())
-          ->DeleteNextInFlowChild(kidNextInFlow, true);
+          ->DeleteNextInFlowChild(mPresContext, kidNextInFlow, true);
       }
     }
   }
@@ -311,24 +316,25 @@ nsBlockReflowContext::ReflowBlock(const nsRect&       aSpace,
  * margins (CSS2 8.3.1). Also apply relative positioning.
  */
 bool
-nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState&  aReflowState,
-                                 bool                      aForceFit,
-                                 nsLineBox*                aLine,
-                                 nsCollapsingMargin&       aBottomMarginResult,
-                                 nsOverflowAreas&          aOverflowAreas,
-                                 nsReflowStatus            aReflowStatus,
-                                 nscoord                   aContainerWidth)
+nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
+                                 bool                     aForceFit,
+                                 nsLineBox*               aLine,
+                                 nsCollapsingMargin&      aBottomMarginResult,
+                                 nsRect&                  aInFlowBounds,
+                                 nsOverflowAreas&         aOverflowAreas,
+                                 nsReflowStatus           aReflowStatus)
 {
   // Compute collapsed bottom margin value.
   if (NS_FRAME_IS_COMPLETE(aReflowStatus)) {
     aBottomMarginResult = mMetrics.mCarriedOutBottomMargin;
-    aBottomMarginResult.Include(aReflowState.ComputedPhysicalMargin().bottom);
+    aBottomMarginResult.Include(aReflowState.mComputedMargin.bottom);
   } else {
     // The used bottom-margin is set to zero above a break.
     aBottomMarginResult.Zero();
   }
 
-  nsPoint position(mX, mY);
+  nscoord x = mX;
+  nscoord y = mY;
   nscoord backupContainingBlockAdvance = 0;
 
   // Check whether the block's bottom margin collapses with its top
@@ -340,7 +346,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState&  aReflowState,
   // Mark the frame as non-dirty; it has been reflowed (or we wouldn't
   // be here), and we don't want to assert in CachedIsEmpty()
   mFrame->RemoveStateBits(NS_FRAME_IS_DIRTY);
-  bool empty = 0 == mMetrics.Height() && aLine->CachedIsEmpty();
+  bool empty = 0 == mMetrics.height && aLine->CachedIsEmpty();
   if (empty) {
     // Collapse the bottom margin with the top margin that was already
     // applied.
@@ -352,7 +358,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState&  aReflowState,
     printf(": ");
     nsFrame::ListTag(stdout, mFrame);
     printf(" -- collapsing top & bottom margin together; y=%d spaceY=%d\n",
-           position.y, mSpace.y);
+           y, mSpace.y);
 #endif
     // Section 8.3.1 of CSS 2.1 says that blocks with adjoining
     // top/bottom margins whose top margin collapses with their
@@ -377,9 +383,9 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState&  aReflowState,
   // See if the frame fit. If it's the first frame or empty then it
   // always fits. If the height is unconstrained then it always fits,
   // even if there's some sort of integer overflow that makes y +
-  // mMetrics.Height() appear to go beyond the available height.
+  // mMetrics.height appear to go beyond the available height.
   if (!empty && !aForceFit && mSpace.height != NS_UNCONSTRAINEDSIZE) {
-    nscoord yMost = position.y - backupContainingBlockAdvance + mMetrics.Height();
+    nscoord yMost = y - backupContainingBlockAdvance + mMetrics.height;
     if (yMost > mSpace.YMost()) {
       // didn't fit, we must acquit.
       mFrame->DidReflow(mPresContext, &aReflowState, nsDidReflowStatus::FINISHED);
@@ -387,20 +393,20 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState&  aReflowState,
     }
   }
 
-  aLine->SetBounds(aReflowState.GetWritingMode(),
-                   nsRect(position.x,
-                          position.y - backupContainingBlockAdvance,
-                          mMetrics.Width(),
-                          mMetrics.Height()),
-                   aContainerWidth);
-
-  aReflowState.ApplyRelativePositioning(&position);
-
+  aInFlowBounds = nsRect(x, y - backupContainingBlockAdvance,
+                         mMetrics.width, mMetrics.height);
+  
+  // Apply CSS relative positioning
+  const nsStyleDisplay* styleDisp = mFrame->StyleDisplay();
+  if (NS_STYLE_POSITION_RELATIVE == styleDisp->mPosition) {
+    x += aReflowState.mComputedOffsets.left;
+    y += aReflowState.mComputedOffsets.top;
+  }
+  
   // Now place the frame and complete the reflow process
-  nsContainerFrame::FinishReflowChild(mFrame, mPresContext, mMetrics,
-                                      &aReflowState, position.x, position.y, 0);
+  nsContainerFrame::FinishReflowChild(mFrame, mPresContext, &aReflowState, mMetrics, x, y, 0);
 
-  aOverflowAreas = mMetrics.mOverflowAreas + position;
+  aOverflowAreas = mMetrics.mOverflowAreas + nsPoint(x, y);
 
   return true;
 }

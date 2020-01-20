@@ -1,4 +1,6 @@
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * vim:set ts=2 sw=2 sts=2 et filetype=javascript
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -11,10 +13,6 @@ module.metadata = {
 const { Cc, Ci, Cr } = require("chrome");
 const apiUtils = require("./deprecated/api-utils");
 const errors = require("./deprecated/errors");
-const { isString, isUndefined, instanceOf } = require('./lang/type');
-const { URL } = require('./url');
-
-const NOTIFICATION_DIRECTIONS  = ["auto", "ltr", "rtl"];
 
 try {
   let alertServ = Cc["@mozilla.org/alerts-service;1"].
@@ -40,21 +38,20 @@ exports.notify = function notifications_notify(options) {
   };
   function notifyWithOpts(notifyFn) {
     notifyFn(valOpts.iconURL, valOpts.title, valOpts.text, !!clickObserver,
-             valOpts.data, clickObserver, valOpts.tag, valOpts.dir, valOpts.lang);
+             valOpts.data, clickObserver);
   }
   try {
     notifyWithOpts(notify);
   }
+  catch (err if err instanceof Ci.nsIException &&
+                err.result == Cr.NS_ERROR_FILE_NOT_FOUND) {
+    console.warn("The notification icon named by " + valOpts.iconURL +
+                 " does not exist.  A default icon will be used instead.");
+    delete valOpts.iconURL;
+    notifyWithOpts(notify);
+  }
   catch (err) {
-    if (err instanceof Ci.nsIException && err.result == Cr.NS_ERROR_FILE_NOT_FOUND) {
-      console.warn("The notification icon named by " + valOpts.iconURL +
-                   " does not exist.  A default icon will be used instead.");
-      delete valOpts.iconURL;
-      notifyWithOpts(notify);
-    }
-    else {
-      notifyWithOpts(notifyUsingConsole);
-    }
+    notifyWithOpts(notifyUsingConsole);
   }
 };
 
@@ -71,32 +68,15 @@ function validateOptions(options) {
       is: ["string", "undefined"]
     },
     iconURL: {
-      is: ["string", "undefined", "object"],
-      ok: function(value) {
-        return isUndefined(value) || isString(value) || (value instanceof URL);
-      },
-      msg: "`iconURL` must be a string or an URL instance."
+      is: ["string", "undefined"]
     },
     onClick: {
       is: ["function", "undefined"]
     },
     text: {
-      is: ["string", "undefined", "number"]
+      is: ["string", "undefined"]
     },
     title: {
-      is: ["string", "undefined", "number"]
-    },
-    tag: {
-      is: ["string", "undefined", "number"]
-    },
-    dir: {
-      is: ["string", "undefined"],
-      ok: function(value) {
-        return isUndefined(value) || ~NOTIFICATION_DIRECTIONS.indexOf(value);
-      },
-      msg: '`dir` option must be one of: "auto", "ltr" or "rtl".'
-    },
-    lang: {
       is: ["string", "undefined"]
     }
   });

@@ -8,10 +8,14 @@
 
 #include <string.h>
 
+#include "jsprf.h"
 #include "jsapi.h"
+#include "jscntxt.h"
 #include "jsscript.h"
 
 #include "vm/Debugger.h"
+
+#include "jsscriptinlines.h"
 
 using namespace js;
 
@@ -33,7 +37,7 @@ XDRBuffer::grow(size_t n)
     size_t offset = cursor - base;
     size_t newCapacity = JS_ROUNDUP(offset + n, MEM_BLOCK);
     if (isUint32Overflow(newCapacity)) {
-        JS_ReportErrorNumber(cx(), js_GetErrorMessage, nullptr, JSMSG_TOO_BIG_TO_ENCODE);
+        JS_ReportErrorNumber(cx(), js_GetErrorMessage, NULL, JSMSG_TOO_BIG_TO_ENCODE);
         return false;
     }
 
@@ -78,7 +82,7 @@ VersionCheck(XDRState<mode> *xdr)
 
     if (mode == XDR_DECODE && bytecodeVer != XDR_BYTECODE_VERSION) {
         /* We do not provide binary compatibility with older scripts. */
-        JS_ReportErrorNumber(xdr->cx(), js_GetErrorMessage, nullptr, JSMSG_BAD_SCRIPT_MAGIC);
+        JS_ReportErrorNumber(xdr->cx(), js_GetErrorMessage, NULL, JSMSG_BAD_SCRIPT_MAGIC);
         return false;
     }
 
@@ -90,7 +94,7 @@ bool
 XDRState<mode>::codeFunction(MutableHandleObject objp)
 {
     if (mode == XDR_DECODE)
-        objp.set(nullptr);
+        objp.set(NULL);
 
     if (!VersionCheck(this))
         return false;
@@ -102,31 +106,55 @@ template<XDRMode mode>
 bool
 XDRState<mode>::codeScript(MutableHandleScript scriptp)
 {
-    if (mode == XDR_DECODE)
-        scriptp.set(nullptr);
+    RootedScript script(cx());
+    if (mode == XDR_DECODE) {
+        script = NULL;
+        scriptp.set(NULL);
+    } else {
+        script = scriptp.get();
+    }
 
     if (!VersionCheck(this))
         return false;
 
-    if (!XDRScript(this, NullPtr(), NullPtr(), NullPtr(), scriptp))
+    if (!XDRScript(this, NullPtr(), NullPtr(), NullPtr(), &script))
         return false;
+
+    if (mode == XDR_DECODE) {
+        JS_ASSERT(!script->compileAndGo);
+        CallNewScriptHook(cx(), script, NullPtr());
+        Debugger::onNewScript(cx(), script, NULL);
+        scriptp.set(script);
+    }
 
     return true;
 }
 
 template<XDRMode mode>
-bool
-XDRState<mode>::codeConstValue(MutableHandleValue vp)
+void
+XDRState<mode>::initScriptPrincipals(JSScript *script)
 {
-    return XDRScriptConst(this, vp);
+    JS_ASSERT(mode == XDR_DECODE);
+
+    /* The origin principals must be normalized at this point. */
+    JS_ASSERT_IF(principals, originPrincipals);
+    JS_ASSERT(!script->originPrincipals);
+    if (principals)
+        JS_ASSERT(script->principals() == principals);
+
+    if (originPrincipals) {
+        script->originPrincipals = originPrincipals;
+        JS_HoldPrincipals(originPrincipals);
+    }
 }
 
 XDRDecoder::XDRDecoder(JSContext *cx, const void *data, uint32_t length,
-                       JSPrincipals *originPrincipals)
+                       JSPrincipals *principals, JSPrincipals *originPrincipals)
   : XDRState<XDR_DECODE>(cx)
 {
     buf.setData(data, length);
-    this->originPrincipals_ = originPrincipals;
+    this->principals = principals;
+    this->originPrincipals = JSScript::normalizeOriginPrincipals(principals, originPrincipals);
 }
 
 template class js::XDRState<XDR_ENCODE>;

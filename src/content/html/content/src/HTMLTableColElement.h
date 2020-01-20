@@ -7,19 +7,36 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
+#include "nsIDOMHTMLTableColElement.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLTableColElement MOZ_FINAL : public nsGenericHTMLElement
+class HTMLTableColElement : public nsGenericHTMLElement,
+                            public nsIDOMHTMLTableColElement
 {
 public:
-  HTMLTableColElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+  HTMLTableColElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : nsGenericHTMLElement(aNodeInfo)
   {
-    SetHasWeirdParserInsertionMode();
+    SetIsDOMBinding();
   }
   virtual ~HTMLTableColElement();
+
+  // nsISupports
+  NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLTableColElement
+  NS_DECL_NSIDOMHTMLTABLECOLELEMENT
 
   uint32_t Span() const
   {
@@ -80,12 +97,11 @@ public:
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-protected:
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
-private:
-  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
+protected:
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 };
 
 } // namespace dom

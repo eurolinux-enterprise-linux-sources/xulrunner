@@ -4,29 +4,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ClientLayerManager.h"
-#include "CompositorChild.h"            // for CompositorChild
-#include "GeckoProfiler.h"              // for PROFILER_LABEL
-#include "gfxPrefs.h"                   // for gfxPrefs::LayersTileWidth/Height
-#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "nsIWidget.h"
+#include "mozilla/dom/TabChild.h"
 #include "mozilla/Hal.h"
-#include "mozilla/dom/ScreenOrientation.h"  // for ScreenOrientation
-#include "mozilla/dom/TabChild.h"       // for TabChild
-#include "mozilla/hal_sandbox/PHal.h"   // for ScreenConfiguration
+#include "mozilla/layers/PLayerChild.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/PLayerTransactionParent.h"
+#include "CompositorChild.h"
+#include "ipc/AutoOpenSurface.h"
+#include "ipc/ShadowLayerChild.h"
 #include "mozilla/layers/CompositableClient.h"
 #include "mozilla/layers/ContentClient.h"
-#include "mozilla/layers/ISurfaceAllocator.h"
-#include "mozilla/layers/LayersMessages.h"  // for EditReply, etc
-#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
-#include "mozilla/layers/PLayerChild.h"  // for PLayerChild
-#include "mozilla/layers/LayerTransactionChild.h"
-#include "mozilla/layers/TextureClientPool.h" // for TextureClientPool
-#include "mozilla/layers/SimpleTextureClientPool.h" // for SimpleTextureClientPool
-#include "nsAString.h"
-#include "nsIWidget.h"                  // for nsIWidget
-#include "nsIWidgetListener.h"
-#include "nsTArray.h"                   // for AutoInfallibleTArray
-#include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
-#include "TiledLayerBuffer.h"
+
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
 #endif
@@ -45,8 +34,6 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
   , mIsRepeatTransaction(false)
   , mTransactionIncomplete(false)
   , mCompositorMightResample(false)
-  , mNeedsComposite(false)
-  , mForwarder(new ShadowLayerForwarder)
 {
   MOZ_COUNT_CTOR(ClientLayerManager);
 }
@@ -61,7 +48,7 @@ ClientLayerManager::~ClientLayerManager()
 int32_t
 ClientLayerManager::GetMaxTextureSize() const
 {
-  return mForwarder->GetMaxTextureSize();
+  return ShadowLayerForwarder::GetMaxTextureSize();
 }
 
 void
@@ -85,7 +72,7 @@ ClientLayerManager::SetRoot(Layer* aLayer)
     if (mRoot) {
       Hold(mRoot);
     }
-    mForwarder->SetRoot(Hold(aLayer));
+    ShadowLayerForwarder::SetRoot(Hold(aLayer));
     NS_ASSERTION(aLayer, "Root can't be null");
     NS_ASSERTION(aLayer->Manager() == this, "Wrong manager");
     NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
@@ -99,7 +86,7 @@ ClientLayerManager::Mutated(Layer* aLayer)
   LayerManager::Mutated(aLayer);
 
   NS_ASSERTION(InConstruction() || InDrawing(), "wrong phase");
-  mForwarder->Mutated(Hold(aLayer));
+  ShadowLayerForwarder::Mutated(Hold(aLayer));
 }
 
 void
@@ -132,7 +119,7 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
   nsIntRect clientBounds;
   mWidget->GetClientBounds(clientBounds);
   clientBounds.x = clientBounds.y = 0;
-  mForwarder->BeginTransaction(mTargetBounds, mTargetRotation, clientBounds, orientation);
+  ShadowLayerForwarder::BeginTransaction(mTargetBounds, mTargetRotation, clientBounds, orientation);
 
   // If we're drawing on behalf of a context with async pan/zoom
   // enabled, then the entire buffer of thebes layers might be
@@ -169,7 +156,6 @@ ClientLayerManager::EndTransactionInternal(DrawThebesLayerCallback aCallback,
   MOZ_LAYERS_LOG(("  ----- (beginning paint)"));
   Log();
 #endif
-  profiler_tracing("Paint", "Rasterize", TRACING_INTERVAL_START);
 
   NS_ASSERTION(InConstruction(), "Should be in construction phase");
   mPhase = PHASE_DRAWING;
@@ -185,12 +171,9 @@ ClientLayerManager::EndTransactionInternal(DrawThebesLayerCallback aCallback,
   mThebesLayerCallback = aCallback;
   mThebesLayerCallbackData = aCallbackData;
 
-  GetRoot()->ComputeEffectiveTransforms(Matrix4x4());
+  GetRoot()->ComputeEffectiveTransforms(gfx3DMatrix());
 
   root->RenderLayer();
-  if (!mRepeatTransaction && !GetRoot()->GetInvalidRegion().IsEmpty()) {
-    GetRoot()->Mutated();
-  }
   
   mThebesLayerCallback = nullptr;
   mThebesLayerCallbackData = nullptr;
@@ -214,7 +197,7 @@ ClientLayerManager::EndTransaction(DrawThebesLayerCallback aCallback,
     mWidget->PrepareWindowEffects();
   }
   EndTransactionInternal(aCallback, aCallbackData, aFlags);
-  ForwardTransaction(!(aFlags & END_NO_REMOTE_COMPOSITE));
+  ForwardTransaction();
 
   if (mRepeatTransaction) {
     mRepeatTransaction = false;
@@ -224,10 +207,6 @@ ClientLayerManager::EndTransaction(DrawThebesLayerCallback aCallback,
     mIsRepeatTransaction = false;
   } else {
     MakeSnapshotIfRequired();
-  }
-
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->ReturnDeferredClients();
   }
 }
 
@@ -248,41 +227,9 @@ ClientLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
   if (mWidget) {
     mWidget->PrepareWindowEffects();
   }
-  ForwardTransaction(!(aFlags & END_NO_REMOTE_COMPOSITE));
+  ForwardTransaction();
   MakeSnapshotIfRequired();
   return true;
-}
-
-CompositorChild *
-ClientLayerManager::GetRemoteRenderer()
-{
-  if (!mWidget) {
-    return nullptr;
-  }
-
-  return mWidget->GetRemoteRenderer();
-}
-
-void
-ClientLayerManager::Composite()
-{
-  if (LayerTransactionChild* manager = mForwarder->GetShadowManager()) {
-    manager->SendForceComposite();
-  }
-}
-
-void
-ClientLayerManager::DidComposite()
-{
-  MOZ_ASSERT(mWidget);
-  nsIWidgetListener *listener = mWidget->GetWidgetListener();
-  if (listener) {
-    listener->DidCompositeWindow();
-  }
-  listener = mWidget->GetAttachedWidgetListener();
-  if (listener) {
-    listener->DidCompositeWindow();
-  }
 }
 
 void 
@@ -292,27 +239,24 @@ ClientLayerManager::MakeSnapshotIfRequired()
     return;
   }
   if (mWidget) {
-    if (CompositorChild* remoteRenderer = GetRemoteRenderer()) {
+    if (CompositorChild* remoteRenderer = mWidget->GetRemoteRenderer()) {
       nsIntRect bounds;
       mWidget->GetBounds(bounds);
-      IntSize widgetSize = bounds.Size().ToIntSize();
       SurfaceDescriptor inSnapshot, snapshot;
-      if (mForwarder->AllocSurfaceDescriptor(widgetSize,
-                                             gfxContentType::COLOR_ALPHA,
-                                             &inSnapshot) &&
+      if (AllocSurfaceDescriptor(bounds.Size(),
+                                 gfxASurface::CONTENT_COLOR_ALPHA,
+                                 &inSnapshot) &&
           // The compositor will usually reuse |snapshot| and return
           // it through |outSnapshot|, but if it doesn't, it's
           // responsible for freeing |snapshot|.
           remoteRenderer->SendMakeSnapshot(inSnapshot, &snapshot)) {
-        RefPtr<DataSourceSurface> surf = GetSurfaceForDescriptor(snapshot);
-        DrawTarget* dt = mShadowTarget->GetDrawTarget();
-        Rect widgetRect(Point(0, 0), Size(widgetSize.width, widgetSize.height));
-        dt->DrawSurface(surf, widgetRect, widgetRect,
-                        DrawSurfaceOptions(),
-                        DrawOptions(1.0f, CompositionOp::OP_OVER));
+        AutoOpenSurface opener(OPEN_READ_ONLY, snapshot);
+        gfxASurface* source = opener.Get();
+
+        mShadowTarget->DrawSurface(source, source->GetSize());
       }
       if (IsSurfaceDescriptorValid(snapshot)) {
-        mForwarder->DestroySharedSurface(&snapshot);
+        ShadowLayerForwarder::DestroySharedSurface(&snapshot);
       }
     }
   }
@@ -330,46 +274,13 @@ ClientLayerManager::FlushRendering()
 }
 
 void
-ClientLayerManager::SendInvalidRegion(const nsIntRegion& aRegion)
-{
-  if (mWidget) {
-    if (CompositorChild* remoteRenderer = mWidget->GetRemoteRenderer()) {
-      remoteRenderer->SendNotifyRegionInvalidated(aRegion);
-    }
-  }
-}
-
-uint32_t
-ClientLayerManager::StartFrameTimeRecording(int32_t aBufferSize)
-{
-  CompositorChild* renderer = GetRemoteRenderer();
-  if (renderer) {
-    uint32_t startIndex;
-    renderer->SendStartFrameTimeRecording(aBufferSize, &startIndex);
-    return startIndex;
-  }
-  return -1;
-}
-
-void
-ClientLayerManager::StopFrameTimeRecording(uint32_t         aStartIndex,
-                                           nsTArray<float>& aFrameIntervals)
-{
-  CompositorChild* renderer = GetRemoteRenderer();
-  if (renderer) {
-    renderer->SendStopFrameTimeRecording(aStartIndex, &aFrameIntervals);
-  }
-}
-
-void
-ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
+ClientLayerManager::ForwardTransaction()
 {
   mPhase = PHASE_FORWARD;
 
   // forward this transaction's changeset to our LayerManagerComposite
-  bool sent;
   AutoInfallibleTArray<EditReply, 10> replies;
-  if (HasShadowManager() && mForwarder->EndTransaction(&replies, mRegionToClear, aScheduleComposite, &sent)) {
+  if (HasShadowManager() && ShadowLayerForwarder::EndTransaction(&replies)) {
     for (nsTArray<EditReply>::size_type i = 0; i < replies.Length(); ++i) {
       const EditReply& reply = replies[i];
 
@@ -379,10 +290,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpContentBufferSwap& obs = reply.get_OpContentBufferSwap();
 
-        CompositableClient* compositable =
-          CompositableClient::FromIPDLActor(obs.compositableChild());
+        CompositableChild* compositableChild =
+          static_cast<CompositableChild*>(obs.compositableChild());
         ContentClientRemote* contentClient =
-          static_cast<ContentClientRemote*>(compositable);
+          static_cast<ContentClientRemote*>(compositableChild->GetCompositableClient());
         MOZ_ASSERT(contentClient);
 
         contentClient->SwapBuffers(obs.frontUpdatedRegion());
@@ -394,24 +305,12 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpTextureSwap& ots = reply.get_OpTextureSwap();
 
-        CompositableClient* compositable =
-          CompositableClient::FromIPDLActor(ots.compositableChild());
-        MOZ_ASSERT(compositable);
-        compositable->SetDescriptorFromReply(ots.textureId(), ots.image());
-        break;
-      }
-      case EditReply::TReturnReleaseFence: {
-        const ReturnReleaseFence& rep = reply.get_ReturnReleaseFence();
-        FenceHandle fence = rep.fence();
-        PTextureChild* child = rep.textureChild();
+        CompositableChild* compositableChild =
+          static_cast<CompositableChild*>(ots.compositableChild());
+        MOZ_ASSERT(compositableChild);
 
-        if (!fence.IsValid() || !child) {
-          break;
-        }
-        RefPtr<TextureClient> texture = TextureClient::AsTextureClient(child);
-        if (texture) {
-          texture->SetReleaseFenceHandle(fence);
-        }
+        compositableChild->GetCompositableClient()
+          ->SetDescriptorFromReply(ots.textureId(), ots.image());
         break;
       }
 
@@ -419,15 +318,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
         NS_RUNTIMEABORT("not reached");
       }
     }
-
-    if (sent) {
-      mNeedsComposite = false;
-    }
   } else if (HasShadowManager()) {
     NS_WARNING("failed to forward Layers transaction");
   }
 
-  mForwarder->RemoveTexturesIfNecessary();
   mPhase = PHASE_NONE;
 
   // this may result in Layers being deleted, which results in
@@ -452,62 +346,27 @@ bool
 ClientLayerManager::IsCompositingCheap()
 {
   // Whether compositing is cheap depends on the parent backend.
-  return mForwarder->mShadowManager &&
-         LayerManager::IsCompositingCheap(mForwarder->GetCompositorBackendType());
+  return mShadowManager &&
+         LayerManager::IsCompositingCheap(GetCompositorBackendType());
 }
 
 void
 ClientLayerManager::SetIsFirstPaint()
 {
-  mForwarder->SetIsFirstPaint();
-}
-
-TextureClientPool*
-ClientLayerManager::GetTexturePool(SurfaceFormat aFormat)
-{
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    if (mTexturePools[i]->GetFormat() == aFormat) {
-      return mTexturePools[i];
-    }
-  }
-
-  mTexturePools.AppendElement(
-      new TextureClientPool(aFormat, IntSize(gfxPrefs::LayersTileWidth(),
-                                             gfxPrefs::LayersTileHeight()),
-                            mForwarder));
-
-  return mTexturePools.LastElement();
-}
-
-SimpleTextureClientPool*
-ClientLayerManager::GetSimpleTileTexturePool(SurfaceFormat aFormat)
-{
-  int index = (int) aFormat;
-  mSimpleTilePools.EnsureLengthAtLeast(index+1);
-
-  if (mSimpleTilePools[index].get() == nullptr) {
-    mSimpleTilePools[index] = new SimpleTextureClientPool(aFormat, IntSize(gfxPrefs::LayersTileWidth(),
-                                                                           gfxPrefs::LayersTileHeight()),
-                                                          mForwarder);
-  }
-
-  return mSimpleTilePools[index];
+  ShadowLayerForwarder::SetIsFirstPaint();
 }
 
 void
 ClientLayerManager::ClearCachedResources(Layer* aSubtree)
 {
   MOZ_ASSERT(!HasShadowManager() || !aSubtree);
-  if (LayerTransactionChild* manager = mForwarder->GetShadowManager()) {
+  if (PLayerTransactionChild* manager = GetShadowManager()) {
     manager->SendClearCachedResources();
   }
   if (aSubtree) {
     ClearLayer(aSubtree);
   } else if (mRoot) {
     ClearLayer(mRoot);
-  }
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->Clear();
   }
 }
 
@@ -524,23 +383,23 @@ ClientLayerManager::ClearLayer(Layer* aLayer)
 void
 ClientLayerManager::GetBackendName(nsAString& aName)
 {
-  switch (mForwarder->GetCompositorBackendType()) {
-    case LayersBackend::LAYERS_BASIC: aName.AssignLiteral("Basic"); return;
-    case LayersBackend::LAYERS_OPENGL: aName.AssignLiteral("OpenGL"); return;
-    case LayersBackend::LAYERS_D3D9: aName.AssignLiteral("Direct3D 9"); return;
-    case LayersBackend::LAYERS_D3D10: aName.AssignLiteral("Direct3D 10"); return;
-    case LayersBackend::LAYERS_D3D11: aName.AssignLiteral("Direct3D 11"); return;
+  switch (Compositor::GetBackend()) {
+    case LAYERS_BASIC: aName.AssignLiteral("Basic"); return;
+    case LAYERS_OPENGL: aName.AssignLiteral("OpenGL"); return;
+    case LAYERS_D3D9: aName.AssignLiteral("Direct3D 9"); return;
+    case LAYERS_D3D10: aName.AssignLiteral("Direct3D 10"); return;
+    case LAYERS_D3D11: aName.AssignLiteral("Direct3D 11"); return;
     default: NS_RUNTIMEABORT("Invalid backend");
   }
 }
 
 bool
 ClientLayerManager::ProgressiveUpdateCallback(bool aHasPendingNewThebesContent,
-                                              ParentLayerRect& aCompositionBounds,
-                                              CSSToParentLayerScale& aZoom,
+                                              gfx::Rect& aViewport,
+                                              float& aScaleX,
+                                              float& aScaleY,
                                               bool aDrawingCritical)
 {
-  aZoom.scale = 1.0;
 #ifdef MOZ_WIDGET_ANDROID
   Layer* primaryScrollable = GetPrimaryScrollableLayer();
   if (primaryScrollable) {
@@ -548,15 +407,17 @@ ClientLayerManager::ProgressiveUpdateCallback(bool aHasPendingNewThebesContent,
 
     // This is derived from the code in
     // gfx/layers/ipc/CompositorParent.cpp::TransformShadowTree.
-    CSSToLayerScale paintScale = metrics.LayersPixelsPerCSSPixel();
+    const gfx3DMatrix& rootTransform = GetRoot()->GetTransform();
+    CSSToLayerScale paintScale = metrics.mDevPixelsPerCSSPixel
+        / LayerToLayoutDeviceScale(rootTransform.GetXScale(), rootTransform.GetYScale());
     const CSSRect& metricsDisplayPort =
       (aDrawingCritical && !metrics.mCriticalDisplayPort.IsEmpty()) ?
         metrics.mCriticalDisplayPort : metrics.mDisplayPort;
-    LayerRect displayPort = (metricsDisplayPort + metrics.GetScrollOffset()) * paintScale;
+    LayerRect displayPort = (metricsDisplayPort + metrics.mScrollOffset) * paintScale;
 
     return AndroidBridge::Bridge()->ProgressiveUpdateCallback(
       aHasPendingNewThebesContent, displayPort, paintScale.scale, aDrawingCritical,
-      aCompositionBounds, aZoom);
+      aViewport, aScaleX, aScaleY);
   }
 #endif
 

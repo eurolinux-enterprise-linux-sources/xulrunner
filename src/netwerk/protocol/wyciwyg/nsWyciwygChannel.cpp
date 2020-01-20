@@ -6,27 +6,14 @@
 
 #include "nsWyciwyg.h"
 #include "nsWyciwygChannel.h"
+#include "nsIServiceManager.h"
 #include "nsILoadGroup.h"
+#include "nsIScriptSecurityManager.h"
 #include "nsNetUtil.h"
-#include "LoadContextInfo.h"
-#include "nsICacheService.h" // only to initialize
-#include "nsICacheStorageService.h"
-#include "nsICacheStorage.h"
-#include "nsICacheEntry.h"
-#include "CacheObserver.h"
+#include "nsICacheService.h"
+#include "nsICacheSession.h"
 #include "nsCharsetSource.h"
 #include "nsProxyRelease.h"
-#include "nsThreadUtils.h"
-#include "nsIEventTarget.h"
-#include "nsIInputStream.h"
-#include "nsIInputStreamPump.h"
-#include "nsIOutputStream.h"
-#include "nsIProgressEventSink.h"
-#include "nsIURI.h"
-#include "mozilla/DebugOnly.h"
-#include "mozilla/unused.h"
-
-typedef mozilla::net::LoadContextInfo LoadContextInfo;
 
 // Must release mChannel on the main thread
 class nsWyciwygAsyncEvent : public nsRunnable {
@@ -39,7 +26,7 @@ public:
     NS_WARN_IF_FALSE(thread, "Couldn't get the main thread!");
     if (thread) {
       nsIWyciwygChannel *chan = static_cast<nsIWyciwygChannel *>(mChannel);
-      mozilla::unused << mChannel.forget();
+      mChannel.forget();
       NS_ProxyRelease(thread, chan);
     }
   }
@@ -61,16 +48,18 @@ public:
 
 class nsWyciwygWriteEvent : public nsWyciwygAsyncEvent {
 public:
-  nsWyciwygWriteEvent(nsWyciwygChannel *aChannel, const nsAString &aData)
-    : nsWyciwygAsyncEvent(aChannel), mData(aData) {}
+  nsWyciwygWriteEvent(nsWyciwygChannel *aChannel, const nsAString &aData, 
+                      const nsACString &spec)
+    : nsWyciwygAsyncEvent(aChannel), mData(aData), mSpec(spec) {}
 
   NS_IMETHOD Run()
   {
-    mChannel->WriteToCacheEntryInternal(mData);
+    mChannel->WriteToCacheEntryInternal(mData, mSpec);
     return NS_OK;
   }
 private:
   nsString mData;
+  nsCString mSpec;
 };
 
 class nsWyciwygCloseEvent : public nsWyciwygAsyncEvent {
@@ -90,8 +79,7 @@ private:
 
 // nsWyciwygChannel methods 
 nsWyciwygChannel::nsWyciwygChannel()
-  : mMode(NONE),
-    mStatus(NS_OK),
+  : mStatus(NS_OK),
     mIsPending(false),
     mCharsetAndSourceSet(false),
     mNeedToWriteCharset(false),
@@ -107,14 +95,14 @@ nsWyciwygChannel::~nsWyciwygChannel()
 {
 }
 
-NS_IMPL_ISUPPORTS(nsWyciwygChannel,
-                  nsIChannel,
-                  nsIRequest,
-                  nsIStreamListener,
-                  nsIRequestObserver,
-                  nsICacheEntryOpenCallback,
-                  nsIWyciwygChannel,
-                  nsIPrivateBrowsingChannel)
+NS_IMPL_THREADSAFE_ISUPPORTS7(nsWyciwygChannel,
+                              nsIChannel,
+                              nsIRequest,
+                              nsIStreamListener,
+                              nsIRequestObserver,
+                              nsICacheListener,
+                              nsIWyciwygChannel,
+                              nsIPrivateBrowsingChannel)
 
 nsresult
 nsWyciwygChannel::Init(nsIURI* uri)
@@ -123,24 +111,14 @@ nsWyciwygChannel::Init(nsIURI* uri)
 
   nsresult rv;
 
-  if (!mozilla::net::CacheObserver::UseNewCache()) {
-    // Since nsWyciwygChannel can use the new cache API off the main thread
-    // and that API normally does this initiation, we need to take care
-    // of initiating the old cache service here manually.  Will be removed
-    // with bug 913828.
-    MOZ_ASSERT(NS_IsMainThread());
-    nsCOMPtr<nsICacheService> service =
-      do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
-  }
-
   mURI = uri;
   mOriginalURI = uri;
 
-  nsCOMPtr<nsICacheStorageService> serv =
-    do_GetService("@mozilla.org/netwerk/cache-storage-service;1", &rv);
+  nsCOMPtr<nsICacheService> serv =
+    do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = serv->GetIoTarget(getter_AddRefs(mCacheIOTarget));
+  rv = serv->GetCacheIOTarget(getter_AddRefs(mCacheIOTarget));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -401,29 +379,28 @@ NS_IMETHODIMP
 nsWyciwygChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 {
   LOG(("nsWyciwygChannel::AsyncOpen [this=%p]\n", this));
-  MOZ_ASSERT(mMode == NONE, "nsWyciwygChannel already open");
 
   NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
-  NS_ENSURE_TRUE(mMode == NONE, NS_ERROR_IN_PROGRESS);
   NS_ENSURE_ARG_POINTER(listener);
 
-  mMode = READING;
+  nsAutoCString spec;
+  mURI->GetSpec(spec);
 
   // open a cache entry for this channel...
-  // mIsPending set to true since OnCacheEntryAvailable may be called
-  // synchronously and fails when mIsPending found false.
-  mIsPending = true;
-  nsresult rv = OpenCacheEntry(mURI, nsICacheStorage::OPEN_READONLY |
-                                     nsICacheStorage::CHECK_MULTITHREADED);
+  nsresult rv = OpenCacheEntry(spec, nsICache::ACCESS_READ);
+  if (rv == NS_ERROR_CACHE_KEY_NOT_FOUND) {
+    // Overwrite rv on purpose; if event dispatch fails we'll bail, and
+    // otherwise we'll wait until the event fires before calling back.
+    rv = NS_DispatchToCurrentThread(
+            NS_NewRunnableMethod(this, &nsWyciwygChannel::NotifyListener));
+  }
+
   if (NS_FAILED(rv)) {
     LOG(("nsWyciwygChannel::OpenCacheEntry failed [rv=%x]\n", rv));
-    mIsPending = false;
     return rv;
   }
 
-  // There is no code path that would invoke the listener sooner than
-  // we get to this line in case OnCacheEntryAvailable is invoked
-  // synchronously.
+  mIsPending = true;
   mListener = listener;
   mListenerContext = ctx;
 
@@ -437,56 +414,29 @@ nsWyciwygChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx)
 // nsIWyciwygChannel
 //////////////////////////////////////////////////////////////////////////////
 
-nsresult
-nsWyciwygChannel::EnsureWriteCacheEntry()
-{
-  MOZ_ASSERT(mMode == WRITING, "nsWyciwygChannel not open for writing");
-
-  if (!mCacheEntry) {
-    // OPEN_TRUNCATE will give us the entry instantly
-    nsresult rv = OpenCacheEntry(mURI, nsICacheStorage::OPEN_TRUNCATE);
-    if (NS_FAILED(rv) || !mCacheEntry) {
-      LOG(("  could not synchronously open cache entry for write!"));
-      return NS_ERROR_FAILURE;
-    }
-  }
-
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 nsWyciwygChannel::WriteToCacheEntry(const nsAString &aData)
 {
-  if (mMode == READING) {
-    LOG(("nsWyciwygChannel::WriteToCacheEntry already open for reading"));
-    MOZ_ASSERT(false);
-    return NS_ERROR_UNEXPECTED;
-  }
+  // URIs not thread-safe, so get spec now in case we need it
+  nsAutoCString spec;
+  nsresult rv = mURI->GetAsciiSpec(spec);
+  if (NS_FAILED(rv)) 
+    return rv;
 
-  mMode = WRITING;
-
-  if (mozilla::net::CacheObserver::UseNewCache()) {
-    nsresult rv = EnsureWriteCacheEntry();
-    if (NS_FAILED(rv)) return rv;
-  }
-
-  return mCacheIOTarget->Dispatch(new nsWyciwygWriteEvent(this, aData),
+  return mCacheIOTarget->Dispatch(new nsWyciwygWriteEvent(this, aData, spec),
                                   NS_DISPATCH_NORMAL);
 }
 
 nsresult
-nsWyciwygChannel::WriteToCacheEntryInternal(const nsAString &aData)
+nsWyciwygChannel::WriteToCacheEntryInternal(const nsAString &aData, const nsACString& spec)
 {
-  LOG(("nsWyciwygChannel::WriteToCacheEntryInternal [this=%p]", this));
   NS_ASSERTION(IsOnCacheIOThread(), "wrong thread");
 
   nsresult rv;
 
-  // With the new cache entry this will just pass as a no-op since we
-  // are opening the entry in WriteToCacheEntry.
-  rv = EnsureWriteCacheEntry();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (!mCacheEntry) {
+    rv = OpenCacheEntry(spec, nsICache::ACCESS_WRITE);
+    if (NS_FAILED(rv)) return rv;
   }
 
   if (mLoadFlags & INHIBIT_PERSISTENT_CACHING) {
@@ -502,7 +452,7 @@ nsWyciwygChannel::WriteToCacheEntryInternal(const nsAString &aData)
     WriteCharsetAndSourceToCache(mCharsetSource, mCharset);
     mNeedToWriteCharset = false;
   }
-
+  
   uint32_t out;
   if (!mCacheOutputStream) {
     // Get the outputstream from the cache entry.
@@ -511,13 +461,13 @@ nsWyciwygChannel::WriteToCacheEntryInternal(const nsAString &aData)
 
     // Write out a Byte Order Mark, so that we'll know if the data is
     // BE or LE when we go to read it.
-    char16_t bom = 0xFEFF;
+    PRUnichar bom = 0xFEFF;
     rv = mCacheOutputStream->Write((char *)&bom, sizeof(bom), &out);
     if (NS_FAILED(rv)) return rv;
   }
 
-  return mCacheOutputStream->Write((const char *)PromiseFlatString(aData).get(),
-                                   aData.Length() * sizeof(char16_t), &out);
+  return mCacheOutputStream->Write((char *)PromiseFlatString(aData).get(),
+                                   aData.Length() * sizeof(PRUnichar), &out);
 }
 
 
@@ -539,7 +489,7 @@ nsWyciwygChannel::CloseCacheEntryInternal(nsresult reason)
     mCacheInputStream = 0;
 
     if (NS_FAILED(reason))
-      mCacheEntry->AsyncDoom(nullptr); // here we were calling Doom() ...
+      mCacheEntry->Doom();
 
     mCacheEntry = 0;
   }
@@ -616,29 +566,17 @@ nsWyciwygChannel::GetCharsetAndSource(int32_t* aSource, nsACString& aCharset)
 }
 
 //////////////////////////////////////////////////////////////////////////////
-// nsICacheEntryOpenCallback
+// nsICachelistener
 //////////////////////////////////////////////////////////////////////////////
-
 NS_IMETHODIMP
-nsWyciwygChannel::OnCacheEntryCheck(nsICacheEntry* entry, nsIApplicationCache* appCache,
-                                    uint32_t* aResult)
+nsWyciwygChannel::OnCacheEntryAvailable(nsICacheEntryDescriptor * aCacheEntry, nsCacheAccessMode aMode, nsresult aStatus)
 {
-  *aResult = ENTRY_WANTED;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWyciwygChannel::OnCacheEntryAvailable(nsICacheEntry *aCacheEntry,
-                                        bool aNew,
-                                        nsIApplicationCache* aAppCache,
-                                        nsresult aStatus)
-{
-  LOG(("nsWyciwygChannel::OnCacheEntryAvailable [this=%p entry=%p "
-       "new=%d status=%x]\n", this, aCacheEntry, aNew, aStatus));
+  LOG(("nsWyciwygChannel::OnCacheEntryAvailable [this=%p entry=%x "
+       "access=%x status=%x]\n", this, aCacheEntry, aMode, aStatus));
 
   // if the channel's already fired onStopRequest, 
   // then we should ignore this event.
-  if (!mIsPending && !aNew)
+  if (!mIsPending)
     return NS_OK;
 
   // otherwise, we have to handle this event.
@@ -647,12 +585,12 @@ nsWyciwygChannel::OnCacheEntryAvailable(nsICacheEntry *aCacheEntry,
   else if (NS_SUCCEEDED(mStatus))
     mStatus = aStatus;
 
-  nsresult rv = NS_OK;
+  nsresult rv;
   if (NS_FAILED(mStatus)) {
     LOG(("channel was canceled [this=%p status=%x]\n", this, mStatus));
     rv = mStatus;
   }
-  else if (!aNew) { // advance to the next state...
+  else { // advance to the next state...
     rv = ReadFromCache();
   }
 
@@ -660,15 +598,16 @@ nsWyciwygChannel::OnCacheEntryAvailable(nsICacheEntry *aCacheEntry,
   if (NS_FAILED(rv)) {
     CloseCacheEntry(rv);
 
-    if (!aNew) {
-      // Since OnCacheEntryAvailable can be called directly from AsyncOpen
-      // we must dispatch.
-      NS_DispatchToCurrentThread(NS_NewRunnableMethod(
-        this, &nsWyciwygChannel::NotifyListener));
-    }
+    NotifyListener();
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsWyciwygChannel::OnCacheEntryDoomed(nsresult status)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 //-----------------------------------------------------------------------------
@@ -741,30 +680,43 @@ nsWyciwygChannel::OnStopRequest(nsIRequest *request, nsISupports *ctx, nsresult 
 //////////////////////////////////////////////////////////////////////////////
 
 nsresult
-nsWyciwygChannel::OpenCacheEntry(nsIURI *aURI,
-                                 uint32_t aOpenFlags)
+nsWyciwygChannel::OpenCacheEntry(const nsACString & aCacheKey,
+                                 nsCacheAccessMode aAccessMode)
 {
-  nsresult rv;
-
-  nsCOMPtr<nsICacheStorageService> cacheService =
-    do_GetService("@mozilla.org/netwerk/cache-storage-service;1", &rv);
+  nsresult rv = NS_ERROR_FAILURE;
+  // Get cache service
+  nsCOMPtr<nsICacheService> cacheService =
+    do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  bool anonymous = mLoadFlags & LOAD_ANONYMOUS;
-  nsRefPtr<LoadContextInfo> loadInfo = mozilla::net::GetLoadContextInfo(
-    mPrivateBrowsing, mAppId, mInBrowser, anonymous);
-
-  nsCOMPtr<nsICacheStorage> cacheStorage;
-  if (mLoadFlags & INHIBIT_PERSISTENT_CACHING)
-    rv = cacheService->MemoryCacheStorage(loadInfo, getter_AddRefs(cacheStorage));
+  // honor security settings
+  nsCacheStoragePolicy storagePolicy;
+  if (mPrivateBrowsing || mLoadFlags & INHIBIT_PERSISTENT_CACHING)
+    storagePolicy = nsICache::STORE_IN_MEMORY;
   else
-    rv = cacheService->DiskCacheStorage(loadInfo, false, getter_AddRefs(cacheStorage));
-  NS_ENSURE_SUCCESS(rv, rv);
+    storagePolicy = nsICache::STORE_ANYWHERE;
 
-  rv = cacheStorage->AsyncOpenURI(aURI, EmptyCString(), aOpenFlags, this);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsICacheSession> cacheSession;
+  nsAutoCString sessionName;
+  nsWyciwygProtocolHandler::GetCacheSessionName(mAppId, mInBrowser,
+                                                mPrivateBrowsing,
+                                                sessionName);
 
-  return NS_OK;
+  // Open a stream based cache session.
+  rv = cacheService->CreateSession(sessionName.get(), storagePolicy, true,
+                                   getter_AddRefs(cacheSession));
+  if (!cacheSession) 
+    return NS_ERROR_FAILURE;
+
+  cacheSession->SetIsPrivate(mPrivateBrowsing);
+
+  if (aAccessMode == nsICache::ACCESS_WRITE)
+    rv = cacheSession->OpenCacheEntry(aCacheKey, aAccessMode, false,
+                                      getter_AddRefs(mCacheEntry));
+  else
+    rv = cacheSession->AsyncOpenCacheEntry(aCacheKey, aAccessMode, this, false);
+
+  return rv;
 }
 
 nsresult

@@ -2,23 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "DOMCameraManager.h"
+#include "nsContentUtils.h"
 #include "nsDebug.h"
-#include "jsapi.h"
-#include "Navigator.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/Services.h"
-#include "nsContentPermissionHelper.h"
-#include "nsIObserverService.h"
+#include "nsObserverService.h"
 #include "nsIPermissionManager.h"
 #include "DOMCameraControl.h"
+#include "DOMCameraManager.h"
 #include "nsDOMClassInfo.h"
+#include "DictionaryHelpers.h"
 #include "CameraCommon.h"
-#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/CameraManagerBinding.h"
-#include "mozilla/dom/PermissionMessageUtils.h"
-#include "mozilla/dom/TabChild.h"
-#include "PCOMContentPermissionRequestChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -28,7 +23,6 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsDOMCameraManager, mWindow)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMCameraManager)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIObserver)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-  NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END
 
@@ -45,71 +39,57 @@ PRLogModuleInfo*
 GetCameraLog()
 {
   static PRLogModuleInfo *sLog;
-  if (!sLog) {
+  if (!sLog)
     sLog = PR_NewLogModule("Camera");
-  }
   return sLog;
 }
 
-WindowTable* nsDOMCameraManager::sActiveWindows = nullptr;
+/**
+ * nsDOMCameraManager::GetListOfCameras
+ * is implementation-specific, and can be found in (e.g.)
+ * GonkCameraManager.cpp and FallbackCameraManager.cpp.
+ */
+
+WindowTable nsDOMCameraManager::sActiveWindows;
+bool nsDOMCameraManager::sActiveWindowsInitialized = false;
 
 nsDOMCameraManager::nsDOMCameraManager(nsPIDOMWindow* aWindow)
   : mWindowId(aWindow->WindowID())
-  , mPermission(nsIPermissionManager::DENY_ACTION)
+  , mCameraThread(nullptr)
   , mWindow(aWindow)
 {
   /* member initializers and constructor code */
   DOM_CAMERA_LOGT("%s:%d : this=%p, windowId=%llx\n", __func__, __LINE__, this, mWindowId);
-  MOZ_COUNT_CTOR(nsDOMCameraManager);
   SetIsDOMBinding();
 }
 
 nsDOMCameraManager::~nsDOMCameraManager()
 {
   /* destructor code */
-  MOZ_COUNT_DTOR(nsDOMCameraManager);
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
+  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+  obs->RemoveObserver(this, "xpcom-shutdown");
 }
 
-/* static */
-void
-nsDOMCameraManager::GetListOfCameras(nsTArray<nsString>& aList, ErrorResult& aRv)
-{
-  aRv = ICameraControl::GetListOfCameras(aList);
-}
-
-/* static */
-bool
-nsDOMCameraManager::HasSupport(JSContext* aCx, JSObject* aGlobal)
-{
-  return Navigator::HasCameraSupport(aCx, aGlobal);
-}
-
-/* static */
-bool
-nsDOMCameraManager::CheckPermission(nsPIDOMWindow* aWindow)
+// static creator
+already_AddRefed<nsDOMCameraManager>
+nsDOMCameraManager::CheckPermissionAndCreateInstance(nsPIDOMWindow* aWindow)
 {
   nsCOMPtr<nsIPermissionManager> permMgr =
     do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-  NS_ENSURE_TRUE(permMgr, false);
+  NS_ENSURE_TRUE(permMgr, nullptr);
 
   uint32_t permission = nsIPermissionManager::DENY_ACTION;
   permMgr->TestPermissionFromWindow(aWindow, "camera", &permission);
-  if (permission != nsIPermissionManager::ALLOW_ACTION &&
-      permission != nsIPermissionManager::PROMPT_ACTION) {
-    return false;
+  if (permission != nsIPermissionManager::ALLOW_ACTION) {
+    NS_WARNING("No permission to access camera");
+    return nullptr;
   }
 
-  return true;
-}
-
-/* static */
-already_AddRefed<nsDOMCameraManager>
-nsDOMCameraManager::CreateInstance(nsPIDOMWindow* aWindow)
-{
   // Initialize the shared active window tracker
-  if (!sActiveWindows) {
-    sActiveWindows = new WindowTable();
+  if (!sActiveWindowsInitialized) {
+    sActiveWindows.Init();
+    sActiveWindowsInitialized = true;
   }
 
   nsRefPtr<nsDOMCameraManager> cameraManager =
@@ -121,252 +101,33 @@ nsDOMCameraManager::CreateInstance(nsPIDOMWindow* aWindow)
   return cameraManager.forget();
 }
 
-class CameraPermissionRequest : public nsIContentPermissionRequest
-                              , public PCOMContentPermissionRequestChild
-                              , public nsIRunnable
-{
-public:
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_NSICONTENTPERMISSIONREQUEST
-  NS_DECL_NSIRUNNABLE
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(CameraPermissionRequest,
-                                           nsIContentPermissionRequest)
-
-  CameraPermissionRequest(nsIPrincipal* aPrincipal,
-                          nsPIDOMWindow* aWindow,
-                          nsRefPtr<nsDOMCameraManager> aManager,
-                          uint32_t aCameraId,
-                          const CameraConfiguration& aInitialConfig,
-                          nsRefPtr<GetCameraCallback> aOnSuccess,
-                          nsRefPtr<CameraErrorCallback> aOnError)
-    : mPrincipal(aPrincipal)
-    , mWindow(aWindow)
-    , mCameraManager(aManager)
-    , mCameraId(aCameraId)
-    , mInitialConfig(aInitialConfig)
-    , mOnSuccess(aOnSuccess)
-    , mOnError(aOnError)
-  {
-  }
-
-  virtual ~CameraPermissionRequest()
-  {
-  }
-
-  bool Recv__delete__(const bool& aAllow,
-                      const InfallibleTArray<PermissionChoice>& choices);
-
-  void IPDLRelease()
-  {
-    Release();
-  }
-
-protected:
-  nsresult DispatchCallback(uint32_t aPermission);
-  void CallAllow();
-  void CallCancel();
-  nsCOMPtr<nsIPrincipal> mPrincipal;
-  nsCOMPtr<nsPIDOMWindow> mWindow;
-  nsRefPtr<nsDOMCameraManager> mCameraManager;
-  uint32_t mCameraId;
-  CameraConfiguration mInitialConfig;
-  nsRefPtr<GetCameraCallback> mOnSuccess;
-  nsRefPtr<CameraErrorCallback> mOnError;
-};
-
-NS_IMPL_CYCLE_COLLECTION(CameraPermissionRequest, mWindow, mOnSuccess, mOnError)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CameraPermissionRequest)
-  NS_INTERFACE_MAP_ENTRY(nsIContentPermissionRequest)
-  NS_INTERFACE_MAP_ENTRY(nsIRunnable)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContentPermissionRequest)
-NS_INTERFACE_MAP_END
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(CameraPermissionRequest)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(CameraPermissionRequest)
-
-NS_IMETHODIMP
-CameraPermissionRequest::Run()
-{
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    TabChild* child = TabChild::GetFrom(mWindow->GetDocShell());
-    if (!child) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-
-    // Retain a reference so the object isn't deleted without IPDL's knowledge.
-    // Corresponding release occurs in DeallocPContentPermissionRequest.
-    AddRef();
-
-    nsTArray<PermissionRequest> permArray;
-    nsTArray<nsString> emptyOptions;
-    permArray.AppendElement(PermissionRequest(
-                            NS_LITERAL_CSTRING("camera"),
-                            NS_LITERAL_CSTRING("unused"),
-                            emptyOptions));
-    child->SendPContentPermissionRequestConstructor(this, permArray,
-                                                    IPC::Principal(mPrincipal));
-
-    Sendprompt();
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIContentPermissionPrompt> prompt =
-    do_GetService(NS_CONTENT_PERMISSION_PROMPT_CONTRACTID);
-  if (prompt) {
-    prompt->Prompt(this);
-  }
-
-  return NS_OK;
-}
-
-bool
-CameraPermissionRequest::Recv__delete__(const bool& aAllow,
-                                        const InfallibleTArray<PermissionChoice>& choices)
-{
-  if (aAllow) {
-    Allow(JS::UndefinedHandleValue);
-  } else {
-    Cancel();
-  }
-  return true;
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::GetPrincipal(nsIPrincipal** aRequestingPrincipal)
-{
-  NS_ADDREF(*aRequestingPrincipal = mPrincipal);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::GetWindow(nsIDOMWindow** aRequestingWindow)
-{
-  NS_ADDREF(*aRequestingWindow = mWindow);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::GetElement(nsIDOMElement** aElement)
-{
-  *aElement = nullptr;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::Cancel()
-{
-  return DispatchCallback(nsIPermissionManager::DENY_ACTION);
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::Allow(JS::HandleValue aChoices)
-{
-  MOZ_ASSERT(aChoices.isUndefined());
-  return DispatchCallback(nsIPermissionManager::ALLOW_ACTION);
-}
-
-nsresult
-CameraPermissionRequest::DispatchCallback(uint32_t aPermission)
-{
-  nsCOMPtr<nsIRunnable> callbackRunnable;
-  if (aPermission == nsIPermissionManager::ALLOW_ACTION) {
-    callbackRunnable = NS_NewRunnableMethod(this, &CameraPermissionRequest::CallAllow);
-  } else {
-    callbackRunnable = NS_NewRunnableMethod(this, &CameraPermissionRequest::CallCancel);
-  }
-  return NS_DispatchToMainThread(callbackRunnable);
-}
-
 void
-CameraPermissionRequest::CallAllow()
-{
-  mCameraManager->PermissionAllowed(mCameraId, mInitialConfig, mOnSuccess, mOnError);
-}
-
-void
-CameraPermissionRequest::CallCancel()
-{
-  mCameraManager->PermissionCancelled(mCameraId, mInitialConfig, mOnSuccess, mOnError);
-}
-
-NS_IMETHODIMP
-CameraPermissionRequest::GetTypes(nsIArray** aTypes)
-{
-  nsTArray<nsString> emptyOptions;
-  return CreatePermissionArray(NS_LITERAL_CSTRING("camera"),
-                               NS_LITERAL_CSTRING("unused"),
-                               emptyOptions,
-                               aTypes);
-}
-
-void
-nsDOMCameraManager::GetCamera(const nsAString& aCamera,
-                              const CameraConfiguration& aInitialConfig,
-                              GetCameraCallback& aOnSuccess,
-                              const OptionalNonNullCameraErrorCallback& aOnError,
+nsDOMCameraManager::GetCamera(const CameraSelector& aOptions,
+                              nsICameraGetCameraCallback* onSuccess,
+                              const Optional<nsICameraErrorCallback*>& onError,
                               ErrorResult& aRv)
 {
-  DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
-
   uint32_t cameraId = 0;  // back (or forward-facing) camera by default
-  if (aCamera.EqualsLiteral("front")) {
+  if (aOptions.mCamera.EqualsLiteral("front")) {
     cameraId = 1;
   }
 
-  nsRefPtr<CameraErrorCallback> errorCallback = nullptr;
-  if (aOnError.WasPassed()) {
-    errorCallback = &aOnError.Value();
+  // reuse the same camera thread to conserve resources
+  if (!mCameraThread) {
+    aRv = NS_NewThread(getter_AddRefs(mCameraThread));
+    if (aRv.Failed()) {
+      return;
+    }
   }
 
-  if (mPermission == nsIPermissionManager::ALLOW_ACTION) {
-    PermissionAllowed(cameraId, aInitialConfig, &aOnSuccess, errorCallback);
-    return;
-  }
+  DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
 
-  nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(mWindow);
-  if (!sop) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
-
-  nsCOMPtr<nsIRunnable> permissionRequest =
-    new CameraPermissionRequest(principal, mWindow, this, cameraId, aInitialConfig,
-                                &aOnSuccess, errorCallback);
-
-  NS_DispatchToMainThread(permissionRequest);
-}
-
-void
-nsDOMCameraManager::PermissionAllowed(uint32_t aCameraId,
-                                      const CameraConfiguration& aInitialConfig,
-                                      GetCameraCallback* aOnSuccess,
-                                      CameraErrorCallback* aOnError)
-{
-  mPermission = nsIPermissionManager::ALLOW_ACTION;
-
-  // Creating this object will trigger the aOnSuccess callback
-  //  (or the aOnError one, if it fails).
-  nsRefPtr<nsDOMCameraControl> cameraControl =
-    new nsDOMCameraControl(aCameraId, aInitialConfig, aOnSuccess, aOnError, mWindow);
+  // Creating this object will trigger the onSuccess handler
+  nsCOMPtr<nsDOMCameraControl> cameraControl =
+    new nsDOMCameraControl(cameraId, mCameraThread,
+                           onSuccess, onError.WasPassed() ? onError.Value() : nullptr, mWindowId);
 
   Register(cameraControl);
-}
-
-void
-nsDOMCameraManager::PermissionCancelled(uint32_t aCameraId,
-                                        const CameraConfiguration& aInitialConfig,
-                                        GetCameraCallback* aOnSuccess,
-                                        CameraErrorCallback* aOnError)
-{
-  mPermission = nsIPermissionManager::DENY_ACTION;
-
-  if (aOnError) {
-    ErrorResult ignored;
-    aOnError->Call(NS_LITERAL_STRING("Permission denied."), ignored);
-  }
 }
 
 void
@@ -376,10 +137,10 @@ nsDOMCameraManager::Register(nsDOMCameraControl* aDOMCameraControl)
   MOZ_ASSERT(NS_IsMainThread());
 
   // Put the camera control into the hash table
-  CameraControls* controls = sActiveWindows->Get(mWindowId);
+  CameraControls* controls = sActiveWindows.Get(mWindowId);
   if (!controls) {
     controls = new CameraControls;
-    sActiveWindows->Put(mWindowId, controls);
+    sActiveWindows.Put(mWindowId, controls);
   }
   controls->AppendElement(aDOMCameraControl);
 }
@@ -390,7 +151,7 @@ nsDOMCameraManager::Shutdown(uint64_t aWindowId)
   DOM_CAMERA_LOGI(">>> Shutdown( aWindowId = 0x%llx )\n", aWindowId);
   MOZ_ASSERT(NS_IsMainThread());
 
-  CameraControls* controls = sActiveWindows->Get(aWindowId);
+  CameraControls* controls = sActiveWindows.Get(aWindowId);
   if (!controls) {
     return;
   }
@@ -402,7 +163,7 @@ nsDOMCameraManager::Shutdown(uint64_t aWindowId)
   }
   controls->Clear();
 
-  sActiveWindows->Remove(aWindowId);
+  sActiveWindows.Remove(aWindowId);
 }
 
 void
@@ -414,12 +175,11 @@ nsDOMCameraManager::XpComShutdown()
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   obs->RemoveObserver(this, "xpcom-shutdown");
 
-  delete sActiveWindows;
-  sActiveWindows = nullptr;
+  sActiveWindows.Clear();
 }
 
 nsresult
-nsDOMCameraManager::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
+nsDOMCameraManager::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* aData)
 {
   if (strcmp(aTopic, "xpcom-shutdown") == 0) {
     XpComShutdown();
@@ -439,15 +199,15 @@ nsDOMCameraManager::IsWindowStillActive(uint64_t aWindowId)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (!sActiveWindows) {
+  if (!sActiveWindowsInitialized) {
     return false;
   }
 
-  return !!sActiveWindows->Get(aWindowId);
+  return !!sActiveWindows.Get(aWindowId);
 }
 
 JSObject*
-nsDOMCameraManager::WrapObject(JSContext* aCx)
+nsDOMCameraManager::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return CameraManagerBinding::Wrap(aCx, this);
+  return CameraManagerBinding::Wrap(aCx, aScope, this);
 }

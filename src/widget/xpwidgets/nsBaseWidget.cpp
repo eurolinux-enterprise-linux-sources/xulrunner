@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -18,17 +18,17 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsISimpleEnumerator.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
 #include "nsIServiceManager.h"
 #include "mozilla/Preferences.h"
 #include "BasicLayers.h"
 #include "ClientLayerManager.h"
+#include "LayerManagerOGL.h"
 #include "mozilla/layers/Compositor.h"
 #include "nsIXULRuntime.h"
 #include "nsIXULWindow.h"
 #include "nsIBaseWindow.h"
 #include "nsXULPopupManager.h"
+#include "nsEventStateManager.h"
 #include "nsIWidgetListener.h"
 #include "nsIGfxInfo.h"
 #include "npapi.h"
@@ -36,14 +36,8 @@
 #include "prdtoa.h"
 #include "prenv.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/unused.h"
 #include "nsContentUtils.h"
-#include "gfxPrefs.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/MouseEvents.h"
-#include "GLConsts.h"
-#include "LayerScope.h"
-#include "mozilla/unused.h"
+#include "gfxPlatform.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -60,29 +54,20 @@ static void debug_RegisterPrefCallbacks();
 static int32_t gNumWidgets;
 #endif
 
-#ifdef XP_MACOSX
-#include "nsCocoaFeatures.h"
-#endif
-
 nsIRollupListener* nsBaseWidget::gRollupListener = nullptr;
 
 using namespace mozilla::layers;
-using namespace mozilla::ipc;
 using namespace mozilla;
 using base::Thread;
+using mozilla::ipc::AsyncChannel;
 
 nsIContent* nsBaseWidget::mLastRollup = nullptr;
 // Global user preference for disabling native theme. Used
 // in NativeWindowTheme.
 bool            gDisableNativeTheme               = false;
 
-// Async pump timer during injected long touch taps
-#define TOUCH_INJECT_PUMP_TIMER_MSEC 50
-#define TOUCH_INJECT_LONG_TAP_DEFAULT_MSEC 1500
-int32_t nsIWidget::sPointerIdCounter = 0;
-
 // nsBaseWidget
-NS_IMPL_ISUPPORTS(nsBaseWidget, nsIWidget)
+NS_IMPL_ISUPPORTS1(nsBaseWidget, nsIWidget)
 
 
 nsAutoRollup::nsAutoRollup()
@@ -111,6 +96,7 @@ nsBaseWidget::nsBaseWidget()
 , mAttachedWidgetListener(nullptr)
 , mContext(nullptr)
 , mCursor(eCursor_standard)
+, mWindowType(eWindowType_child)
 , mBorderStyle(eBorderStyle_none)
 , mUseLayersAcceleration(false)
 , mForceLayersAcceleration(false)
@@ -120,6 +106,7 @@ nsBaseWidget::nsBaseWidget()
 , mBounds(0,0,0,0)
 , mOriginalBounds(nullptr)
 , mClipRectCount(0)
+, mZIndex(0)
 , mSizeMode(nsSizeMode_Normal)
 , mPopupLevel(ePopupLevelTop)
 , mPopupType(ePopupTypeAny)
@@ -137,12 +124,12 @@ nsBaseWidget::nsBaseWidget()
   nsContentUtils::RegisterShutdownObserver(mShutdownObserver);
 }
 
-NS_IMPL_ISUPPORTS(WidgetShutdownObserver, nsIObserver)
+NS_IMPL_ISUPPORTS1(WidgetShutdownObserver, nsIObserver)
 
 NS_IMETHODIMP
 WidgetShutdownObserver::Observe(nsISupports *aSubject,
                                 const char *aTopic,
-                                const char16_t *aData)
+                                const PRUnichar *aData)
 {
   if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0 &&
       mWidget) {
@@ -171,8 +158,6 @@ static void DeferredDestroyCompositor(CompositorParent* aCompositorParent,
 
 void nsBaseWidget::DestroyCompositor()
 {
-  LayerScope::DestroyServerSocket();
-
   if (mCompositorChild) {
     mCompositorChild->SendWillStop();
     mCompositorChild->Destroy();
@@ -189,8 +174,8 @@ void nsBaseWidget::DestroyCompositor()
                                    mCompositorChild));
     // The DestroyCompositor task we just added to the MessageLoop will handle
     // releasing mCompositorParent and mCompositorChild.
-    unused << mCompositorParent.forget();
-    unused << mCompositorChild.forget();
+    mCompositorParent.forget();
+    mCompositorChild.forget();
   }
 }
 
@@ -202,7 +187,7 @@ void nsBaseWidget::DestroyCompositor()
 nsBaseWidget::~nsBaseWidget()
 {
   if (mLayerManager &&
-      mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+      mLayerManager->GetBackendType() == LAYERS_BASIC) {
     static_cast<BasicLayerManager*>(mLayerManager.get())->ClearRetainerWidget();
   }
 
@@ -266,7 +251,6 @@ void nsBaseWidget::BaseCreate(nsIWidget *aParent,
     mBorderStyle = aInitData->mBorderStyle;
     mPopupLevel = aInitData->mPopupLevel;
     mPopupType = aInitData->mPopupHint;
-    mRequireOffMainThreadCompositing = aInitData->mRequireOffMainThreadCompositing;
   }
 
   if (aParent) {
@@ -434,7 +418,7 @@ float nsBaseWidget::GetDPI()
   return 96.0f;
 }
 
-CSSToLayoutDeviceScale nsIWidget::GetDefaultScale()
+double nsIWidget::GetDefaultScale()
 {
   double devPixelsPerCSSPixel = DefaultScaleOverride();
 
@@ -442,7 +426,7 @@ CSSToLayoutDeviceScale nsIWidget::GetDefaultScale()
     devPixelsPerCSSPixel = GetDefaultScaleInternal();
   }
 
-  return CSSToLayoutDeviceScale(devPixelsPerCSSPixel);
+  return devPixelsPerCSSPixel;
 }
 
 /* static */
@@ -530,7 +514,7 @@ void nsBaseWidget::RemoveChild(nsIWidget* aChild)
 // Sets widget's position within its parent's child list.
 //
 //-------------------------------------------------------------------------
-void nsBaseWidget::SetZIndex(int32_t aZIndex)
+NS_IMETHODIMP nsBaseWidget::SetZIndex(int32_t aZIndex)
 {
   // Hold a ref to ourselves just in case, since we're going to remove
   // from our parent.
@@ -545,23 +529,25 @@ void nsBaseWidget::SetZIndex(int32_t aZIndex)
     // Scope sib outside the for loop so we can check it afterward
     nsIWidget* sib = parent->GetFirstChild();
     for ( ; sib; sib = sib->GetNextSibling()) {
-      int32_t childZIndex = GetZIndex();
-      if (aZIndex < childZIndex) {
-        // Insert ourselves before sib
-        nsIWidget* prev = sib->GetPrevSibling();
-        mNextSibling = sib;
-        mPrevSibling = prev;
-        sib->SetPrevSibling(this);
-        if (prev) {
-          prev->SetNextSibling(this);
-        } else {
-          NS_ASSERTION(sib == parent->mFirstChild, "Broken child list");
-          // We've taken ownership of sib, so it's safe to have parent let
-          // go of it
-          parent->mFirstChild = this;
+      int32_t childZIndex;
+      if (NS_SUCCEEDED(sib->GetZIndex(&childZIndex))) {
+        if (aZIndex < childZIndex) {
+          // Insert ourselves before sib
+          nsIWidget* prev = sib->GetPrevSibling();
+          mNextSibling = sib;
+          mPrevSibling = prev;
+          sib->SetPrevSibling(this);
+          if (prev) {
+            prev->SetNextSibling(this);
+          } else {
+            NS_ASSERTION(sib == parent->mFirstChild, "Broken child list");
+            // We've taken ownership of sib, so it's safe to have parent let
+            // go of it
+            parent->mFirstChild = this;
+          }
+          PlaceBehind(eZPlacementBelow, sib, false);
+          break;
         }
-        PlaceBehind(eZPlacementBelow, sib, false);
-        break;
       }
     }
     // were we added to the list?
@@ -569,6 +555,18 @@ void nsBaseWidget::SetZIndex(int32_t aZIndex)
       parent->AddChild(this);
     }
   }
+  return NS_OK;
+}
+
+//-------------------------------------------------------------------------
+//
+// Gets widget's position within its parent's child list.
+//
+//-------------------------------------------------------------------------
+NS_IMETHODIMP nsBaseWidget::GetZIndex(int32_t* aZIndex)
+{
+  *aZIndex = mZIndex;
+  return NS_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -603,6 +601,48 @@ NS_IMETHODIMP nsBaseWidget::SetSizeMode(int32_t aMode)
 
 //-------------------------------------------------------------------------
 //
+// Get the foreground color
+//
+//-------------------------------------------------------------------------
+nscolor nsBaseWidget::GetForegroundColor(void)
+{
+  return mForeground;
+}
+
+//-------------------------------------------------------------------------
+//
+// Set the foreground color
+//
+//-------------------------------------------------------------------------
+NS_METHOD nsBaseWidget::SetForegroundColor(const nscolor &aColor)
+{
+  mForeground = aColor;
+  return NS_OK;
+}
+
+//-------------------------------------------------------------------------
+//
+// Get the background color
+//
+//-------------------------------------------------------------------------
+nscolor nsBaseWidget::GetBackgroundColor(void)
+{
+  return mBackground;
+}
+
+//-------------------------------------------------------------------------
+//
+// Set the background color
+//
+//-------------------------------------------------------------------------
+NS_METHOD nsBaseWidget::SetBackgroundColor(const nscolor &aColor)
+{
+  mBackground = aColor;
+  return NS_OK;
+}
+
+//-------------------------------------------------------------------------
+//
 // Get this component cursor
 //
 //-------------------------------------------------------------------------
@@ -621,6 +661,17 @@ NS_IMETHODIMP nsBaseWidget::SetCursor(imgIContainer* aCursor,
                                       uint32_t aHotspotX, uint32_t aHotspotY)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+//-------------------------------------------------------------------------
+//
+// Get the window type for this widget
+//
+//-------------------------------------------------------------------------
+NS_IMETHODIMP nsBaseWidget::GetWindowType(nsWindowType& aWindowType)
+{
+  aWindowType = mWindowType;
+  return NS_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -695,12 +746,12 @@ NS_IMETHODIMP nsBaseWidget::MakeFullScreen(bool aFullScreen)
     if (!mOriginalBounds)
       mOriginalBounds = new nsIntRect();
     GetScreenBounds(*mOriginalBounds);
-    // convert dev pix to display pix for window manipulation
-    CSSToLayoutDeviceScale scale = GetDefaultScale();
-    mOriginalBounds->x = NSToIntRound(mOriginalBounds->x / scale.scale);
-    mOriginalBounds->y = NSToIntRound(mOriginalBounds->y / scale.scale);
-    mOriginalBounds->width = NSToIntRound(mOriginalBounds->width / scale.scale);
-    mOriginalBounds->height = NSToIntRound(mOriginalBounds->height / scale.scale);
+    // convert dev pix to display pix for window manipulation 
+    double scale = GetDefaultScale();
+    mOriginalBounds->x = NSToIntRound(mOriginalBounds->x / scale);
+    mOriginalBounds->y = NSToIntRound(mOriginalBounds->y / scale);
+    mOriginalBounds->width = NSToIntRound(mOriginalBounds->width / scale);
+    mOriginalBounds->height = NSToIntRound(mOriginalBounds->height / scale);
 
     // Move to top-left corner of screen and size to the screen dimensions
     nsCOMPtr<nsIScreenManager> screenManager;
@@ -736,7 +787,7 @@ nsBaseWidget::AutoLayerManagerSetup::AutoLayerManagerSetup(
 {
   mLayerManager = static_cast<BasicLayerManager*>(mWidget->GetLayerManager());
   if (mLayerManager) {
-    NS_ASSERTION(mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC,
+    NS_ASSERTION(mLayerManager->GetBackendType() == LAYERS_BASIC,
       "AutoLayerManagerSetup instantiated for non-basic layer backend!");
     mLayerManager->SetDefaultTarget(aTarget);
     mLayerManager->SetDefaultTargetConfiguration(aDoubleBuffering, aRotation);
@@ -746,10 +797,10 @@ nsBaseWidget::AutoLayerManagerSetup::AutoLayerManagerSetup(
 nsBaseWidget::AutoLayerManagerSetup::~AutoLayerManagerSetup()
 {
   if (mLayerManager) {
-    NS_ASSERTION(mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC,
+    NS_ASSERTION(mLayerManager->GetBackendType() == LAYERS_BASIC,
       "AutoLayerManagerSetup instantiated for non-basic layer backend!");
     mLayerManager->SetDefaultTarget(nullptr);
-    mLayerManager->SetDefaultTargetConfiguration(mozilla::layers::BufferMode::BUFFER_NONE, ROTATION_0);
+    mLayerManager->SetDefaultTargetConfiguration(mozilla::layers::BUFFER_NONE, ROTATION_0);
   }
 }
 
@@ -770,8 +821,8 @@ nsBaseWidget::AutoUseBasicLayerManager::~AutoUseBasicLayerManager()
 bool
 nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
 {
-#if defined(XP_WIN) || defined(ANDROID) || \
-    defined(MOZ_GL_PROVIDER) || defined(XP_MACOSX) || defined(MOZ_WIDGET_QT)
+#if defined(XP_WIN) || defined(ANDROID) || (MOZ_PLATFORM_MAEMO > 5) || \
+    defined(MOZ_GL_PROVIDER) || defined(XP_MACOSX)
   bool accelerateByDefault = true;
 #else
   bool accelerateByDefault = false;
@@ -783,17 +834,26 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
   // those versions of the OS.
   // This will still let full-screen video be accelerated on OpenGL, because
   // that XUL widget opts in to acceleration, but that's probably OK.
-  SInt32 major = nsCocoaFeatures::OSXVersionMajor();
-  SInt32 minor = nsCocoaFeatures::OSXVersionMinor();
-  SInt32 bugfix = nsCocoaFeatures::OSXVersionBugFix();
-  if (major == 10 && minor == 6 && bugfix <= 2) {
-    accelerateByDefault = false;
+  SInt32 major, minor, bugfix;
+  OSErr err1 = ::Gestalt(gestaltSystemVersionMajor, &major);
+  OSErr err2 = ::Gestalt(gestaltSystemVersionMinor, &minor);
+  OSErr err3 = ::Gestalt(gestaltSystemVersionBugFix, &bugfix);
+  if (err1 == noErr && err2 == noErr && err3 == noErr) {
+    if (major == 10 && minor == 6) {
+      if (bugfix <= 2) {
+        accelerateByDefault = false;
+      }
+    }
   }
 #endif
 
+  // We don't want to accelerate small popup windows like menu, but we still
+  // want to accelerate xul panels that may contain arbitrarily complex content.
+  bool isSmallPopup = ((mWindowType == eWindowType_popup) &&
+                      (mPopupType != ePopupTypePanel));
   // we should use AddBoolPrefVarCache
-  bool disableAcceleration = gfxPrefs::LayersAccelerationDisabled();
-  mForceLayersAcceleration = gfxPrefs::LayersAccelerationForceEnabled();
+  bool disableAcceleration = isSmallPopup || gfxPlatform::GetPrefLayersAccelerationDisabled() || (mWindowType == eWindowType_invisible);
+  mForceLayersAcceleration = gfxPlatform::GetPrefLayersAccelerationForceEnabled();
 
   const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
   accelerateByDefault = accelerateByDefault ||
@@ -829,11 +889,7 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
     return true;
 
   if (!whitelisted) {
-    static int tell_me_once = 0;
-    if (!tell_me_once) {
-      NS_WARNING("OpenGL-accelerated layers are not supported on this system");
-      tell_me_once = 1;
-    }
+    NS_WARNING("OpenGL-accelerated layers are not supported on this system");
 #ifdef MOZ_ANDROID_OMTC
     NS_RUNTIMEABORT("OpenGL-accelerated layers are a hard requirement on this platform. "
                     "Cannot continue without support for them");
@@ -861,26 +917,14 @@ void nsBaseWidget::CreateCompositor()
   CreateCompositor(rect.width, rect.height);
 }
 
-void
-nsBaseWidget::GetPreferredCompositorBackends(nsTArray<LayersBackend>& aHints)
+mozilla::layers::LayersBackend
+nsBaseWidget::GetPreferredCompositorBackend()
 {
   if (mUseLayersAcceleration) {
-    aHints.AppendElement(LayersBackend::LAYERS_OPENGL);
+    return mozilla::layers::LAYERS_OPENGL;
   }
 
-  aHints.AppendElement(LayersBackend::LAYERS_BASIC);
-}
-
-static void
-CheckForBasicBackends(nsTArray<LayersBackend>& aHints)
-{
-  for (size_t i = 0; i < aHints.Length(); ++i) {
-    if (aHints[i] == LayersBackend::LAYERS_BASIC &&
-        !Preferences::GetBool("layers.offmainthreadcomposition.force-basic", false)) {
-      // basic compositor is not stable enough for regular use
-      aHints[i] = LayersBackend::LAYERS_NONE;
-    }
-  }
+  return mozilla::layers::LAYERS_BASIC;
 }
 
 void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
@@ -894,32 +938,22 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
     return;
   }
 
-  // The server socket has to be created on the main thread.
-  LayerScope::CreateServerSocket();
-
   mCompositorParent = NewCompositorParent(aWidth, aHeight);
-  MessageChannel *parentChannel = mCompositorParent->GetIPCChannel();
-  ClientLayerManager* lm = new ClientLayerManager(this);
+  AsyncChannel *parentChannel = mCompositorParent->GetIPCChannel();
+  LayerManager* lm = new ClientLayerManager(this);
   MessageLoop *childMessageLoop = CompositorParent::CompositorLoop();
   mCompositorChild = new CompositorChild(lm);
-  mCompositorChild->Open(parentChannel, childMessageLoop, ipc::ChildSide);
+  AsyncChannel::Side childSide = mozilla::ipc::AsyncChannel::Child;
+  mCompositorChild->Open(parentChannel, childMessageLoop, childSide);
 
   TextureFactoryIdentifier textureFactoryIdentifier;
-  PLayerTransactionChild* shadowManager = nullptr;
-  nsTArray<LayersBackend> backendHints;
-  GetPreferredCompositorBackends(backendHints);
+  PLayerTransactionChild* shadowManager;
+  mozilla::layers::LayersBackend backendHint = GetPreferredCompositorBackend();
 
-  if (!mRequireOffMainThreadCompositing) {
-    CheckForBasicBackends(backendHints);
-  }
+  shadowManager = mCompositorChild->SendPLayerTransactionConstructor(
+    backendHint, 0, &textureFactoryIdentifier);
 
-  bool success = false;
-  if (!backendHints.IsEmpty()) {
-    shadowManager = mCompositorChild->SendPLayerTransactionConstructor(
-      backendHints, 0, &textureFactoryIdentifier, &success);
-  }
-
-  if (success) {
+  if (shadowManager) {
     ShadowLayerForwarder* lf = lm->AsShadowForwarder();
     if (!lf) {
       delete lm;
@@ -929,12 +963,12 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
     lf->SetShadowManager(shadowManager);
     lf->IdentifyTextureHost(textureFactoryIdentifier);
     ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
-    WindowUsesOMTC();
 
     mLayerManager = lm;
     return;
   }
 
+  // Failed to create a compositor!
   NS_WARNING("Failed to create an OMT compositor.");
   DestroyCompositor();
   // Compositor child had the only reference to LayerManager and will have
@@ -943,7 +977,9 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
 bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 {
-  return CompositorParent::CompositorLoop();
+  bool isSmallPopup = ((mWindowType == eWindowType_popup) &&
+                      (mPopupType != ePopupTypePanel)) || (mWindowType == eWindowType_invisible);
+  return CompositorParent::CompositorLoop() && !isSmallPopup;
 }
 
 LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
@@ -963,6 +999,22 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       CreateCompositor();
     }
 
+    if (mUseLayersAcceleration) {
+      if (!mLayerManager) {
+        nsRefPtr<LayerManagerOGL> layerManager = new LayerManagerOGL(this);
+        /**
+         * XXX - On several OSes initialization is expected to fail for now.
+         * If we'd get a non-basic layer manager they'd crash. This is ok though
+         * since on those platforms it will fail. Anyone implementing new
+         * platforms on LayerManagerOGL should ensure their widget is able to
+         * deal with it though!
+         */
+
+        if (layerManager->Initialize(mForceLayersAcceleration)) {
+          mLayerManager = layerManager;
+        }
+      }
+    }
     if (!mLayerManager) {
       mLayerManager = CreateBasicLayerManager();
     }
@@ -978,7 +1030,7 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
   return usedLayerManager;
 }
 
-LayerManager* nsBaseWidget::CreateBasicLayerManager()
+BasicLayerManager* nsBaseWidget::CreateBasicLayerManager()
 {
   return new BasicLayerManager(this);
 }
@@ -986,11 +1038,6 @@ LayerManager* nsBaseWidget::CreateBasicLayerManager()
 CompositorChild* nsBaseWidget::GetRemoteRenderer()
 {
   return mCompositorChild;
-}
-
-TemporaryRef<mozilla::gfx::DrawTarget> nsBaseWidget::StartRemoteDrawing()
-{
-  return nullptr;
 }
 
 //-------------------------------------------------------------------------
@@ -1042,11 +1089,9 @@ NS_METHOD nsBaseWidget::MoveClient(double aX, double aY)
 
   // GetClientOffset returns device pixels; scale back to display pixels
   // if that's what this widget uses for the Move/Resize APIs
-  CSSToLayoutDeviceScale scale = BoundsUseDisplayPixels()
-                                    ? GetDefaultScale()
-                                    : CSSToLayoutDeviceScale(1.0);
-  aX -= clientOffset.x * 1.0 / scale.scale;
-  aY -= clientOffset.y * 1.0 / scale.scale;
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
+  aX -= clientOffset.x * scale;
+  aY -= clientOffset.y * scale;
 
   return Move(aX, aY);
 }
@@ -1063,12 +1108,9 @@ NS_METHOD nsBaseWidget::ResizeClient(double aWidth,
 
   // GetClientBounds and mBounds are device pixels; scale back to display pixels
   // if that's what this widget uses for the Move/Resize APIs
-  CSSToLayoutDeviceScale scale = BoundsUseDisplayPixels()
-                                    ? GetDefaultScale()
-                                    : CSSToLayoutDeviceScale(1.0);
-  double invScale = 1.0 / scale.scale;
-  aWidth = mBounds.width * invScale + (aWidth - clientBounds.width * invScale);
-  aHeight = mBounds.height * invScale + (aHeight - clientBounds.height * invScale);
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
+  aWidth = mBounds.width * scale + (aWidth - clientBounds.width * scale);
+  aHeight = mBounds.height * scale + (aHeight - clientBounds.height * scale);
 
   return Resize(aWidth, aHeight, aRepaint);
 }
@@ -1085,7 +1127,7 @@ NS_METHOD nsBaseWidget::ResizeClient(double aX,
   nsIntRect clientBounds;
   GetClientBounds(clientBounds);
 
-  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale().scale : 1.0;
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
   aWidth = mBounds.width * scale + (aWidth - clientBounds.width * scale);
   aHeight = mBounds.height * scale + (aHeight - clientBounds.height * scale);
 
@@ -1151,11 +1193,6 @@ nsBaseWidget::SetNonClientMargins(nsIntMargin &margins)
 NS_METHOD nsBaseWidget::EnableDragDrop(bool aEnable)
 {
   return NS_OK;
-}
-
-uint32_t nsBaseWidget::GetMaxTouchPoints() const
-{
-  return 0;
 }
 
 NS_METHOD nsBaseWidget::SetModal(bool aModal)
@@ -1337,15 +1374,13 @@ nsBaseWidget::ResolveIconName(const nsAString &aIconName,
 }
 
 NS_IMETHODIMP
-nsBaseWidget::BeginResizeDrag(WidgetGUIEvent* aEvent,
-                              int32_t aHorizontal,
-                              int32_t aVertical)
+nsBaseWidget::BeginResizeDrag(nsGUIEvent* aEvent, int32_t aHorizontal, int32_t aVertical)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-nsBaseWidget::BeginMoveDrag(WidgetMouseEvent* aEvent)
+nsBaseWidget::BeginMoveDrag(nsMouseEvent* aEvent)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -1353,7 +1388,13 @@ nsBaseWidget::BeginMoveDrag(WidgetMouseEvent* aEvent)
 uint32_t
 nsBaseWidget::GetGLFrameBufferFormat()
 {
-  return LOCAL_GL_RGBA;
+  if (mLayerManager &&
+      mLayerManager->GetBackendType() == LAYERS_OPENGL) {
+    // Assume that the default framebuffer has RGBA format.  Specific
+    // backends that know differently will override this method.
+    return LOCAL_GL_RGBA;
+  }
+  return LOCAL_GL_NONE;
 }
 
 void nsBaseWidget::SetSizeConstraints(const SizeConstraints& aConstraints)
@@ -1405,18 +1446,6 @@ nsBaseWidget::NotifySizeMoveDone()
 }
 
 void
-nsBaseWidget::NotifyWindowMoved(int32_t aX, int32_t aY)
-{
-  if (mWidgetListener) {
-    mWidgetListener->WindowMoved(this, aX, aY);
-  }
-
-  if (GetIMEUpdatePreference().WantPositionChanged()) {
-    NotifyIME(IMENotification(IMEMessage::NOTIFY_IME_OF_POSITION_CHANGE));
-  }
-}
-
-void
 nsBaseWidget::NotifySysColorChanged()
 {
   if (!mWidgetListener || mWidgetListener->GetXULWindow())
@@ -1463,7 +1492,7 @@ nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
 #ifdef ACCESSIBILITY
 
 a11y::Accessible*
-nsBaseWidget::GetRootAccessible()
+nsBaseWidget::GetAccessible()
 {
   NS_ENSURE_TRUE(mWidgetListener, nullptr);
 
@@ -1473,12 +1502,12 @@ nsBaseWidget::GetRootAccessible()
   // If container is null then the presshell is not active. This often happens
   // when a preshell is being held onto for fastback.
   nsPresContext* presContext = presShell->GetPresContext();
-  NS_ENSURE_TRUE(presContext->GetContainerWeak(), nullptr);
+  nsCOMPtr<nsISupports> container = presContext->GetContainer();
+  NS_ENSURE_TRUE(container, nullptr);
 
   // Accessible creation might be not safe so use IsSafeToRunScript to
   // make sure it's not created at unsafe times.
-  nsCOMPtr<nsIAccessibilityService> accService =
-    services::GetAccessibilityService();
+  nsCOMPtr<nsIAccessibilityService> accService = services::GetAccessibilityService();
   if (accService) {
     return accService->GetRootDocumentAccessible(presShell, nsContentUtils::IsSafeToRunScript());
   }
@@ -1486,103 +1515,7 @@ nsBaseWidget::GetRootAccessible()
   return nullptr;
 }
 
-#endif // ACCESSIBILITY
-
-nsresult
-nsIWidget::SynthesizeNativeTouchTap(nsIntPoint aPointerScreenPoint, bool aLongTap)
-{
-  if (sPointerIdCounter > TOUCH_INJECT_MAX_POINTS) {
-    sPointerIdCounter = 0;
-  }
-  int pointerId = sPointerIdCounter;
-  sPointerIdCounter++;
-  nsresult rv = SynthesizeNativeTouchPoint(pointerId, TOUCH_CONTACT,
-                                           aPointerScreenPoint, 1.0, 90);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  if (!aLongTap) {
-    nsresult rv = SynthesizeNativeTouchPoint(pointerId, TOUCH_REMOVE,
-                                             aPointerScreenPoint, 0, 0);
-    return rv;
-  }
-
-  // initiate a long tap
-  int elapse = Preferences::GetInt("ui.click_hold_context_menus.delay",
-                                   TOUCH_INJECT_LONG_TAP_DEFAULT_MSEC);
-  if (!mLongTapTimer) {
-    mLongTapTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
-    if (NS_FAILED(rv)) {
-      SynthesizeNativeTouchPoint(pointerId, TOUCH_CANCEL,
-                                 aPointerScreenPoint, 0, 0);
-      return NS_ERROR_UNEXPECTED;
-    }
-    // Windows requires recuring events, so we set this to a smaller window
-    // than the pref value.
-    int timeout = elapse;
-    if (timeout > TOUCH_INJECT_PUMP_TIMER_MSEC) {
-      timeout = TOUCH_INJECT_PUMP_TIMER_MSEC;
-    }
-    mLongTapTimer->InitWithFuncCallback(OnLongTapTimerCallback, this,
-                                        timeout,
-                                        nsITimer::TYPE_REPEATING_SLACK);
-  }
-
-  // If we already have a long tap pending, cancel it. We only allow one long
-  // tap to be active at a time.
-  if (mLongTapTouchPoint) {
-    SynthesizeNativeTouchPoint(mLongTapTouchPoint->mPointerId, TOUCH_CANCEL,
-                               mLongTapTouchPoint->mPosition, 0, 0);
-  }
-
-  mLongTapTouchPoint = new LongTapInfo(pointerId, aPointerScreenPoint,
-                                       TimeDuration::FromMilliseconds(elapse));
-  return NS_OK;
-}
-
-// static
-void
-nsIWidget::OnLongTapTimerCallback(nsITimer* aTimer, void* aClosure)
-{
-  nsIWidget *self = static_cast<nsIWidget *>(aClosure);
-
-  if ((self->mLongTapTouchPoint->mStamp + self->mLongTapTouchPoint->mDuration) >
-      TimeStamp::Now()) {
-#ifdef XP_WIN
-    // Windows needs us to keep pumping feedback to the digitizer, so update
-    // the pointer id with the same position.
-    self->SynthesizeNativeTouchPoint(self->mLongTapTouchPoint->mPointerId,
-                                     TOUCH_CONTACT,
-                                     self->mLongTapTouchPoint->mPosition,
-                                     1.0, 90);
 #endif
-    return;
-  }
-
-  // finished, remove the touch point
-  self->mLongTapTimer->Cancel();
-  self->mLongTapTimer = nullptr;
-  self->SynthesizeNativeTouchPoint(self->mLongTapTouchPoint->mPointerId,
-                                   TOUCH_REMOVE,
-                                   self->mLongTapTouchPoint->mPosition,
-                                   0, 0);
-  self->mLongTapTouchPoint = nullptr;
-}
-
-nsresult
-nsIWidget::ClearNativeTouchSequence()
-{
-  if (!mLongTapTimer) {
-    return NS_OK;
-  }
-  mLongTapTimer->Cancel();
-  mLongTapTimer = nullptr;
-  SynthesizeNativeTouchPoint(mLongTapTouchPoint->mPointerId, TOUCH_CANCEL,
-                             mLongTapTouchPoint->mPosition, 0, 0);
-  mLongTapTouchPoint = nullptr;
-  return NS_OK;
-}
 
 #ifdef DEBUG
 //////////////////////////////////////////////////////////////
@@ -1596,7 +1529,7 @@ nsIWidget::ClearNativeTouchSequence()
 //
 //////////////////////////////////////////////////////////////
 /* static */ nsAutoString
-nsBaseWidget::debug_GuiEventToString(WidgetGUIEvent* aGuiEvent)
+nsBaseWidget::debug_GuiEventToString(nsGUIEvent * aGuiEvent)
 {
   NS_ASSERTION(nullptr != aGuiEvent,"cmon, null gui event.");
 
@@ -1613,10 +1546,10 @@ case _value: eventName.AssignLiteral(_name) ; break
     _ASSIGN_eventName(NS_DRAGDROP_ENTER,"NS_DND_ENTER");
     _ASSIGN_eventName(NS_DRAGDROP_EXIT,"NS_DND_EXIT");
     _ASSIGN_eventName(NS_DRAGDROP_OVER,"NS_DND_OVER");
-    _ASSIGN_eventName(NS_EDITOR_INPUT,"NS_EDITOR_INPUT");
     _ASSIGN_eventName(NS_FOCUS_CONTENT,"NS_FOCUS_CONTENT");
     _ASSIGN_eventName(NS_FORM_SELECTED,"NS_FORM_SELECTED");
     _ASSIGN_eventName(NS_FORM_CHANGE,"NS_FORM_CHANGE");
+    _ASSIGN_eventName(NS_FORM_INPUT,"NS_FORM_INPUT");
     _ASSIGN_eventName(NS_FORM_RESET,"NS_FORM_RESET");
     _ASSIGN_eventName(NS_FORM_SUBMIT,"NS_FORM_SUBMIT");
     _ASSIGN_eventName(NS_IMAGE_ABORT,"NS_IMAGE_ABORT");
@@ -1718,11 +1651,11 @@ class Debug_PrefObserver MOZ_FINAL : public nsIObserver {
     NS_DECL_NSIOBSERVER
 };
 
-NS_IMPL_ISUPPORTS(Debug_PrefObserver, nsIObserver)
+NS_IMPL_ISUPPORTS1(Debug_PrefObserver, nsIObserver)
 
 NS_IMETHODIMP
 Debug_PrefObserver::Observe(nsISupports* subject, const char* topic,
-                            const char16_t* data)
+                            const PRUnichar* data)
 {
   NS_ConvertUTF16toUTF8 prefName(data);
 
@@ -1773,7 +1706,7 @@ nsBaseWidget::debug_WantPaintFlashing()
 /* static */ void
 nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
                               nsIWidget *           aWidget,
-                              WidgetGUIEvent*       aGuiEvent,
+                              nsGUIEvent *          aGuiEvent,
                               const nsAutoCString & aWidgetName,
                               int32_t               aWindowID)
 {

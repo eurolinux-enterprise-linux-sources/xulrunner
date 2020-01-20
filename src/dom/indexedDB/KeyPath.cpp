@@ -7,13 +7,10 @@
 #include "KeyPath.h"
 #include "IDBObjectStore.h"
 #include "Key.h"
-#include "ReportInternalError.h"
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsJSUtils.h"
 #include "xpcpublic.h"
-
-#include "mozilla/dom/BindingDeclarations.h"
 
 USING_INDEXEDDB_NAMESPACE
 
@@ -21,7 +18,7 @@ namespace {
 
 inline
 bool
-IgnoreWhitespace(char16_t c)
+IgnoreWhitespace(PRUnichar c)
 {
   return false;
 }
@@ -42,15 +39,15 @@ IsValidKeyPathString(JSContext* aCx, const nsAString& aKeyPath)
       return false;
     }
 
-    JS::Rooted<JS::Value> stringVal(aCx);
+    jsval stringVal;
     if (!xpc::StringToJsval(aCx, token, &stringVal)) {
       return false;
     }
 
-    NS_ASSERTION(stringVal.toString(), "This should never happen");
-    JS::Rooted<JSString*> str(aCx, stringVal.toString());
+    NS_ASSERTION(JSVAL_IS_STRING(stringVal), "This should never happen");
+    JSString* str = JSVAL_TO_STRING(stringVal);
 
-    bool isIdentifier = false;
+    JSBool isIdentifier = JS_FALSE;
     if (!JS_IsIdentifier(aCx, str, &isIdentifier) || !isIdentifier) {
       return false;
     }
@@ -106,22 +103,23 @@ GetJSValFromKeyPathString(JSContext* aCx,
     const jschar* keyPathChars = token.BeginReading();
     const size_t keyPathLen = token.Length();
 
-    bool hasProp;
+    JSBool hasProp;
     if (!targetObject) {
       // We're still walking the chain of existing objects
       if (!obj) {
         return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
       }
 
-      bool ok = JS_HasUCProperty(aCx, obj, keyPathChars, keyPathLen,
-                                 &hasProp);
-      IDB_ENSURE_TRUE(ok, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+      JSBool ok = JS_HasUCProperty(aCx, obj, keyPathChars, keyPathLen,
+                                   &hasProp);
+      NS_ENSURE_TRUE(ok, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
       if (hasProp) {
         // Get if the property exists...
         JS::Rooted<JS::Value> intermediate(aCx);
-        bool ok = JS_GetUCProperty(aCx, obj, keyPathChars, keyPathLen, &intermediate);
-        IDB_ENSURE_TRUE(ok, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        JSBool ok = JS_GetUCProperty(aCx, obj, keyPathChars, keyPathLen,
+                                     intermediate.address());
+        NS_ENSURE_TRUE(ok, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
         // Treat explicitly undefined as an error.
         if (intermediate == JSVAL_VOID) {
@@ -160,10 +158,8 @@ GetJSValFromKeyPathString(JSContext* aCx,
       if (tokenizer.hasMoreTokens()) {
         // If we're not at the end, we need to add a dummy object to the
         // chain.
-        JS::Rooted<JSObject*> dummy(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(),
-                                                      JS::NullPtr()));
+        JS::Rooted<JSObject*> dummy(aCx, JS_NewObject(aCx, nullptr, nullptr, nullptr));
         if (!dummy) {
-          IDB_REPORT_INTERNAL_ERR();
           rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
           break;
         }
@@ -172,7 +168,6 @@ GetJSValFromKeyPathString(JSContext* aCx,
                                  token.Length(),
                                  OBJECT_TO_JSVAL(dummy), nullptr, nullptr,
                                  JSPROP_ENUMERATE)) {
-          IDB_REPORT_INTERNAL_ERR();
           rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
           break;
         }
@@ -181,9 +176,8 @@ GetJSValFromKeyPathString(JSContext* aCx,
       }
       else {
         JS::Rooted<JSObject*> dummy(aCx, JS_NewObject(aCx, &IDBObjectStore::sDummyPropJSClass,
-                                                      JS::NullPtr(), JS::NullPtr()));
+                                                      nullptr, nullptr));
         if (!dummy) {
-          IDB_REPORT_INTERNAL_ERR();
           rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
           break;
         }
@@ -191,7 +185,6 @@ GetJSValFromKeyPathString(JSContext* aCx,
         if (!JS_DefineUCProperty(aCx, obj, token.BeginReading(),
                                  token.Length(), OBJECT_TO_JSVAL(dummy),
                                  nullptr, nullptr, JSPROP_ENUMERATE)) {
-          IDB_REPORT_INTERNAL_ERR();
           rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
           break;
         }
@@ -210,15 +203,16 @@ GetJSValFromKeyPathString(JSContext* aCx,
   if (targetObject) {
     // If this fails, we lose, and the web page sees a magical property
     // appear on the object :-(
-    bool succeeded;
+    JS::Rooted<JS::Value> succeeded(aCx);
     if (!JS_DeleteUCProperty2(aCx, targetObject,
                               targetObjectPropName.get(),
                               targetObjectPropName.Length(),
-                              &succeeded)) {
-      IDB_REPORT_INTERNAL_ERR();
+                              succeeded.address())) {
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-    IDB_ENSURE_TRUE(succeeded, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+    NS_ASSERTION(JSVAL_IS_BOOLEAN(succeeded), "Wtf?");
+    NS_ENSURE_TRUE(JSVAL_TO_BOOLEAN(succeeded),
+                   NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -229,48 +223,15 @@ GetJSValFromKeyPathString(JSContext* aCx,
 
 // static
 nsresult
-KeyPath::Parse(JSContext* aCx, const nsAString& aString, KeyPath* aKeyPath)
+KeyPath::Parse(JSContext* aCx, const JS::Value& aValue, KeyPath* aKeyPath)
 {
-  KeyPath keyPath(0);
-  keyPath.SetType(STRING);
-
-  if (!keyPath.AppendStringWithValidation(aCx, aString)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aKeyPath = keyPath;
-  return NS_OK;
-}
-
-//static
-nsresult
-KeyPath::Parse(JSContext* aCx, const mozilla::dom::Sequence<nsString>& aStrings,
-               KeyPath* aKeyPath)
-{
-  KeyPath keyPath(0);
-  keyPath.SetType(ARRAY);
-
-  for (uint32_t i = 0; i < aStrings.Length(); ++i) {
-    if (!keyPath.AppendStringWithValidation(aCx, aStrings[i])) {
-      return NS_ERROR_FAILURE;
-    }
-  }
-
-  *aKeyPath = keyPath;
-  return NS_OK;
-}
-
-// static
-nsresult
-KeyPath::Parse(JSContext* aCx, const JS::Value& aValue_, KeyPath* aKeyPath)
-{
-  JS::Rooted<JS::Value> aValue(aCx, aValue_);
   KeyPath keyPath(0);
 
   aKeyPath->SetType(NONEXISTENT);
 
   // See if this is a JS array.
-  if (JS_IsArrayObject(aCx, aValue)) {
+  if (!JSVAL_IS_PRIMITIVE(aValue) &&
+      JS_IsArrayObject(aCx, JSVAL_TO_OBJECT(aValue))) {
 
     JS::Rooted<JSObject*> obj(aCx, JSVAL_TO_OBJECT(aValue));
 
@@ -289,8 +250,8 @@ KeyPath::Parse(JSContext* aCx, const JS::Value& aValue_, KeyPath* aKeyPath)
       JS::Rooted<JS::Value> val(aCx);
       JSString* jsstr;
       nsDependentJSString str;
-      if (!JS_GetElement(aCx, obj, index, &val) ||
-          !(jsstr = JS::ToString(aCx, val)) ||
+      if (!JS_GetElement(aCx, obj, index, val.address()) ||
+          !(jsstr = JS_ValueToString(aCx, val)) ||
           !str.init(aCx, jsstr)) {
         return NS_ERROR_FAILURE;
       }
@@ -304,7 +265,7 @@ KeyPath::Parse(JSContext* aCx, const JS::Value& aValue_, KeyPath* aKeyPath)
   else if (!JSVAL_IS_NULL(aValue) && !JSVAL_IS_VOID(aValue)) {
     JSString* jsstr;
     nsDependentJSString str;
-    if (!(jsstr = JS::ToString(aCx, aValue)) ||
+    if (!(jsstr = JS_ValueToString(aCx, aValue)) ||
         !str.init(aCx, jsstr)) {
       return NS_ERROR_FAILURE;
     }
@@ -389,7 +350,7 @@ KeyPath::ExtractKeyAsJSVal(JSContext* aCx, const JS::Value& aValue,
   }
 
   const uint32_t len = mStrings.Length();
-  JS::Rooted<JSObject*> arrayObj(aCx, JS_NewArrayObject(aCx, len));
+  JS::RootedObject arrayObj(aCx, JS_NewArrayObject(aCx, len, nullptr));
   if (!arrayObj) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -404,8 +365,7 @@ KeyPath::ExtractKeyAsJSVal(JSContext* aCx, const JS::Value& aValue,
       return rv;
     }
 
-    if (!JS_SetElement(aCx, arrayObj, i, value)) {
-      IDB_REPORT_INTERNAL_ERR();
+    if (!JS_SetElement(aCx, arrayObj, i, value.address())) {
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   }
@@ -501,22 +461,20 @@ KeyPath::ToJSVal(JSContext* aCx, JS::MutableHandle<JS::Value> aValue) const
 {
   if (IsArray()) {
     uint32_t len = mStrings.Length();
-    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, len));
+    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, len, nullptr));
     if (!array) {
-      IDB_WARNING("Failed to make array!");
+      NS_WARNING("Failed to make array!");
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
     for (uint32_t i = 0; i < len; ++i) {
       JS::Rooted<JS::Value> val(aCx);
       nsString tmp(mStrings[i]);
-      if (!xpc::StringToJsval(aCx, tmp, &val)) {
-        IDB_REPORT_INTERNAL_ERR();
+      if (!xpc::StringToJsval(aCx, tmp, val.address())) {
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
 
-      if (!JS_SetElement(aCx, array, i, val)) {
-        IDB_REPORT_INTERNAL_ERR();
+      if (!JS_SetElement(aCx, array, i, val.address())) {
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
     }
@@ -527,8 +485,7 @@ KeyPath::ToJSVal(JSContext* aCx, JS::MutableHandle<JS::Value> aValue) const
 
   if (IsString()) {
     nsString tmp(mStrings[0]);
-    if (!xpc::StringToJsval(aCx, tmp, aValue)) {
-      IDB_REPORT_INTERNAL_ERR();
+    if (!xpc::StringToJsval(aCx, tmp, aValue.address())) {
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
     return NS_OK;

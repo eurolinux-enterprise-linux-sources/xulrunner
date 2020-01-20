@@ -22,6 +22,7 @@
 #include <vector>
 #include "mozilla/FileUtils.h"
 #include "mozilla/NullPtr.h"
+#include "mozilla/Util.h"
 #include "png.h"
 
 #include "android/log.h"
@@ -267,7 +268,7 @@ RawReader(png_structp png_ptr, png_bytep data, png_size_t length)
 {
     RawReadState *state = (RawReadState *)png_get_io_ptr(png_ptr);
     if (length > (state->length - state->offset))
-        png_error(png_ptr, "PNG read overrun");
+        png_err(png_ptr);
 
     memcpy(data, state->start + state->offset, length);
     state->offset += length;
@@ -523,27 +524,8 @@ AnimationThread(void *)
                     display->QueueBuffer(buf);
                     break;
                 }
-
-                if (buf->height == frame.height && buf->width == frame.width) {
-                    memcpy(vaddr, frame.buf,
-                           frame.width * frame.height * frame.bytepp);
-                } else if (buf->height >= frame.height &&
-                           buf->width >= frame.width) {
-                    int startx = (buf->width - frame.width) / 2;
-                    int starty = (buf->height - frame.height) / 2;
-
-                    int src_stride = frame.width * frame.bytepp;
-                    int dst_stride = buf->stride * frame.bytepp;
-
-                    char *src = frame.buf;
-                    char *dst = (char *) vaddr + starty * dst_stride + startx * frame.bytepp;
-
-                    for (int i = 0; i < frame.height; i++) {
-                        memcpy(dst, src, src_stride);
-                        src += src_stride;
-                        dst += dst_stride;
-                    }
-                }
+                memcpy(vaddr, frame.buf,
+                       frame.width * frame.height * frame.bytepp);
                 grmodule->unlock(grmodule, buf->handle);
 
                 gettimeofday(&tv2, nullptr);

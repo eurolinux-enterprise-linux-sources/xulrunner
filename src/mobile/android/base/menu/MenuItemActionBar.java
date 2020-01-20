@@ -9,6 +9,7 @@ import org.mozilla.gecko.R;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
+import android.view.ViewGroup;
 import android.widget.ImageButton;
 
 public class MenuItemActionBar extends ImageButton
@@ -25,6 +26,9 @@ public class MenuItemActionBar extends ImageButton
 
     public MenuItemActionBar(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
+
+        int size = (int) (context.getResources().getDimension(R.dimen.browser_toolbar_height));
+        setLayoutParams(new ViewGroup.LayoutParams(size, size));
     }
 
     @Override
@@ -35,23 +39,27 @@ public class MenuItemActionBar extends ImageButton
         setIcon(item.getIcon());
         setTitle(item.getTitle());
         setEnabled(item.isEnabled());
-        setId(item.getItemId());
     }
 
-    void setIcon(Drawable icon) {
-        if (icon == null) {
-            setVisibility(GONE);
-        } else {
-            setVisibility(VISIBLE);
+    private void setIcon(Drawable icon) {
+        if (icon != null) {
             setImageDrawable(icon);
+            setVisibility(VISIBLE);
+        } else {
+            setVisibility(GONE);
         }
     }
 
-    void setIcon(int icon) {
-        setIcon((icon == 0) ? null : getResources().getDrawable(icon));
+    private void setIcon(int icon) {
+        if (icon != 0) {
+            setImageResource(icon);
+            setVisibility(VISIBLE);
+        } else {
+            setVisibility(GONE);
+        }
     }
 
-    void setTitle(CharSequence title) {
+    private void setTitle(CharSequence title) {
         // set accessibility contentDescription here
         setContentDescription(title);
     }
@@ -60,10 +68,5 @@ public class MenuItemActionBar extends ImageButton
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
         setColorFilter(enabled ? 0 : 0xFF999999);
-    }
-
-    @Override
-    public void setShowIcon(boolean show) {
-        // Do nothing.
     }
 }

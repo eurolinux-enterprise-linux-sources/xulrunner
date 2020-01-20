@@ -39,7 +39,7 @@ static const XPCOMFunctions kFrozenFunctions = {
 
     // these functions were added post 1.4
     &NS_GetDebug,
-    nullptr,
+    &NS_GetTraceRefcnt,
 
     // these functions were added post 1.6
     &NS_StringContainerInit,
@@ -67,7 +67,7 @@ static const XPCOMFunctions kFrozenFunctions = {
     &NS_CStringContainerInit2,
     &NS_StringGetMutableData,
     &NS_CStringGetMutableData,
-    nullptr,
+    NULL,
 
     // these functions were added post 1.8
     &NS_DebugBreak,
@@ -89,11 +89,9 @@ static const XPCOMFunctions kFrozenFunctions = {
     &NS_CStringSetIsVoid,
     &NS_CStringGetIsVoid,
 
-    // these functions were added post 1.9, but then made obsolete
-    nullptr,
-    nullptr,
-
-    &NS_CycleCollectorSuspect3,
+    // these functions were added post 1.9
+    &NS_CycleCollectorSuspect2,
+    nullptr
 };
 
 EXPORT_XPCOM_API(nsresult)

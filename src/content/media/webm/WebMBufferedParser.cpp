@@ -12,6 +12,8 @@
 
 namespace mozilla {
 
+static const double NS_PER_S = 1e9;
+
 static uint32_t
 VIntLength(unsigned char aFirstByte, uint32_t* aMask)
 {
@@ -216,22 +218,6 @@ bool WebMBufferedState::CalculateBufferedForRange(int64_t aStartOffset, int64_t 
 
   *aStartTime = mTimeMapping[start].mTimecode;
   *aEndTime = mTimeMapping[end].mTimecode;
-  return true;
-}
-
-bool WebMBufferedState::GetOffsetForTime(uint64_t aTime, int64_t* aOffset)
-{
-  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  WebMTimeDataOffset result(0,0);
-
-  for (uint32_t i = 0; i < mTimeMapping.Length(); ++i) {
-    WebMTimeDataOffset o = mTimeMapping[i];
-    if (o.mTimecode < aTime && o.mTimecode > result.mTimecode) {
-      result = o;
-    }
-  }
-
-  *aOffset = result.mOffset;
   return true;
 }
 

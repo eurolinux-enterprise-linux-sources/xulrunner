@@ -2,14 +2,13 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // This tests are for a sessionstore.js atomic backup.
-// Each test will wait for a write to the Session Store
-// before executing.
 
 let tmp = {};
 Cu.import("resource://gre/modules/osfile.jsm", tmp);
-Cu.import("resource:///modules/sessionstore/SessionFile.jsm", tmp);
+Cu.import("resource://gre/modules/Task.jsm", tmp);
+Cu.import("resource:///modules/sessionstore/_SessionFile.jsm", tmp);
 
-const {OS, SessionFile} = tmp;
+const {OS, Task, _SessionFile} = tmp;
 
 const PREF_SS_INTERVAL = "browser.sessionstore.interval";
 // Full paths for sessionstore.js and sessionstore.bak.
@@ -24,12 +23,51 @@ let gDecoder = new TextDecoder();
 let gSSData;
 let gSSBakData;
 
+// waitForSaveStateComplete waits for a state write completion.
+function waitForSaveStateComplete(aSaveStateCallback) {
+  let topic = "sessionstore-state-write-complete";
 
+  function observer() {
+    Services.prefs.clearUserPref(PREF_SS_INTERVAL);
+    Services.obs.removeObserver(observer, topic);
+    executeSoon(function taskCallback() {
+      Task.spawn(aSaveStateCallback);
+    });
+  }
 
-add_task(function* testAfterFirstWrite() {
-  // Ensure sessionstore.bak is not created. We start with a clean
-  // profile so there was nothing to move to sessionstore.bak before
-  // initially writing sessionstore.js
+  Services.obs.addObserver(observer, topic, false);
+}
+
+// Register next test callback and trigger state saving change.
+function nextTest(testFunc) {
+  waitForSaveStateComplete(testFunc);
+  Services.prefs.setIntPref(PREF_SS_INTERVAL, 0);
+}
+
+registerCleanupFunction(function() {
+  // Cleaning up after the test: removing the sessionstore.bak file.
+  Task.spawn(function cleanupTask() {
+    yield OS.File.remove(backupPath);
+  });
+});
+
+function test() {
+  waitForExplicitFinish();
+  nextTest(testInitialWriteNoBackup);
+}
+
+function testInitialWriteNoBackup() {
+  // Ensure that sessionstore.js is created, but not sessionstore.bak.
+  let ssExists = yield OS.File.exists(path);
+  let ssBackupExists = yield OS.File.exists(backupPath);
+  ok(ssExists, "sessionstore.js should be created.");
+  ok(!ssBackupExists, "sessionstore.bak should not have been created, yet.");
+
+  nextTest(testWriteNoBackup);
+}
+
+function testWriteNoBackup() {
+  // Ensure sessionstore.bak is not created.
   let ssExists = yield OS.File.exists(path);
   let ssBackupExists = yield OS.File.exists(backupPath);
   ok(ssExists, "sessionstore.js should exist.");
@@ -40,14 +78,14 @@ add_task(function* testAfterFirstWrite() {
   let array = yield OS.File.read(path);
   gSSData = gDecoder.decode(array);
 
-  // Manually move to the backup since the first write has already happened
-  // and a backup would not be triggered again.
-  yield OS.File.move(path, backupPath);
+  // Manually trigger _SessionFile.createBackupCopy since the backup once
+  // promise is already resolved and backup would not be triggered again.
+  yield _SessionFile.createBackupCopy();
 
-  yield forceSaveState();
-});
+  nextTest(testWriteBackup);
+}
 
-add_task(function* testReadBackup() {
+function testWriteBackup() {
   // Ensure sessionstore.bak is finally created.
   let ssExists = yield OS.File.exists(path);
   let ssBackupExists = yield OS.File.exists(backupPath);
@@ -66,24 +104,33 @@ add_task(function* testReadBackup() {
   array = yield OS.File.read(path);
   gSSData = gDecoder.decode(array);
 
-  // Read sessionstore.js with SessionFile.read.
-  let ssDataRead = yield SessionFile.read();
-  is(ssDataRead, gSSData, "SessionFile.read read sessionstore.js correctly.");
+  // Read sessionstore.js with _SessionFile.read.
+  let ssDataRead = yield _SessionFile.read();
+  is(ssDataRead, gSSData, "_SessionFile.read read sessionstore.js correctly.");
+
+  // Read sessionstore.js with _SessionFile.syncRead.
+  ssDataRead = _SessionFile.syncRead();
+  is(ssDataRead, gSSData,
+    "_SessionFile.syncRead read sessionstore.js correctly.");
 
   // Remove sessionstore.js to test fallback onto sessionstore.bak.
   yield OS.File.remove(path);
   ssExists = yield OS.File.exists(path);
   ok(!ssExists, "sessionstore.js should be removed now.");
 
-  // Read sessionstore.bak with SessionFile.read.
-  ssDataRead = yield SessionFile.read();
+  // Read sessionstore.bak with _SessionFile.read.
+  ssDataRead = yield _SessionFile.read();
   is(ssDataRead, gSSBakData,
-    "SessionFile.read read sessionstore.bak correctly.");
+    "_SessionFile.read read sessionstore.bak correctly.");
 
-  yield forceSaveState();
-});
+  // Read sessionstore.bak with _SessionFile.syncRead.
+  ssDataRead = _SessionFile.syncRead();
+  is(ssDataRead, gSSBakData,
+    "_SessionFile.syncRead read sessionstore.bak correctly.");
+  nextTest(testNoWriteBackup);
+}
 
-add_task(function* testBackupUnchanged() {
+function testNoWriteBackup() {
   // Ensure sessionstore.bak is backed up only once.
 
   // Read sessionstore.bak data.
@@ -91,9 +138,6 @@ add_task(function* testBackupUnchanged() {
   let ssBakData = gDecoder.decode(array);
   // Ensure the sessionstore.bak did not change.
   is(ssBakData, gSSBakData, "sessionstore.bak is unchanged.");
-});
 
-add_task(function* cleanup() {
-  // Cleaning up after the test: removing the sessionstore.bak file.
-  yield OS.File.remove(backupPath);
-});
+  executeSoon(finish);
+}

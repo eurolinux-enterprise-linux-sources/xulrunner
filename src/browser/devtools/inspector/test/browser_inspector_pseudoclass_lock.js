@@ -1,142 +1,160 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-// Test that locking the pseudoclass displays correctly in the ruleview
-
 let DOMUtils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-const PSEUDO = ":hover";
-const TEST_URL = 'data:text/html,' +
-                 '<head>' +
-                 '  <style>div {color:red;} div:hover {color:blue;}</style>' +
-                 '</head>' +
-                 '<body>' +
-                 '  <div id="parent-div">' +
-                 '    <div id="div-1">test div</div>' +
-                 '    <div id="div-2">test div2</div>' +
-                 '  </div>' +
-                 '</body>';
 
-waitForExplicitFinish();
+let doc;
+let parentDiv, div, div2;
+let inspector;
+let ruleview;
 
-function test() {
+let pseudo = ":hover";
+
+function test()
+{
+  waitForExplicitFinish();
   ignoreAllUncaughtExceptions();
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function() {
     gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
-    waitForFocus(startTests, content);
+    doc = content.document;
+    waitForFocus(createDocument, content);
   }, true);
 
-  content.location = TEST_URL;
+  content.location = "data:text/html,pseudo-class lock tests";
 }
 
-let startTests = Task.async(function*() {
-  let {toolbox, inspector, view} = yield openRuleView();
-  yield selectNode("#div-1", inspector);
+function createDocument()
+{
+  parentDiv = doc.createElement("div");
+  parentDiv.textContent = "parent div";
 
-  yield performTests(inspector, view);
+  div = doc.createElement("div");
+  div.textContent = "test div";
 
-  yield finishUp(toolbox);
-  finish();
-});
+  div2 = doc.createElement("div");
+  div2.textContent = "test div2";
 
-function* performTests(inspector, ruleview) {
-  yield togglePseudoClass(inspector);
-  yield testAdded(inspector, ruleview);
+  let head = doc.getElementsByTagName('head')[0];
+  let style = doc.createElement('style');
+  let rules = doc.createTextNode('div { color: red; } div:hover { color: blue; }');
 
-  yield togglePseudoClass(inspector);
-  yield testRemoved();
-  yield testRemovedFromUI(inspector, ruleview);
+  style.appendChild(rules);
+  head.appendChild(style);
+  parentDiv.appendChild(div);
+  parentDiv.appendChild(div2);
+  doc.body.appendChild(parentDiv);
 
-  yield togglePseudoClass(inspector);
-  yield testNavigate(inspector, ruleview);
+  openInspector(selectNode);
 }
 
-function* togglePseudoClass(inspector) {
-  info("Toggle the pseudoclass, wait for the pseudoclass event and wait for the refresh of the rule view");
-
-  let onPseudo = inspector.selection.once("pseudoclass");
-  let onRefresh = inspector.once("rule-view-refreshed");
-  inspector.togglePseudoClass(PSEUDO);
-
-  yield onPseudo;
-  yield onRefresh;
+function selectNode(aInspector)
+{
+  inspector = aInspector;
+  inspector.selection.setNode(div);
+  inspector.sidebar.once("ruleview-ready", function() {
+    ruleview = inspector.sidebar.getWindowForTab("ruleview").ruleview.view;
+    inspector.sidebar.select("ruleview");
+    performTests();
+  });
 }
 
-function* testNavigate(inspector, ruleview) {
-  yield selectNode("#parent-div", inspector);
+function performTests()
+{
+  // toggle the class
+  inspector.togglePseudoClass(pseudo);
 
-  info("Make sure the pseudoclass is still on after navigating to a parent");
-  is(DOMUtils.hasPseudoClassLock(getNode("#div-1"), PSEUDO), true,
-    "pseudo-class lock is still applied after inspecting ancestor");
+  testAdded();
 
-  let onPseudo = inspector.selection.once("pseudoclass");
-  yield selectNode("#div-2", inspector);
-  yield onPseudo;
+  // toggle the lock off
+  inspector.togglePseudoClass(pseudo);
 
-  info("Make sure the pseudoclass is removed after navigating to a non-hierarchy node");
-  is(DOMUtils.hasPseudoClassLock(getNode("#div-1"), PSEUDO), false,
-    "pseudo-class lock is removed after inspecting sibling node");
+  testRemoved();
+  testRemovedFromUI();
 
-  yield selectNode("#div-1", inspector);
-  yield togglePseudoClass(inspector);
-  yield inspector.once("computed-view-refreshed");
+  // toggle it back on
+  inspector.togglePseudoClass(pseudo);
+
+  testNavigate();
+
+  // close the inspector
+  finishUp();
 }
 
-function showPickerOn(node, inspector) {
-  let highlighter = inspector.toolbox.highlighter;
-  return highlighter.showBoxModel(getNodeFront(node));
+function testNavigate()
+{
+  inspector.selection.setNode(parentDiv);
+
+  // make sure it's still on after naving to parent
+  is(DOMUtils.hasPseudoClassLock(div, pseudo), true,
+       "pseudo-class lock is still applied after inspecting ancestor");
+
+  inspector.selection.setNode(div2);
+
+  // make sure it's removed after naving to a non-hierarchy node
+  is(DOMUtils.hasPseudoClassLock(div, pseudo), false,
+       "pseudo-class lock is removed after inspecting sibling node");
+
+  // toggle it back on
+  inspector.selection.setNode(div);
+  inspector.togglePseudoClass(pseudo);
 }
 
-function* testAdded(inspector, ruleview) {
-  info("Make sure the pseudoclass lock is applied to #div-1 and its ancestors");
-  let node = getNode("#div-1");
+function testAdded()
+{
+  // lock is applied to it and ancestors
+  let node = div;
   do {
-    is(DOMUtils.hasPseudoClassLock(node, PSEUDO), true,
-      "pseudo-class lock has been applied");
+    is(DOMUtils.hasPseudoClassLock(node, pseudo), true,
+       "pseudo-class lock has been applied");
     node = node.parentNode;
   } while (node.parentNode)
 
-  info("Check that the ruleview contains the pseudo-class rule");
-  let rules = ruleview.element.querySelectorAll(".ruleview-rule.theme-separator");
-  is(rules.length, 3, "rule view is showing 3 rules for pseudo-class locked div");
-  is(rules[1]._ruleEditor.rule.selectorText, "div:hover", "rule view is showing " + PSEUDO + " rule");
+  // infobar selector contains pseudo-class
+  let pseudoClassesBox = getActiveInspector().highlighter.nodeInfo.pseudoClassesBox;
+  is(pseudoClassesBox.textContent, pseudo, "pseudo-class in infobar selector");
 
-  info("Show the highlighter on #div-1");
-  yield showPickerOn(getNode("#div-1"), inspector);
+  // ruleview contains pseudo-class rule
+  is(ruleview.element.children.length, 3,
+     "rule view is showing 3 rules for pseudo-class locked div");
 
-  info("Check that the infobar selector contains the pseudo-class");
-  let pseudoClassesBox = getHighlighter().querySelector(".highlighter-nodeinfobar-pseudo-classes");
-  is(pseudoClassesBox.textContent, PSEUDO, "pseudo-class in infobar selector");
-  yield inspector.toolbox.highlighter.hideBoxModel();
+  is(ruleview.element.children[1]._ruleEditor.rule.selectorText,
+     "div:hover", "rule view is showing " + pseudo + " rule");
 }
 
-function* testRemoved() {
-  info("Make sure the pseudoclass lock is removed from #div-1 and its ancestors");
-  let node = getNode("#div-1");
+function testRemoved()
+{
+  // lock removed from node and ancestors
+  let node = div;
   do {
-    is(DOMUtils.hasPseudoClassLock(node, PSEUDO), false,
+    is(DOMUtils.hasPseudoClassLock(node, pseudo), false,
        "pseudo-class lock has been removed");
     node = node.parentNode;
   } while (node.parentNode)
 }
 
-function* testRemovedFromUI(inspector, ruleview) {
-  info("Check that the ruleview no longer contains the pseudo-class rule");
-  let rules = ruleview.element.querySelectorAll(".ruleview-rule.theme-separator");
-  is(rules.length, 2, "rule view is showing 2 rules after removing lock");
-
-  yield showPickerOn(getNode("#div-1"), inspector);
-
-  let pseudoClassesBox = getHighlighter().querySelector(".highlighter-nodeinfobar-pseudo-classes");
+function testRemovedFromUI()
+{
+  // infobar selector doesn't contain pseudo-class
+  let pseudoClassesBox = getActiveInspector().highlighter.nodeInfo.pseudoClassesBox;
   is(pseudoClassesBox.textContent, "", "pseudo-class removed from infobar selector");
-  yield inspector.toolbox.highlighter.hideBoxModel();
+
+  // ruleview no longer contains pseudo-class rule
+  is(ruleview.element.children.length, 2,
+     "rule view is showing 2 rules after removing lock");
 }
 
-function* finishUp(toolbox) {
-  let onDestroy = gDevTools.once("toolbox-destroyed");
-  toolbox.destroy();
-  yield onDestroy;
+function finishUp()
+{
+  gDevTools.once("toolbox-destroyed", function() {
+    testRemoved();
+    inspector = ruleview = null;
+    doc = div = null;
+    gBrowser.removeCurrentTab();
+    finish();
+  });
 
-  yield testRemoved(getNode("#div-1"));
-  gBrowser.removeCurrentTab();
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.getToolbox(target);
+  toolbox.destroy();
 }

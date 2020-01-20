@@ -7,12 +7,14 @@
 #ifndef jit_BytecodeAnalysis_h
 #define jit_BytecodeAnalysis_h
 
-#include "jsscript.h"
-#include "jit/IonAllocPolicy.h"
+#include "jscntxt.h"
+
+#include "IonAllocPolicy.h"
 #include "js/Vector.h"
 
 namespace js {
 namespace jit {
+
 
 // Basic information about bytecodes in the script.  Used to help baseline compilation.
 struct BytecodeInfo
@@ -23,9 +25,6 @@ struct BytecodeInfo
     bool jumpTarget : 1;
     bool jumpFallthrough : 1;
     bool fallthrough : 1;
-
-    // If true, this is a JSOP_LOOPENTRY op inside a catch or finally block.
-    bool loopEntryInCatchOrFinally : 1;
 
     void init(unsigned depth) {
         JS_ASSERT(depth <= MAX_STACK_DEPTH);
@@ -40,36 +39,20 @@ class BytecodeAnalysis
     JSScript *script_;
     Vector<BytecodeInfo, 0, IonAllocPolicy> infos_;
 
-    bool usesScopeChain_;
-    bool hasTryFinally_;
-    bool hasSetArg_;
-
   public:
-    explicit BytecodeAnalysis(TempAllocator &alloc, JSScript *script);
+    explicit BytecodeAnalysis(JSScript *script);
 
-    bool init(TempAllocator &alloc, GSNCache &gsn);
+    bool init();
 
     BytecodeInfo &info(jsbytecode *pc) {
-        JS_ASSERT(infos_[script_->pcToOffset(pc)].initialized);
-        return infos_[script_->pcToOffset(pc)];
+        JS_ASSERT(infos_[pc - script_->code].initialized);
+        return infos_[pc - script_->code];
     }
 
     BytecodeInfo *maybeInfo(jsbytecode *pc) {
-        if (infos_[script_->pcToOffset(pc)].initialized)
-            return &infos_[script_->pcToOffset(pc)];
-        return nullptr;
-    }
-
-    bool usesScopeChain() const {
-        return usesScopeChain_;
-    }
-
-    bool hasTryFinally() const {
-        return hasTryFinally_;
-    }
-
-    bool hasSetArg() const {
-        return hasSetArg_;
+        if (infos_[pc - script_->code].initialized)
+            return &infos_[pc - script_->code];
+        return NULL;
     }
 };
 

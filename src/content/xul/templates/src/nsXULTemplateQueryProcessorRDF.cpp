@@ -13,13 +13,12 @@
 #include "nsIRDFService.h"
 #include "nsRDFCID.h"
 #include "nsIServiceManager.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMDocument.h"
 #include "nsAttrName.h"
 #include "rdf.h"
 #include "nsArrayUtils.h"
-#include "nsIURI.h"
 
 #include "nsContentTestNode.h"
 #include "nsRDFConInstanceTestNode.h"
@@ -33,9 +32,11 @@
 #include "nsXULTemplateResultSetRDF.h"
 #include "nsXULTemplateQueryProcessorRDF.h"
 #include "nsXULSortService.h"
-#include "nsIDocument.h"
 
 //----------------------------------------------------------------------
+
+static NS_DEFINE_CID(kRDFContainerUtilsCID,      NS_RDFCONTAINERUTILS_CID);
+static NS_DEFINE_CID(kRDFServiceCID,             NS_RDFSERVICE_CID);
 
 #define PARSE_TYPE_INTEGER  "Integer"
 
@@ -44,8 +45,6 @@ nsIRDFService*            nsXULTemplateQueryProcessorRDF::gRDFService;
 nsIRDFContainerUtils*     nsXULTemplateQueryProcessorRDF::gRDFContainerUtils;
 nsIRDFResource*           nsXULTemplateQueryProcessorRDF::kNC_BookmarkSeparator;
 nsIRDFResource*           nsXULTemplateQueryProcessorRDF::kRDF_type;
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateQueryProcessorRDF)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateQueryProcessorRDF)
     tmp->Done();
@@ -97,11 +96,17 @@ RuleToBindingTraverser(nsISupports* key, RDFBindingSet* binding, void* userArg)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateQueryProcessorRDF)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDB)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastRef)
-    tmp->mBindingDependencies.EnumerateRead(BindingDependenciesTraverser,
-                                            &cb);
-    tmp->mMemoryElementToResultMap.EnumerateRead(MemoryElementTraverser,
-                                                 &cb);
-    tmp->mRuleToBindingsMap.EnumerateRead(RuleToBindingTraverser, &cb);
+    if (tmp->mBindingDependencies.IsInitialized()) {
+        tmp->mBindingDependencies.EnumerateRead(BindingDependenciesTraverser,
+                                                &cb);
+    }
+    if (tmp->mMemoryElementToResultMap.IsInitialized()) {
+        tmp->mMemoryElementToResultMap.EnumerateRead(MemoryElementTraverser,
+                                                     &cb);
+    }
+    if (tmp->mRuleToBindingsMap.IsInitialized()) {
+        tmp->mRuleToBindingsMap.EnumerateRead(RuleToBindingTraverser, &cb);
+    }
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueries)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -142,14 +147,12 @@ nsXULTemplateQueryProcessorRDF::InitGlobals()
     // Initialize the global shared reference to the service
     // manager and get some shared resource objects.
     if (!gRDFService) {
-        NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
         rv = CallGetService(kRDFServiceCID, &gRDFService);
         if (NS_FAILED(rv))
             return rv;
     }
 
     if (!gRDFContainerUtils) {
-        NS_DEFINE_CID(kRDFContainerUtilsCID, NS_RDFCONTAINERUTILS_CID);
         rv = CallGetService(kRDFContainerUtilsCID, &gRDFContainerUtils);
         if (NS_FAILED(rv))
             return rv;
@@ -298,6 +301,13 @@ nsXULTemplateQueryProcessorRDF::InitializeForBuilding(nsISupports* aDatasource,
         nsresult rv = InitGlobals();
         if (NS_FAILED(rv))
             return rv;
+
+        if (!mMemoryElementToResultMap.IsInitialized())
+            mMemoryElementToResultMap.Init();
+        if (!mBindingDependencies.IsInitialized())
+            mBindingDependencies.Init();
+        if (!mRuleToBindingsMap.IsInitialized())
+            mRuleToBindingsMap.Init();
 
         mQueryProcessorRDFInited = true;
     }
@@ -658,7 +668,7 @@ nsXULTemplateQueryProcessorRDF::CompareResults(nsIXULTemplateResult* aLeft,
         if (l) {
             nsCOMPtr<nsIRDFLiteral> r = do_QueryInterface(rightNode);
             if (r) {
-                const char16_t *lstr, *rstr;
+                const PRUnichar *lstr, *rstr;
                 l->GetValueConst(&lstr);
                 r->GetValueConst(&rstr);
 
@@ -1351,7 +1361,7 @@ nsXULTemplateQueryProcessorRDF::CompileTripleCondition(nsRDFQuery* aQuery,
         nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_TRIPLE_BAD_SUBJECT);
         return NS_OK;
     }
-    if (subject[0] == char16_t('?'))
+    if (subject[0] == PRUnichar('?'))
         svar = do_GetAtom(subject);
     else
         gRDFService->GetUnicodeResource(subject, getter_AddRefs(sres));
@@ -1361,7 +1371,7 @@ nsXULTemplateQueryProcessorRDF::CompileTripleCondition(nsRDFQuery* aQuery,
     aCondition->GetAttr(kNameSpaceID_None, nsGkAtoms::predicate, predicate);
 
     nsCOMPtr<nsIRDFResource> pres;
-    if (predicate.IsEmpty() || predicate[0] == char16_t('?')) {
+    if (predicate.IsEmpty() || predicate[0] == PRUnichar('?')) {
         nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_TRIPLE_BAD_PREDICATE);
         return NS_OK;
     }
@@ -1378,7 +1388,7 @@ nsXULTemplateQueryProcessorRDF::CompileTripleCondition(nsRDFQuery* aQuery,
         return NS_OK;
     }
 
-    if (object[0] == char16_t('?')) {
+    if (object[0] == PRUnichar('?')) {
         ovar = do_GetAtom(object);
     }
     else if (object.FindChar(':') != -1) { // XXXwaterson evil.
@@ -1445,7 +1455,7 @@ nsXULTemplateQueryProcessorRDF::CompileMemberCondition(nsRDFQuery* aQuery,
     nsAutoString container;
     aCondition->GetAttr(kNameSpaceID_None, nsGkAtoms::container, container);
 
-    if (!container.IsEmpty() && container[0] != char16_t('?')) {
+    if (!container.IsEmpty() && container[0] != PRUnichar('?')) {
         nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_MEMBER_NOCONTAINERVAR);
         return NS_OK;
     }
@@ -1456,7 +1466,7 @@ nsXULTemplateQueryProcessorRDF::CompileMemberCondition(nsRDFQuery* aQuery,
     nsAutoString child;
     aCondition->GetAttr(kNameSpaceID_None, nsGkAtoms::child, child);
 
-    if (!child.IsEmpty() && child[0] != char16_t('?')) {
+    if (!child.IsEmpty() && child[0] != PRUnichar('?')) {
         nsXULContentUtils::LogTemplateError(ERROR_TEMPLATE_MEMBER_NOCHILDVAR);
         return NS_OK;
     }

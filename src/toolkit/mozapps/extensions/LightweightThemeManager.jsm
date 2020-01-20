@@ -40,7 +40,7 @@ const PERSIST_FILES = {
 };
 
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
-  "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
+  "resource://gre/modules/LightweightThemeImageOptimizer.jsm");
 
 this.__defineGetter__("_prefs", function prefsGetter() {
   delete this._prefs;
@@ -508,7 +508,12 @@ function AddonWrapper(aTheme) {
   };
 
   this.findUpdates = function AddonWrapper_findUpdates(listener, reason, appVersion, platformVersion) {
-    AddonManagerPrivate.callNoUpdateListeners(this, listener, reason, appVersion, platformVersion);
+    if ("onNoCompatibilityUpdateAvailable" in listener)
+      listener.onNoCompatibilityUpdateAvailable(this);
+    if ("onNoUpdateAvailable" in listener)
+      listener.onNoUpdateAvailable(this);
+    if ("onUpdateFinished" in listener)
+      listener.onUpdateFinished(this);
   };
 }
 

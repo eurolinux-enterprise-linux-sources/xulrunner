@@ -44,8 +44,6 @@ public class GeckoAccessibility {
     private static JSONObject sEventMessage = null;
     private static AccessibilityNodeInfo sVirtualCursorNode = null;
 
-    // This is the number Brailleback uses to start indexing routing keys.
-    private static final int BRAILLE_CLICK_BASE_INDEX = -275000000;
     private static SelfBrailleClient sSelfBrailleClient = null;
 
     private static final HashSet<String> sServiceWhitelist =
@@ -200,10 +198,9 @@ public class GeckoAccessibility {
                 sVirtualCursorNode.setBoundsInScreen(screenBounds);
             }
 
-            final JSONObject braille = message.optJSONObject("brailleOutput");
-            if (braille != null) {
-                sendBrailleText(view, braille.optString("text"),
-                                braille.optInt("selectionStart"), braille.optInt("selectionEnd"));
+            final String brailleText = message.optString("brailleText");
+            if (!brailleText.isEmpty()) {
+                sendBrailleText(view, brailleText);
             }
 
             ThreadUtils.postToUiThread(new Runnable() {
@@ -235,13 +232,13 @@ public class GeckoAccessibility {
         }
     }
 
-    private static void sendBrailleText(final View view, final String text, final int selectionStart, final int selectionEnd) {
+    private static void sendBrailleText(final View view, final String text) {
         AccessibilityNodeInfo info = AccessibilityNodeInfo.obtain(view, VIRTUAL_CURSOR_POSITION);
         WriteData data = WriteData.forInfo(info);
         data.setText(text);
-        // Set either the focus blink or the current caret position/selection
-        data.setSelectionStart(selectionStart);
-        data.setSelectionEnd(selectionEnd);
+        // Set the focus blink
+        data.setSelectionStart(0);
+        data.setSelectionEnd(0);
         sSelfBrailleClient.write(data);
     }
 
@@ -301,13 +298,12 @@ public class GeckoAccessibility {
                             default:
                                 info.setParent(host);
                                 info.setSource(host, virtualDescendantId);
-                                info.setVisibleToUser(host.isShown());
+                                info.setVisibleToUser(true);
                                 info.setPackageName(GeckoAppShell.getContext().getPackageName());
                                 info.setClassName(host.getClass().getName());
                                 info.addAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
                                 info.addAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
                                 info.addAction(AccessibilityNodeInfo.ACTION_CLICK);
-                                info.addAction(AccessibilityNodeInfo.ACTION_LONG_CLICK);
                                 info.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
                                 info.addAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
                                 info.setMovementGranularities(AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER |
@@ -341,25 +337,13 @@ public class GeckoAccessibility {
                                 GeckoAppShell.
                                     sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:ActivateObject", null));
                                 return true;
-                            } else if (action == AccessibilityNodeInfo.ACTION_LONG_CLICK && virtualViewId == VIRTUAL_CURSOR_POSITION) {
-                                GeckoAppShell.
-                                    sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:LongPress", null));
-                                return true;
                             } else if (action == AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY &&
                                        virtualViewId == VIRTUAL_CURSOR_POSITION) {
-                                // XXX: Self brailling gives this action with a bogus argument instead of an actual click action;
-                                // the argument value is the BRAILLE_CLICK_BASE_INDEX - the index of the routing key that was hit
+                                // XXX: Self brailling gives this action with a bogus argument instead of an actual click action
                                 int granularity = arguments.getInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT);
                                 if (granularity < 0) {
-                                    int keyIndex = BRAILLE_CLICK_BASE_INDEX - granularity;
-                                    JSONObject activationData = new JSONObject();
-                                    try {
-                                        activationData.put("keyIndex", keyIndex);
-                                    } catch (JSONException e) {
-                                        return true;
-                                    }
                                     GeckoAppShell.
-                                        sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:ActivateObject", activationData.toString()));
+                                        sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:ActivateObject", null));
                                 } else {
                                     JSONObject movementData = new JSONObject();
                                     try {
@@ -369,7 +353,7 @@ public class GeckoAccessibility {
                                         return true;
                                     }
                                     GeckoAppShell.
-                                        sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:MoveByGranularity", movementData.toString()));
+                                        sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:MoveCaret", movementData.toString()));
                                 }
                                 return true;
                             } else if (action == AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY &&
@@ -382,7 +366,7 @@ public class GeckoAccessibility {
                                     return true;
                                 }
                                 GeckoAppShell.
-                                    sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:MoveByGranularity", movementData.toString()));
+                                    sendEventToGecko(GeckoEvent.createBroadcastEvent("Accessibility:MoveCaret", movementData.toString()));
                                 return true;
                             }
                             return host.performAccessibilityAction(action, arguments);

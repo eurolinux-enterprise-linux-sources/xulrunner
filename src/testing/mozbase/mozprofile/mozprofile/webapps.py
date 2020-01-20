@@ -16,12 +16,13 @@ __all__ = ["Webapp", "WebappCollection", "WebappFormatException", "APP_STATUS_NO
            "APP_STATUS_INSTALLED", "APP_STATUS_PRIVILEGED", "APP_STATUS_CERTIFIED"]
 
 from string import Template
-import json
 import os
 import shutil
 
-import mozfile
-
+try:
+    import json
+except ImportError:
+    import simplejson as json
 
 # from http://hg.mozilla.org/mozilla-central/file/add0b94c2c0b/caps/idl/nsIPrincipal.idl#l163
 APP_STATUS_NOT_INSTALLED = 0
@@ -29,10 +30,8 @@ APP_STATUS_INSTALLED     = 1
 APP_STATUS_PRIVILEGED    = 2
 APP_STATUS_CERTIFIED     = 3
 
-
 class WebappFormatException(Exception):
     """thrown for invalid webapp objects"""
-
 
 class Webapp(dict):
     """A webapp definition"""
@@ -67,7 +66,6 @@ class WebappCollection(object):
     """A list-like object that collects webapps and updates the webapp manifests"""
 
     json_template = Template(""""$name": {
-  "name": "$name",
   "origin": "$origin",
   "installOrigin": "$origin",
   "receipt": null,
@@ -183,7 +181,8 @@ class WebappCollection(object):
         for app in remove_apps:
             self._installed_apps.remove(app)
             manifest_dir = os.path.join(self.webapps_dir, app['name'])
-            mozfile.remove(manifest_dir)
+            if os.path.isdir(manifest_dir):
+                shutil.rmtree(manifest_dir)
 
     def update_manifests(self):
         """Updates the webapp manifests with the webapps represented in this collection
@@ -237,12 +236,12 @@ class WebappCollection(object):
 
     def clean(self):
         """Remove all webapps that were installed and restore profile to previous state"""
-        if self._installed_apps:
-            mozfile.remove(self.webapps_dir)
+        if self._installed_apps and os.path.isdir(self.webapps_dir):
+            shutil.rmtree(self.webapps_dir)
 
         if os.path.isdir(self.backup_dir):
             shutil.copytree(self.backup_dir, self.webapps_dir)
-            mozfile.remove(self.backup_dir)
+            shutil.rmtree(self.backup_dir)
 
         self._apps = []
         self._installed_apps = []

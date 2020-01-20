@@ -4,8 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #endif
 
-Cu.import("resource://gre/modules/NewTabUtils.jsm");
-
 /**
  * Keeps thumbnails of open web pages up-to-date.
  */
@@ -36,6 +34,11 @@ let gBrowserThumbnails = {
     // Bug 863512 - Make page thumbnails work in electrolysis
     if (gMultiProcessBrowser)
       return;
+
+    try {
+      if (Services.prefs.getBoolPref("browser.pagethumbnails.capturing_disabled"))
+        return;
+    } catch (e) {}
 
     PageThumbs.addExpirationFilter(this);
     gBrowser.addTabsProgressListener(this);
@@ -89,7 +92,7 @@ let gBrowserThumbnails = {
 
   filterForThumbnailExpiration:
   function Thumbnails_filterForThumbnailExpiration(aCallback) {
-    aCallback(this._topSiteURLs);
+    aCallback([browser.currentURI.spec for (browser of gBrowser.browsers)]);
   },
 
   /**
@@ -104,7 +107,7 @@ let gBrowserThumbnails = {
 
   _capture: function Thumbnails_capture(aBrowser) {
     if (this._shouldCapture(aBrowser))
-      PageThumbs.captureAndStoreIfStale(aBrowser);
+      PageThumbs.captureAndStore(aBrowser);
   },
 
   _delayedCapture: function Thumbnails_delayedCapture(aBrowser) {
@@ -124,10 +127,6 @@ let gBrowserThumbnails = {
   _shouldCapture: function Thumbnails_shouldCapture(aBrowser) {
     // Capture only if it's the currently selected tab.
     if (aBrowser != gBrowser.selectedBrowser)
-      return false;
-
-    // Only capture about:newtab top sites.
-    if (this._topSiteURLs.indexOf(aBrowser.currentURI.spec) < 0)
       return false;
 
     // Don't capture in per-window private browsing mode.
@@ -187,14 +186,6 @@ let gBrowserThumbnails = {
     }
 
     return true;
-  },
-
-  get _topSiteURLs() {
-    return NewTabUtils.links.getLinks().reduce((urls, link) => {
-      if (link)
-        urls.push(link.url);
-      return urls;
-    }, []);
   },
 
   _clearTimeout: function Thumbnails_clearTimeout(aBrowser) {

@@ -6,7 +6,6 @@ import hashlib
 import mozlog
 import socket
 import os
-import posixpath
 import re
 import struct
 import StringIO
@@ -169,25 +168,21 @@ class DeviceManager(object):
             self.removeFile(tempScreenshotFile)
 
     @abstractmethod
-    def pushFile(self, localFilename, remoteFilename, retryLimit=1, createDir=True):
+    def pushFile(self, localFilename, remoteFilename, retryLimit=1):
         """
         Copies localname from the host to destname on the device.
         """
 
     @abstractmethod
-    def pushDir(self, localDirname, remoteDirname, retryLimit=1, timeout=None):
+    def pushDir(self, localDirname, remoteDirname, retryLimit=1):
         """
         Push local directory from host to remote directory on the device,
         """
 
     @abstractmethod
-    def pullFile(self, remoteFilename, offset=None, length=None):
+    def pullFile(self, remoteFilename):
         """
         Returns contents of remoteFile using the "pull" command.
-
-        :param remoteFilename: Path to file to pull from remote device.
-        :param offset: Offset in bytes from which to begin reading (optional)
-        :param length: Number of bytes to read (optional)
         """
 
     @abstractmethod
@@ -239,14 +234,15 @@ class DeviceManager(object):
         WARNING: does not create last part of the path. For example, if asked to
         create `/mnt/sdcard/foo/bar/baz`, it will only create `/mnt/sdcard/foo/bar`
         """
-        filename = posixpath.normpath(filename)
-        containing = posixpath.dirname(filename)
-        if not self.dirExists(containing):
+        dirParts = filename.rsplit('/', 1)
+        if not self.dirExists(dirParts[0]):
             parts = filename.split('/')
-            name = "/"
-            for part in parts[:-1]:
+            name = ""
+            for part in parts:
+                if part is parts[-1]:
+                    break
                 if part != "":
-                    name = posixpath.join(name, part)
+                    name += '/' + part
                     self.mkDir(name) # mkDir will check previous existence
 
     @abstractmethod
@@ -258,8 +254,7 @@ class DeviceManager(object):
     @abstractmethod
     def fileExists(self, filepath):
         """
-        Return whether filepath exists on the device file system,
-        regardless of file type.
+        Return whether filepath exists and is a file on the device file system.
         """
 
     @abstractmethod
@@ -281,24 +276,6 @@ class DeviceManager(object):
         """
         Does a recursive delete of directory on the device: rm -Rf remoteDirname.
         """
-
-    @abstractmethod
-    def moveTree(self, source, destination):
-         """
-         Does a move of the file or directory on the device.
-
-        :param source: Path to the original file or directory
-        :param destination: Path to the destination file or directory
-         """
-
-    @abstractmethod
-    def copyTree(self, source, destination):
-         """
-         Does a copy of the file or directory on the device.
-
-        :param source: Path to the original file or directory
-        :param destination: Path to the destination file or directory
-         """
 
     @abstractmethod
     def chmodDir(self, remoteDirname, mask="777"):
@@ -368,7 +345,7 @@ class DeviceManager(object):
         """
         Executes shell command on device and returns exit code.
 
-        :param cmd: Commandline list to execute
+        :param cmd: Command string to execute
         :param outputfile: File to store output
         :param env: Environment to pass to exec command
         :param cwd: Directory to execute command from
@@ -380,7 +357,6 @@ class DeviceManager(object):
         """
         Executes shell command on device and returns output as a string.
 
-        :param cmd: Commandline list to execute
         :param env: Environment to pass to exec command
         :param cwd: Directory to execute command from
         :param timeout: specified in seconds, defaults to 'default_timeout'
@@ -438,25 +414,20 @@ class DeviceManager(object):
 
 
     @abstractmethod
-    def killProcess(self, processName, sig=None):
+    def killProcess(self, processName, forceKill=False):
         """
-        Kills the process named processName. If sig is not None, process is
-        killed with the specified signal.
-
-        :param processName: path or name of the process to kill
-        :param sig: signal to pass into the kill command (optional)
+        Kills the process named processName. If forceKill is True, process is
+        killed regardless of state.
         """
 
     @abstractmethod
-    def reboot(self, wait=False, ipAddr=None):
+    def reboot(self, ipAddr=None, port=30000):
         """
         Reboots the device.
 
-        :param wait: block on device to come back up before returning
-        :param ipAddr: if specified, try to make the device connect to this
-                       specific IP address after rebooting (only works with
-                       SUT; if None, we try to determine a reasonable address
-                       ourselves)
+        Some implementations may optionally support waiting for a TCP callback from
+        the device once it has restarted before returning, but this is not
+        guaranteed.
         """
 
     @abstractmethod
@@ -487,21 +458,21 @@ class DeviceManager(object):
         """
 
     @abstractmethod
-    def updateApp(self, appBundlePath, processName=None, destPath=None,
-                  wait=False, ipAddr=None):
+    def updateApp(self, appBundlePath, processName=None, destPath=None, ipAddr=None, port=30000):
         """
-        Updates the application on the device and reboots.
+        Updates the application on the device.
 
         :param appBundlePath: path to the application bundle on the device
         :param processName: used to end the process if the applicaiton is
                             currently running (optional)
         :param destPath: Destination directory to where the application should
                          be installed (optional)
-        :param wait: block on device to come back up before returning
-        :param ipAddr: if specified, try to make the device connect to this
-                       specific IP address after rebooting (only works with
-                       SUT; if None and wait is True, we try to determine a
-                       reasonable address ourselves)
+        :param ipAddr: IP address to await a callback ping to let us know that
+                       the device has updated properly (defaults to current
+                       IP)
+        :param port: port to await a callback ping to let us know that the
+                     device has updated properly defaults to 30000, and counts
+                     up from there if it finds a conflict
         """
 
     @staticmethod
@@ -572,6 +543,65 @@ class DeviceManager(object):
             quotedCmd.append(arg)
 
         return " ".join(quotedCmd)
+
+
+class NetworkTools:
+    def __init__(self):
+        pass
+
+    # Utilities to get the local ip address
+    def getInterfaceIp(self, ifname):
+        if os.name != "nt":
+            import fcntl
+            import struct
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            return socket.inet_ntoa(fcntl.ioctl(
+                                    s.fileno(),
+                                    0x8915,  # SIOCGIFADDR
+                                    struct.pack('256s', ifname[:15])
+                                    )[20:24])
+        else:
+            return None
+
+    def getLanIp(self):
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except socket.gaierror:
+            ip = socket.gethostbyname(socket.gethostname() + ".local") # for Mac OS X
+        if (ip is None or ip.startswith("127.")) and os.name != "nt":
+            interfaces = ["eth0","eth1","eth2","wlan0","wlan1","wifi0","ath0","ath1","ppp0"]
+            for ifname in interfaces:
+                try:
+                    ip = self.getInterfaceIp(ifname)
+                    break
+                except IOError:
+                    pass
+        return ip
+
+    # Gets an open port starting with the seed by incrementing by 1 each time
+    def findOpenPort(self, ip, seed):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            connected = False
+            if isinstance(seed, basestring):
+                seed = int(seed)
+            maxportnum = seed + 5000 # We will try at most 5000 ports to find an open one
+            while not connected:
+                try:
+                    s.bind((ip, seed))
+                    connected = True
+                    s.close()
+                    break
+                except:
+                    if seed > maxportnum:
+                        self._logger.error("Automation Error: Could not find open port after checking 5000 ports")
+                        raise
+                seed += 1
+        except:
+            self._logger.error("Automation Error: Socket error trying to find open port")
+
+        return seed
 
 def _pop_last_line(file_obj):
     """

@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/PluginPRLibrary.h"
-#include "nsNPAPIPluginInstance.h"
 
 // Some plugins on Windows, notably Quake Live, implement NP_Initialize using
 // cdecl instead of the documented stdcall. In order to work around this,
@@ -38,6 +37,8 @@ PluginPRLibrary::NP_Initialize(NPNetscapeFuncs* bFuncs,
 			       NPPluginFuncs* pFuncs, NPError* error)
 {
   JNIEnv* env = GetJNIForThread();
+  if (!env)
+    return NS_ERROR_FAILURE;
 
   mozilla::AutoLocalJNIFrame jniFrame(env);
 
@@ -164,7 +165,7 @@ PluginPRLibrary::NP_GetValue(void *future, NPPVariable aVariable,
 #endif
 }
 
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(XP_OS2)
 nsresult
 PluginPRLibrary::NP_GetEntryPoints(NPPluginFuncs* pFuncs, NPError* error)
 {
@@ -258,6 +259,17 @@ PluginPRLibrary::AsyncSetWindow(NPP instance, NPWindow* window)
   NS_ENSURE_TRUE(inst, NS_ERROR_NULL_POINTER);
   return NS_ERROR_NOT_IMPLEMENTED;
 }
+
+#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
+nsresult
+PluginPRLibrary::HandleGUIEvent(NPP instance, const nsGUIEvent& anEvent,
+                                bool* handled)
+{
+  nsNPAPIPluginInstance* inst = (nsNPAPIPluginInstance*)instance->ndata;
+  NS_ENSURE_TRUE(inst, NS_ERROR_NULL_POINTER);
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+#endif
 
 nsresult
 PluginPRLibrary::GetImageContainer(NPP instance, ImageContainer** aContainer)

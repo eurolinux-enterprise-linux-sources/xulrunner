@@ -10,8 +10,7 @@
  * liability, trademark and document use rules apply.
  */
 
-[Constructor,
- Pref="media.webspeech.recognition.enable"]
+[Constructor, PrefControlled]
 interface SpeechRecognition : EventTarget {
     // recognition parameters
     [Throws]
@@ -34,15 +33,26 @@ interface SpeechRecognition : EventTarget {
     void abort();
 
     // event methods
+    [SetterThrows]
     attribute EventHandler onaudiostart;
+    [SetterThrows]
     attribute EventHandler onsoundstart;
+    [SetterThrows]
     attribute EventHandler onspeechstart;
+    [SetterThrows]
     attribute EventHandler onspeechend;
+    [SetterThrows]
     attribute EventHandler onsoundend;
+    [SetterThrows]
     attribute EventHandler onaudioend;
+    [SetterThrows]
     attribute EventHandler onresult;
+    [SetterThrows]
     attribute EventHandler onnomatch;
+    [SetterThrows]
     attribute EventHandler onerror;
+    [SetterThrows]
     attribute EventHandler onstart;
+    [SetterThrows]
     attribute EventHandler onend;
 };

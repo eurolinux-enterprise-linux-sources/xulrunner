@@ -6,10 +6,8 @@
 #ifndef nsChromeRegistryChrome_h
 #define nsChromeRegistryChrome_h
 
-#include "nsCOMArray.h"
 #include "nsChromeRegistry.h"
 #include "nsVoidArray.h"
-#include "mozilla/Move.h"
 
 namespace mozilla {
 namespace dom {
@@ -36,7 +34,7 @@ class nsChromeRegistryChrome : public nsChromeRegistry
   NS_IMETHOD GetSelectedLocale(const nsACString& aPackage,
                                nsACString& aLocale) MOZ_OVERRIDE;
   NS_IMETHOD Observe(nsISupports *aSubject, const char *aTopic,
-                     const char16_t *someData) MOZ_OVERRIDE;
+                     const PRUnichar *someData) MOZ_OVERRIDE;
 
 #ifdef MOZ_XUL
   NS_IMETHOD GetXULOverlays(nsIURI *aURI,
@@ -128,8 +126,8 @@ class nsChromeRegistryChrome : public nsChromeRegistry
     typedef nsURIHashKey::KeyTypePointer KeyTypePointer;
 
     OverlayListEntry(KeyTypePointer aKey) : nsURIHashKey(aKey) { }
-    OverlayListEntry(OverlayListEntry&& toMove) : nsURIHashKey(mozilla::Move(toMove)),
-                                                  mArray(mozilla::Move(toMove.mArray)) { }
+    OverlayListEntry(OverlayListEntry& toCopy) : nsURIHashKey(toCopy),
+                                                 mArray(toCopy.mArray) { }
     ~OverlayListEntry() { }
 
     void AddURI(nsIURI* aURI);
@@ -143,6 +141,7 @@ class nsChromeRegistryChrome : public nsChromeRegistry
     OverlayListHash() { }
     ~OverlayListHash() { }
 
+    void Init() { mTable.Init(); }
     void Add(nsIURI* aBase, nsIURI* aOverlay);
     void Clear() { mTable.Clear(); }
     const nsCOMArray<nsIURI>* GetArray(nsIURI* aBase);

@@ -14,17 +14,15 @@ function test() {
 function runTests() {
   // Open a new window.
   let win = OpenBrowserWindow();
-  yield whenDelayedStartupFinished(win, next);
+  yield whenWindowLoaded(win);
 
   // Load some URL in the current tab.
-  let flags = Ci.nsIWebNavigation.LOAD_FLAGS_REPLACE_HISTORY;
-  win.gBrowser.selectedBrowser.loadURIWithFlags("about:robots", flags);
+  win.gBrowser.selectedBrowser.loadURI("about:robots");
   yield whenBrowserLoaded(win.gBrowser.selectedBrowser);
 
   // Open a second tab and close the first one.
   let tab = win.gBrowser.addTab("about:mozilla");
   yield whenBrowserLoaded(tab.linkedBrowser);
-  SyncHandlers.get(tab.linkedBrowser).flush();
   win.gBrowser.removeTab(win.gBrowser.tabs[0]);
 
   // Make sure our window is still tracked by sessionstore

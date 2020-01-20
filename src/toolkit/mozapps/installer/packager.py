@@ -137,15 +137,6 @@ def precompile_cache(formatter, source_path, gre_path, app_path):
     fd, cache = mkstemp('.zip')
     os.close(fd)
     os.remove(cache)
-
-    # For VC12, make sure we can find the right bitness of pgort120.dll
-    env = os.environ.copy()
-    if 'VS120COMNTOOLS' in env and not buildconfig.substs['HAVE_64BIT_OS']:
-      vc12dir = os.path.abspath(os.path.join(env['VS120COMNTOOLS'],
-                                             '../../VC/bin'))
-      if os.path.exists(vc12dir):
-        env['PATH'] = vc12dir + ';' + env['PATH']
-
     try:
         if launcher.launch(['xpcshell', '-g', gre_path, '-a', app_path,
                             '-f', os.path.join(os.path.dirname(__file__),
@@ -153,8 +144,7 @@ def precompile_cache(formatter, source_path, gre_path, app_path):
                             '-e', 'precompile_startupcache("resource://%s/");'
                                   % resource],
                            extra_linker_path=gre_path,
-                           extra_env={'MOZ_STARTUP_CACHE': cache,
-                                      'PATH': env['PATH']}):
+                           extra_env={'MOZ_STARTUP_CACHE': cache}):
             errors.fatal('Error while running startup cache precompilation')
             return
         from mozpack.mozjar import JarReader
@@ -248,12 +238,6 @@ def main():
                         help='Transform errors into warnings.')
     parser.add_argument('--minify', action='store_true', default=False,
                         help='Make some files more compact while packaging')
-    parser.add_argument('--minify-js', action='store_true',
-                        help='Minify JavaScript files while packaging.')
-    parser.add_argument('--js-binary',
-                        help='Path to js binary. This is used to verify '
-                        'minified JavaScript. If this is not defined, '
-                        'minification verification will not be performed.')
     parser.add_argument('--jarlog', default='', help='File containing jar ' +
                         'access logs')
     parser.add_argument('--optimizejars', action='store_true', default=False,
@@ -317,22 +301,12 @@ def main():
         launcher.tooldir = buildconfig.substs['LIBXUL_DIST']
 
     with errors.accumulate():
-        finder_args = dict(
-            minify=args.minify,
-            minify_js=args.minify_js,
-        )
-        if args.js_binary:
-            finder_args['minify_js_verify_command'] = [
-                args.js_binary,
-                os.path.join(os.path.abspath(os.path.dirname(__file__)),
-                    'js-compare-ast.js')
-            ]
         if args.unify:
             finder = UnifiedBuildFinder(FileFinder(args.source),
                                         FileFinder(args.unify),
-                                        **finder_args)
+                                        minify=args.minify)
         else:
-            finder = FileFinder(args.source, **finder_args)
+            finder = FileFinder(args.source, minify=args.minify)
         if 'NO_PKG_FILES' in os.environ:
             sinkformatter = NoPkgFilesRemover(formatter,
                                               args.manifest is not None)

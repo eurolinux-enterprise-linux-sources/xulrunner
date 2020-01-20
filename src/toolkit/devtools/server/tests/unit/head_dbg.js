@@ -7,11 +7,7 @@ const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 
-const { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
-const Services = devtools.require("Services");
-const { ActorPool, createExtraActors, appendExtraActors } = devtools.require("devtools/server/actors/common");
-const DevToolsUtils = devtools.require("devtools/toolkit/DevToolsUtils.js");
-const {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+Cu.import("resource://gre/modules/Services.jsm");
 
 // Always log packets when running tests. runxpcshelltests.py will throw
 // the output away anyway, unless you give it the --verbose flag.
@@ -19,20 +15,9 @@ Services.prefs.setBoolPref("devtools.debugger.log", true);
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
-function tryImport(url) {
-  try {
-    Cu.import(url);
-  } catch (e) {
-    dump("Error importing " + url + "\n");
-    dump(DevToolsUtils.safeErrorString(e) + "\n");
-    throw e;
-  }
-}
-
-tryImport("resource://gre/modules/devtools/dbg-server.jsm");
-tryImport("resource://gre/modules/devtools/dbg-client.jsm");
-tryImport("resource://gre/modules/devtools/Loader.jsm");
-tryImport("resource://gre/modules/devtools/Console.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
+Cu.import("resource://gre/modules/devtools/Loader.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -40,7 +25,6 @@ function testExceptionHook(ex) {
   } catch(ex) {
     return {throw: ex}
   }
-  return undefined;
 }
 
 // Convert an nsIScriptError 'aFlags' value into an appropriate string.
@@ -59,19 +43,13 @@ function scriptErrorFlagsToKind(aFlags) {
   return kind;
 }
 
-// Redeclare dbg_assert with a fatal behavior.
-function dbg_assert(cond, e) {
-  if (!cond) {
-    throw e;
-  }
-}
-
 // Register a console listener, so console messages don't just disappear
 // into the ether.
 let errorCount = 0;
 let listener = {
   observe: function (aMessage) {
     errorCount++;
+    var shouldThrow = true;
     try {
       // If we've been given an nsIScriptError, then we can print out
       // something nicely formatted, for tools like Emacs to pick up.
@@ -80,6 +58,7 @@ let listener = {
            scriptErrorFlagsToKind(aMessage.flags) + ": " +
            aMessage.errorMessage + "\n");
       var string = aMessage.errorMessage;
+      shouldThrow = !aMessage.flags;
     } catch (x) {
       // Be a little paranoid with message, as the whole goal here is to lose
       // no information.
@@ -94,7 +73,8 @@ let listener = {
     while (DebuggerServer.xpcInspector.eventLoopNestLevel > 0) {
       DebuggerServer.xpcInspector.exitNestedEventLoop();
     }
-    do_throw("head_dbg.js got console message: " + string + "\n");
+    if (shouldThrow)
+      do_throw("head_dbg.js got console message: " + string + "\n");
   }
 };
 
@@ -118,7 +98,7 @@ function testGlobal(aName) {
     .createInstance(Ci.nsIPrincipal);
 
   let sandbox = Cu.Sandbox(systemPrincipal);
-  sandbox.__name = aName;
+  Cu.evalInSandbox("this.__name = '" + aName + "'", sandbox);
   return sandbox;
 }
 
@@ -157,10 +137,9 @@ function attachTestTab(aClient, aTitle, aCallback) {
 // thread.
 function attachTestThread(aClient, aTitle, aCallback) {
   attachTestTab(aClient, aTitle, function (aResponse, aTabClient) {
-    function onAttach(aResponse, aThreadClient) {
+    aClient.attachThread(aResponse.threadActor, function (aResponse, aThreadClient) {
       aCallback(aResponse, aTabClient, aThreadClient);
-    }
-    aTabClient.attachThread({ useSourceMaps: true }, onAttach);
+    }, { useSourceMaps: true });
   });
 }
 
@@ -181,20 +160,18 @@ function attachTestTabAndResume(aClient, aTitle, aCallback) {
  */
 function initTestDebuggerServer()
 {
-  DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/root.js");
   DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/script.js");
   DebuggerServer.addActors("resource://test/testactors.js");
   // Allow incoming connections.
   DebuggerServer.init(function () { return true; });
 }
 
-function initTestTracerServer()
+function initSourcesBackwardsCompatDebuggerServer()
 {
   DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/root.js");
+  DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/webbrowser.js");
   DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/script.js");
-  DebuggerServer.addActors("resource://test/testactors.js");
-  DebuggerServer.registerModule("devtools/server/actors/tracer");
-  // Allow incoming connections.
+  DebuggerServer.addActors("resource://test/testcompatactors.js");
   DebuggerServer.init(function () { return true; });
 }
 
@@ -208,8 +185,8 @@ function finishClient(aClient)
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
-function getFileUrl(aName, aAllowMissing=false) {
-  let file = do_get_file(aName, aAllowMissing);
+function getFileUrl(aName) {
+  let file = do_get_file(aName);
   return Services.io.newFileURI(file).spec;
 }
 
@@ -217,9 +194,9 @@ function getFileUrl(aName, aAllowMissing=false) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName, aAllowMissing=false)
+function getFilePath(aName)
 {
-  let file = do_get_file(aName, aAllowMissing);
+  let file = do_get_file(aName);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
   if ("nsILocalFileWin" in Ci &&
@@ -349,14 +326,3 @@ TracingTransport.prototype = {
     }
   }
 };
-
-function StubTransport() { }
-StubTransport.prototype.ready = function () {};
-StubTransport.prototype.send  = function () {};
-StubTransport.prototype.close = function () {};
-
-function executeSoon(aFunc) {
-  Services.tm.mainThread.dispatch({
-    run: DevToolsUtils.makeInfallible(aFunc)
-  }, Ci.nsIThread.DISPATCH_NORMAL);
-}

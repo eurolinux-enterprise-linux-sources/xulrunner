@@ -11,11 +11,8 @@
 #include "nsIServiceManager.h"
 #include "nsDebug.h"
 #include "nsCOMArray.h"
-#include "nsXULAppAPI.h"
 #include "prinrval.h"
 #include "prlog.h"
-#include "prtime.h"
-#include "mozilla/dom/ContentChild.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
@@ -47,7 +44,7 @@ using namespace mozilla;
 #define SECONDS_PER_DAY 86400
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sLog = nullptr;
+static PRLogModuleInfo *sLog = NULL;
 #endif
 
 // Use this to find previously added observers in our array:
@@ -64,12 +61,12 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 //// nsIdleServiceDaily
 
-NS_IMPL_ISUPPORTS(nsIdleServiceDaily, nsIObserver, nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS2(nsIdleServiceDaily, nsIObserver, nsISupportsWeakReference)
 
 NS_IMETHODIMP
 nsIdleServiceDaily::Observe(nsISupports *,
                             const char *aTopic,
-                            const char16_t *)
+                            const PRUnichar *)
 {
   PR_LOG(sLog, PR_LOG_DEBUG,
          ("nsIdleServiceDaily: Observe '%s' (%d)",
@@ -107,8 +104,7 @@ nsIdleServiceDaily::Observe(nsISupports *,
                                          nullptr);
 
   // Notify the category observers.
-  nsCOMArray<nsIObserver> entries;
-  mCategoryObservers.GetEntries(entries);
+  const nsCOMArray<nsIObserver> &entries = mCategoryObservers.GetEntries();
   for (int32_t i = 0; i < entries.Count(); ++i) {
     (void)entries[i]->Observe(nullptr, OBSERVER_TOPIC_IDLE_DAILY, nullptr);
   }
@@ -394,15 +390,13 @@ nsIdleService::nsIdleService() : mCurrentlySetToTimeoutAt(TimeStamp()),
                                  mLastUserInteraction(TimeStamp::Now())
 {
 #ifdef PR_LOGGING
-  if (sLog == nullptr)
+  if (sLog == NULL)
     sLog = PR_NewLogModule("idleService");
 #endif
   MOZ_ASSERT(!gIdleService);
   gIdleService = this;
-  if (XRE_GetProcessType() == GeckoProcessType_Default) {
-    mDailyIdle = new nsIdleServiceDaily(this);
-    mDailyIdle->Init();
-  }
+  mDailyIdle = new nsIdleServiceDaily(this);
+  mDailyIdle->Init();
 }
 
 nsIdleService::~nsIdleService()
@@ -416,30 +410,24 @@ nsIdleService::~nsIdleService()
   gIdleService = nullptr;
 }
 
-NS_IMPL_ISUPPORTS(nsIdleService, nsIIdleService, nsIIdleServiceInternal)
+NS_IMPL_ISUPPORTS2(nsIdleService, nsIIdleService, nsIIdleServiceInternal)
 
 NS_IMETHODIMP
 nsIdleService::AddIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS)
 {
+  PR_LOG(sLog, PR_LOG_DEBUG,
+         ("idleService: Register idle observer %x for %d seconds",
+          aObserver, aIdleTimeInS));
+#ifdef MOZ_WIDGET_ANDROID
+  __android_log_print(ANDROID_LOG_INFO, "IdleService",
+                      "Register idle observer %x for %d seconds",
+                      aObserver, aIdleTimeInS);
+#endif
+
   NS_ENSURE_ARG_POINTER(aObserver);
   // We don't accept idle time at 0, and we can't handle idle time that are too
   // high either - no more than ~136 years.
   NS_ENSURE_ARG_RANGE(aIdleTimeInS, 1, (UINT32_MAX / 10) - 1);
-
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    dom::ContentChild* cpc = dom::ContentChild::GetSingleton();
-    cpc->AddIdleObserver(aObserver, aIdleTimeInS);
-    return NS_OK;
-  }
-
-  PR_LOG(sLog, PR_LOG_DEBUG,
-       ("idleService: Register idle observer %p for %d seconds",
-        aObserver, aIdleTimeInS));
-#ifdef MOZ_WIDGET_ANDROID
-  __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                      "Register idle observer %p for %d seconds",
-                      aObserver, aIdleTimeInS);
-#endif
 
   // Put the time + observer in a struct we can keep:
   IdleListener listener(aObserver, aIdleTimeInS);
@@ -484,13 +472,6 @@ nsIdleService::RemoveIdleObserver(nsIObserver* aObserver, uint32_t aTimeInS)
 
   NS_ENSURE_ARG_POINTER(aObserver);
   NS_ENSURE_ARG(aTimeInS);
-
-  if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    dom::ContentChild* cpc = dom::ContentChild::GetSingleton();
-    cpc->RemoveIdleObserver(aObserver, aTimeInS);
-    return NS_OK;
-  }
-
   IdleListener listener(aObserver, aTimeInS);
 
   // Find the entry and remove it, if it was the last entry, we just let the
@@ -503,11 +484,11 @@ nsIdleService::RemoveIdleObserver(nsIObserver* aObserver, uint32_t aTimeInS)
       mIdleObserverCount--;
     mArrayListeners.RemoveElementAt(listenerIndex);
     PR_LOG(sLog, PR_LOG_DEBUG,
-           ("idleService: Remove observer %p (%d seconds), %d remain idle",
+           ("idleService: Remove observer %x (%d seconds), %d remain idle",
             aObserver, aTimeInS, mIdleObserverCount));
 #ifdef MOZ_WIDGET_ANDROID
     __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                        "Remove observer %p (%d seconds), %d remain idle",
+                        "Remove observer %x (%d seconds), %d remain idle",
                         aObserver, aTimeInS, mIdleObserverCount);
 #endif
     return NS_OK;
@@ -515,11 +496,11 @@ nsIdleService::RemoveIdleObserver(nsIObserver* aObserver, uint32_t aTimeInS)
 
   // If we get here, we haven't removed anything:
   PR_LOG(sLog, PR_LOG_WARNING, 
-         ("idleService: Failed to remove idle observer %p (%d seconds)",
+         ("idleService: Failed to remove idle observer %x (%d seconds)",
           aObserver, aTimeInS));
 #ifdef MOZ_WIDGET_ANDROID
   __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                      "Failed to remove idle observer %p (%d seconds)",
+                      "Failed to remove idle observer %x (%d seconds)",
                       aObserver, aTimeInS);
 #endif
   return NS_ERROR_FAILURE;
@@ -578,8 +559,8 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
     return NS_OK;
   }
 
-  // Now send "active" events to all, if any should have timed out already,
-  // then they will be reawaken by the timer that is already running.
+  // Now send "back" events to all, if any should have timed out allready, then
+  // they will be reawaken by the timer that is already running.
 
   // We need a text string to send with any state change events.
   nsAutoString timeStr;
@@ -589,11 +570,11 @@ nsIdleService::ResetIdleTimeOut(uint32_t idleDeltaInMS)
   // Send the "non-idle" events.
   while (numberOfPendingNotifications--) {
     PR_LOG(sLog, PR_LOG_DEBUG,
-           ("idleService: Reset idle timeout: tell observer %p user is back",
+           ("idleService: Reset idle timeout: tell observer %x user is back",
             notifyList[numberOfPendingNotifications]));
 #ifdef MOZ_WIDGET_ANDROID
     __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                        "Reset idle timeout: tell observer %p user is back",
+                        "Reset idle timeout: tell observer %x user is back",
                         notifyList[numberOfPendingNotifications]);
 #endif
     notifyList[numberOfPendingNotifications]->Observe(this,
@@ -773,11 +754,11 @@ nsIdleService::IdleTimerCallback(void)
   // Notify all listeners that just timed out.
   while (numberOfPendingNotifications--) {
     PR_LOG(sLog, PR_LOG_DEBUG,
-           ("idleService: **** Idle timer callback: tell observer %p user is idle",
+           ("idleService: **** Idle timer callback: tell observer %x user is idle",
             notifyList[numberOfPendingNotifications]));
 #ifdef MOZ_WIDGET_ANDROID
   __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                      "Idle timer callback: tell observer %p user is idle",
+                      "Idle timer callback: tell observer %x user is idle",
                       notifyList[numberOfPendingNotifications]);
 #endif
     notifyList[numberOfPendingNotifications]->Observe(this,
@@ -789,14 +770,10 @@ nsIdleService::IdleTimerCallback(void)
 void
 nsIdleService::SetTimerExpiryIfBefore(TimeStamp aNextTimeout)
 {
-#if defined(PR_LOGGING) || defined(MOZ_WIDGET_ANDROID)
   TimeDuration nextTimeoutDuration = aNextTimeout - TimeStamp::Now();
-#endif
-
   PR_LOG(sLog, PR_LOG_DEBUG,
          ("idleService: SetTimerExpiryIfBefore: next timeout %0.f msec from now",
           nextTimeoutDuration.ToMilliseconds()));
-
 #ifdef MOZ_WIDGET_ANDROID
   __android_log_print(ANDROID_LOG_INFO, "IdleService",
                       "SetTimerExpiryIfBefore: next timeout %0.f msec from now",
@@ -846,6 +823,7 @@ nsIdleService::SetTimerExpiryIfBefore(TimeStamp aNextTimeout)
   }
 }
 
+
 void
 nsIdleService::ReconfigureTimer(void)
 {
@@ -871,20 +849,15 @@ nsIdleService::ReconfigureTimer(void)
   TimeStamp nextTimeoutAt = mLastUserInteraction +
                             TimeDuration::FromSeconds(mDeltaToNextIdleSwitchInS);
 
-#if defined(PR_LOGGING) || defined(MOZ_WIDGET_ANDROID)
   TimeDuration nextTimeoutDuration = nextTimeoutAt - curTime;
-#endif
-
   PR_LOG(sLog, PR_LOG_DEBUG,
          ("idleService: next timeout %0.f msec from now",
           nextTimeoutDuration.ToMilliseconds()));
-
 #ifdef MOZ_WIDGET_ANDROID
   __android_log_print(ANDROID_LOG_INFO, "IdleService",
                       "next timeout %0.f msec from now",
                       nextTimeoutDuration.ToMilliseconds());
 #endif
-
   // Check if we should correct the timeout time because we should poll before.
   if ((mIdleObserverCount > 0) && UsePollMode()) {
     TimeStamp pollTimeout =
@@ -892,11 +865,11 @@ nsIdleService::ReconfigureTimer(void)
 
     if (nextTimeoutAt > pollTimeout) {
       PR_LOG(sLog, PR_LOG_DEBUG,
-           ("idleService: idle observers, reducing timeout to %lu msec from now",
+           ("idleService: idle observers, reducing timeout to %u msec from now",
             MIN_IDLE_POLL_INTERVAL_MSEC));
 #ifdef MOZ_WIDGET_ANDROID
       __android_log_print(ANDROID_LOG_INFO, "IdleService",
-                          "idle observers, reducing timeout to %lu msec from now",
+                          "idle observers, reducing timeout to %u msec from now",
                           MIN_IDLE_POLL_INTERVAL_MSEC);
 #endif
       nextTimeoutAt = pollTimeout;
@@ -905,3 +878,4 @@ nsIdleService::ReconfigureTimer(void)
 
   SetTimerExpiryIfBefore(nextTimeoutAt);
 }
+

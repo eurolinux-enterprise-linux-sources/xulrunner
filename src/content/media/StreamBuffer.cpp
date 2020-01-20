@@ -11,23 +11,23 @@ namespace mozilla {
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gMediaStreamGraphLog;
-#define STREAM_LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
+#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
 #else
-#define STREAM_LOG(type, msg)
+#define LOG(type, msg)
 #endif
 
 #ifdef DEBUG
 void
 StreamBuffer::DumpTrackInfo() const
 {
-  STREAM_LOG(PR_LOG_ALWAYS, ("DumpTracks: mTracksKnownTime %lld", mTracksKnownTime));
+  LOG(PR_LOG_ALWAYS, ("DumpTracks: mTracksKnownTime %lld", mTracksKnownTime));
   for (uint32_t i = 0; i < mTracks.Length(); ++i) {
     Track* track = mTracks[i];
     if (track->IsEnded()) {
-      STREAM_LOG(PR_LOG_ALWAYS, ("Track[%d] %d: ended", i, track->GetID()));
+      LOG(PR_LOG_ALWAYS, ("Track[%d] %d: ended", i, track->GetID()));
     } else {
-      STREAM_LOG(PR_LOG_ALWAYS, ("Track[%d] %d: %lld", i, track->GetID(),
-                                 track->GetEndTimeRoundDown()));
+      LOG(PR_LOG_ALWAYS, ("Track[%d] %d: %lld", i, track->GetID(),
+                          track->GetEndTimeRoundDown()));
     }
   }
 }
@@ -42,24 +42,6 @@ StreamBuffer::GetEnd() const
     if (!track->IsEnded()) {
       t = std::min(t, track->GetEndTimeRoundDown());
     }
-  }
-  return t;
-}
-
-StreamTime
-StreamBuffer::GetAllTracksEnd() const
-{
-  if (mTracksKnownTime < STREAM_TIME_MAX) {
-    // A track might be added.
-    return STREAM_TIME_MAX;
-  }
-  StreamTime t = 0;
-  for (uint32_t i = 0; i < mTracks.Length(); ++i) {
-    Track* track = mTracks[i];
-    if (!track->IsEnded()) {
-      return STREAM_TIME_MAX;
-    }
-    t = std::max(t, track->GetEndTimeRoundDown());
   }
   return t;
 }

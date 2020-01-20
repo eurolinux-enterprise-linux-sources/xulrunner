@@ -6,16 +6,15 @@
 
 DIRS += ['public']
 
-SOURCES += [
-    'nsIconChannel.cpp',
-]
+MODULE = 'imgicon'
 
-EXTRA_COMPONENTS += [
-    'gtkqticonsconverter.manifest',
+CPP_SOURCES += [
+    'nsIconChannel.cpp',
 ]
 
 EXTRA_PP_COMPONENTS += [
     'gtkqticonsconverter.js',
 ]
 
-FINAL_LIBRARY = 'imgicon'
+LIBRARY_NAME = 'imgiconqt_s'
+

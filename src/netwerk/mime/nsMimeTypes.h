@@ -79,8 +79,6 @@
 #define AUDIO_MP3                           "audio/mpeg"
 #define AUDIO_MP4                           "audio/mp4"
 #define AUDIO_AMR                           "audio/amr"
-#define AUDIO_3GPP                          "audio/3gpp"
-#define AUDIO_MIDI                          "audio/x-midi"
 
 #define BINARY_OCTET_STREAM                 "binary/octet-stream"
 
@@ -104,6 +102,7 @@
 #define IMAGE_MNG                           "video/x-mng"
 #define IMAGE_JNG                           "image/x-jng"
 #define IMAGE_SVG_XML                       "image/svg+xml"
+#define IMAGE_WBMP                          "image/vnd.wap.wbmp"
 
 #define MESSAGE_EXTERNAL_BODY               "message/external-body"
 #define MESSAGE_NEWS                        "message/news"
@@ -112,7 +111,6 @@
 #define MULTIPART_ALTERNATIVE               "multipart/alternative"
 #define MULTIPART_APPLEDOUBLE               "multipart/appledouble"
 #define MULTIPART_DIGEST                    "multipart/digest"
-#define MULTIPART_FORM_DATA                 "multipart/form-data"
 #define MULTIPART_HEADER_SET                "multipart/header-set"
 #define MULTIPART_MIXED                     "multipart/mixed"
 #define MULTIPART_PARALLEL                  "multipart/parallel"
@@ -129,7 +127,7 @@
 #define TEXT_MDL                            "text/mdl"
 #define TEXT_PLAIN                          "text/plain"
 #define TEXT_RICHTEXT                       "text/richtext"
-#define TEXT_VCARD                          "text/vcard"
+#define TEXT_VCARD                          "text/x-vcard"
 #define TEXT_CSS                            "text/css"
 #define TEXT_JSSS                           "text/jsss"
 #define TEXT_XML                            "text/xml"
@@ -148,6 +146,9 @@
 #define VIDEO_WEBM                          "video/webm"
 #define VIDEO_3GPP                          "video/3gpp"
 #define APPLICATION_OGG                     "application/ogg"
+#ifdef MOZ_DASH
+#define APPLICATION_DASH                    "application/dash+xml"
+#endif
 
 /* x-uuencode-apple-single. QuickMail made me do this. */
 #define UUENCODE_APPLE_SINGLE               "x-uuencode-apple-single"

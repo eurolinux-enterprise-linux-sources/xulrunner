@@ -23,7 +23,6 @@
 const char kAPP_INI[] = "application.ini";
 const char kWEBAPP_INI[] = "webapp.ini";
 const char kWEBAPP_JSON[] = "webapp.json";
-const char kWEBAPP_PACKAGE[] = "application.zip";
 const char kWEBAPPRT_INI[] = "webapprt.ini";
 const char kWEBAPPRT_PATH[] = "webapprt";
 const char kAPP_ENV_VAR[] = "XUL_APP_FILE";
@@ -71,9 +70,7 @@ void ErrorDialog(const char* message)
 {
   gtk_init(pargc, pargv);
 
-  GtkWidget* dialog = gtk_message_dialog_new(nullptr, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", message);
-  gtk_window_set_title(GTK_WINDOW(dialog), "Error launching webapp");
-  gtk_window_set_skip_taskbar_hint(GTK_WINDOW(dialog), false);
+  GtkWidget* dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", message);
   gtk_dialog_run(GTK_DIALOG(dialog));
   gtk_widget_destroy(dialog);
 }
@@ -265,10 +262,6 @@ void RemoveApplication(nsINIParser& parser, const char* curExeDir, const char* p
   snprintf(iconPath, MAXPATHLEN, "%s/icon.png", curExeDir);
   unlink(iconPath);
 
-  char packagePath[MAXPATHLEN];
-  snprintf(packagePath, MAXPATHLEN, "%s/%s", curExeDir, kWEBAPP_PACKAGE);
-  unlink(packagePath);
-
   char appName[MAXPATHLEN];
   if (NS_FAILED(parser.GetString("Webapp", "Name", appName, MAXPATHLEN))) {
     strcpy(appName, profile);
@@ -280,7 +273,7 @@ void RemoveApplication(nsINIParser& parser, const char* curExeDir, const char* p
      * The only difference between libnotify.so.4 and libnotify.so.1 for these symbols
      * is that notify_notification_new takes three arguments in libnotify.so.4 and
      * four in libnotify.so.1.
-     * Passing the fourth argument as nullptr is binary compatible.
+     * Passing the fourth argument as NULL is binary compatible.
      */
     typedef void  (*notify_init_t)(const char*);
     typedef void* (*notify_notification_new_t)(const char*, const char*, const char*, const char*);
@@ -303,9 +296,9 @@ void RemoveApplication(nsINIParser& parser, const char* curExeDir, const char* p
 
     nn_init(appName);
 
-    void* n = nn_new(uninstallMsg, nullptr, "dialog-information", nullptr);
+    void* n = nn_new(uninstallMsg, NULL, "dialog-information", NULL);
 
-    nn_show(n, nullptr);
+    nn_show(n, NULL);
 
     dlclose(handle);
   }

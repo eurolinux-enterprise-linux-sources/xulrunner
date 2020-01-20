@@ -22,7 +22,6 @@
 #include <android/log.h>
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
-#include "nsThreadUtils.h"
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsICrashReporter.h"
@@ -36,18 +35,18 @@
 #include "mozilla/dom/mobilemessage/Types.h"
 #include "mozilla/dom/mobilemessage/PSms.h"
 #include "mozilla/dom/mobilemessage/SmsParent.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/AsyncPanZoomController.h"
 #include "nsIMobileMessageDatabaseService.h"
 #include "nsPluginInstanceOwner.h"
 #include "nsSurfaceTexture.h"
 #include "GeckoProfiler.h"
-#include "nsMemoryPressure.h"
+
+#include "GeckoProfiler.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::layers;
-using namespace mozilla::widget::android;
 
 /* Forward declare all the JNI methods as extern "C" */
 
@@ -59,7 +58,7 @@ extern "C" {
 NS_EXPORT void JNICALL
 Java_org_mozilla_gecko_GeckoAppShell_nativeInit(JNIEnv *jenv, jclass jc)
 {
-    AndroidBridge::ConstructBridge(jenv);
+    AndroidBridge::ConstructBridge(jenv, jc);
 }
 
 NS_EXPORT void JNICALL
@@ -782,6 +781,11 @@ Java_org_mozilla_gecko_GeckoAppShell_onFullScreenPluginHidden(JNIEnv* jenv, jcla
 
       NS_IMETHODIMP Run() {
         JNIEnv* env = AndroidBridge::GetJNIEnv();
+        if (!env) {
+          NS_WARNING("Failed to acquire JNI env, can't exit plugin fullscreen mode");
+          return NS_OK;
+        }
+
         nsPluginInstanceOwner::ExitFullScreen(mView);
         env->DeleteGlobalRef(mView);
         return NS_OK;
@@ -803,23 +807,17 @@ Java_org_mozilla_gecko_GeckoAppShell_getNextMessageFromQueue(JNIEnv* jenv, jclas
     static jmethodID jNextMethod;
     if (!jMessageQueueCls) {
         jMessageQueueCls = (jclass) jenv->NewGlobalRef(jenv->FindClass("android/os/MessageQueue"));
-        jNextMethod = jenv->GetMethodID(jMessageQueueCls, "next", "()Landroid/os/Message;");
         jMessagesField = jenv->GetFieldID(jMessageQueueCls, "mMessages", "Landroid/os/Message;");
+        jNextMethod = jenv->GetMethodID(jMessageQueueCls, "next", "()Landroid/os/Message;");
     }
-
-    if (!jMessageQueueCls || !jNextMethod)
-        return nullptr;
-
-    if (jMessagesField) {
-        jobject msg = jenv->GetObjectField(queue, jMessagesField);
-        // if queue.mMessages is null, queue.next() will block, which we don't want
-        // It turns out to be an order of magnitude more performant to do this extra check here and
-        // block less vs. one fewer checks here and more blocking.
-        if (!msg) {
-            return nullptr;
-        }
-    }
-    return jenv->CallObjectMethod(queue, jNextMethod);
+    if (!jMessageQueueCls || !jMessagesField || !jNextMethod)
+        return NULL;
+    jobject msg = jenv->GetObjectField(queue, jMessagesField);
+    // if queue.mMessages is null, queue.next() will block, which we don't want
+    if (!msg)
+        return msg;
+    msg = jenv->CallObjectMethod(queue, jNextMethod);
+    return msg;
 }
 
 NS_EXPORT void JNICALL
@@ -834,26 +832,10 @@ Java_org_mozilla_gecko_GeckoAppShell_onSurfaceTextureFrameAvailable(JNIEnv* jenv
   st->NotifyFrameAvailable();
 }
 
-NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_GeckoAppShell_dispatchMemoryPressure(JNIEnv* jenv, jclass)
-{
-    NS_DispatchMemoryPressure(MemPressure_New);
-}
-
 NS_EXPORT jdouble JNICALL
 Java_org_mozilla_gecko_GeckoJavaSampler_getProfilerTime(JNIEnv *jenv, jclass jc)
 {
   return profiler_time();
-}
-
-NS_EXPORT void JNICALL
-Java_org_mozilla_gecko_gfx_NativePanZoomController_abortAnimation(JNIEnv* env, jobject instance)
-{
-    APZCTreeManager *controller = nsWindow::GetAPZCTreeManager();
-    if (controller) {
-        // TODO: Pass in correct values for presShellId and viewId.
-        controller->CancelAnimation(ScrollableLayerGuid(nsWindow::RootLayerTreeId(), 0, 0));
-    }
 }
 
 NS_EXPORT void JNICALL
@@ -863,23 +845,24 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_init(JNIEnv* env, jobject ins
         return;
     }
 
-    NativePanZoomController* oldRef = AndroidBridge::Bridge()->SetNativePanZoomController(instance);
-    if (oldRef && !oldRef->isNull()) {
+    jobject oldRef = AndroidBridge::Bridge()->SetNativePanZoomController(env->NewGlobalRef(instance));
+    if (oldRef) {
         MOZ_ASSERT(false, "Registering a new NPZC when we already have one");
-        delete oldRef;
+        env->DeleteGlobalRef(oldRef);
     }
+    nsWindow::SetPanZoomController(new AsyncPanZoomController(AndroidBridge::Bridge(), AsyncPanZoomController::USE_GESTURE_DETECTOR));
 }
 
 NS_EXPORT void JNICALL
 Java_org_mozilla_gecko_gfx_NativePanZoomController_handleTouchEvent(JNIEnv* env, jobject instance, jobject event)
 {
-    APZCTreeManager *controller = nsWindow::GetAPZCTreeManager();
+    AsyncPanZoomController *controller = nsWindow::GetPanZoomController();
     if (controller) {
         AndroidGeckoEvent* wrapper = AndroidGeckoEvent::MakeFromJavaObject(env, event);
         const MultiTouchInput& input = wrapper->MakeMultiTouchInput(nsWindow::TopWindow());
         delete wrapper;
         if (input.mType >= 0) {
-            controller->ReceiveInputEvent(input, nullptr);
+            controller->ReceiveInputEvent(input);
         }
     }
 }
@@ -907,21 +890,21 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_destroy(JNIEnv* env, jobject 
         return;
     }
 
-    NativePanZoomController* oldRef = AndroidBridge::Bridge()->SetNativePanZoomController(nullptr);
-    if (!oldRef || oldRef->isNull()) {
+    nsWindow::SetPanZoomController(nullptr);
+    jobject oldRef = AndroidBridge::Bridge()->SetNativePanZoomController(NULL);
+    if (!oldRef) {
         MOZ_ASSERT(false, "Clearing a non-existent NPZC");
     } else {
-        delete oldRef;
+        env->DeleteGlobalRef(oldRef);
     }
 }
 
 NS_EXPORT void JNICALL
 Java_org_mozilla_gecko_gfx_NativePanZoomController_notifyDefaultActionPrevented(JNIEnv* env, jobject instance, jboolean prevented)
 {
-    APZCTreeManager *controller = nsWindow::GetAPZCTreeManager();
+    AsyncPanZoomController *controller = nsWindow::GetPanZoomController();
     if (controller) {
-        // TODO: Pass in correct values for presShellId and viewId.
-        controller->ContentReceivedTouch(ScrollableLayerGuid(nsWindow::RootLayerTreeId(), 0, 0), prevented);
+        controller->ContentReceivedTouch(prevented);
     }
 }
 
@@ -946,7 +929,7 @@ Java_org_mozilla_gecko_gfx_NativePanZoomController_getOverScrollMode(JNIEnv* env
 }
 
 NS_EXPORT jboolean JNICALL
-Java_org_mozilla_gecko_ANRReporter_requestNativeStack(JNIEnv*, jclass, jboolean aUnwind)
+Java_org_mozilla_gecko_ANRReporter_requestNativeStack(JNIEnv*, jclass)
 {
     if (profiler_is_active()) {
         // Don't proceed if profiler is already running
@@ -956,25 +939,11 @@ Java_org_mozilla_gecko_ANRReporter_requestNativeStack(JNIEnv*, jclass, jboolean 
     // generally unsafe to use the profiler from off the main thread. However,
     // the risk here is limited because for most users, the profiler is not run
     // elsewhere. See the discussion in Bug 863777, comment 13
-    const char *NATIVE_STACK_FEATURES[] =
-        {"leaf", "threads", "privacy"};
-    const char *NATIVE_STACK_UNWIND_FEATURES[] =
-        {"leaf", "threads", "privacy", "stackwalk"};
-
-    const char **features = NATIVE_STACK_FEATURES;
-    size_t features_size = sizeof(NATIVE_STACK_FEATURES);
-    if (aUnwind) {
-        features = NATIVE_STACK_UNWIND_FEATURES;
-        features_size = sizeof(NATIVE_STACK_UNWIND_FEATURES);
-        // We want the new unwinder if the unwind mode has not been set yet
-        putenv("MOZ_PROFILER_NEW=1");
-    }
-
-    const char *NATIVE_STACK_THREADS[] =
-        {"GeckoMain", "Compositor"};
+    const char *NATIVE_STACK_FEATURES[] = {"leaf", "threads", "privacy"};
     // Buffer one sample and let the profiler wait a long time
-    profiler_start(100, 10000, features, features_size / sizeof(char*),
-        NATIVE_STACK_THREADS, sizeof(NATIVE_STACK_THREADS) / sizeof(char*));
+    profiler_start(100, 10000, NATIVE_STACK_FEATURES,
+        sizeof(NATIVE_STACK_FEATURES) / sizeof(char*),
+        NULL, 0);
     return JNI_TRUE;
 }
 
@@ -983,7 +952,7 @@ Java_org_mozilla_gecko_ANRReporter_getNativeStack(JNIEnv* jenv, jclass)
 {
     if (!profiler_is_active()) {
         // Maybe profiler support is disabled?
-        return nullptr;
+        return NULL;
     }
     char *profile = profiler_get_profile();
     while (profile && !strlen(profile)) {
@@ -991,7 +960,7 @@ Java_org_mozilla_gecko_ANRReporter_getNativeStack(JNIEnv* jenv, jclass)
         sched_yield();
         profile = profiler_get_profile();
     }
-    jstring result = nullptr;
+    jstring result = NULL;
     if (profile) {
         result = jenv->NewStringUTF(profile);
         free(profile);

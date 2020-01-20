@@ -25,7 +25,7 @@ public:
     : mTarget(aTarget)
   { }
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERDBSERVICE
   NS_DECL_NSIURLCLASSIFIERDBSERVICEWORKER
 
@@ -34,11 +34,9 @@ public:
   public:
     LookupRunnable(nsIUrlClassifierDBServiceWorker* aTarget,
                    nsIPrincipal* aPrincipal,
-                   const nsACString& aTables,
                    nsIUrlClassifierCallback* aCB)
       : mTarget(aTarget)
       , mPrincipal(aPrincipal)
-      , mLookupTables(aTables)
       , mCB(aCB)
     { }
 
@@ -47,7 +45,6 @@ public:
   private:
     nsCOMPtr<nsIUrlClassifierDBServiceWorker> mTarget;
     nsCOMPtr<nsIPrincipal> mPrincipal;
-    nsCString mLookupTables;
     nsCOMPtr<nsIUrlClassifierCallback> mCB;
   };
 
@@ -72,10 +69,12 @@ public:
   public:
     BeginUpdateRunnable(nsIUrlClassifierDBServiceWorker* aTarget,
                         nsIUrlClassifierUpdateObserver* aUpdater,
-                        const nsACString& aTables)
+                        const nsACString& aTables,
+                        const nsACString& aClientKey)
       : mTarget(aTarget)
       , mUpdater(aUpdater)
       , mTables(aTables)
+      , mClientKey(aClientKey)
     { }
 
     NS_DECL_NSIRUNNABLE
@@ -83,23 +82,25 @@ public:
   private:
     nsCOMPtr<nsIUrlClassifierDBServiceWorker> mTarget;
     nsCOMPtr<nsIUrlClassifierUpdateObserver> mUpdater;
-    nsCString mTables;
+    nsCString mTables, mClientKey;
   };
 
   class BeginStreamRunnable : public nsRunnable
   {
   public:
     BeginStreamRunnable(nsIUrlClassifierDBServiceWorker* aTarget,
-                        const nsACString& aTable)
+                        const nsACString& aTable,
+                        const nsACString& aServerMAC)
       : mTarget(aTarget)
       , mTable(aTable)
+      , mServerMAC(aServerMAC)
     { }
 
     NS_DECL_NSIRUNNABLE
 
   private:
     nsCOMPtr<nsIUrlClassifierDBServiceWorker> mTarget;
-    nsCString mTable;
+    nsCString mTable, mServerMAC;
   };
 
   class UpdateStreamRunnable : public nsRunnable
@@ -164,13 +165,13 @@ public:
     : mTarget(new nsMainThreadPtrHolder<nsIUrlClassifierLookupCallback>(aTarget))
   { }
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERLOOKUPCALLBACK
 
   class LookupCompleteRunnable : public nsRunnable
   {
   public:
-    LookupCompleteRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierLookupCallback>& aTarget,
+    LookupCompleteRunnable(nsMainThreadPtrHolder<nsIUrlClassifierLookupCallback>* aTarget,
                            mozilla::safebrowsing::LookupResultArray *aResults)
       : mTarget(aTarget)
       , mResults(aResults)
@@ -194,13 +195,13 @@ public:
     : mTarget(new nsMainThreadPtrHolder<nsIUrlClassifierCallback>(aTarget))
   { }
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERCALLBACK
 
   class HandleEventRunnable : public nsRunnable
   {
   public:
-    HandleEventRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierCallback>& aTarget,
+    HandleEventRunnable(nsMainThreadPtrHolder<nsIUrlClassifierCallback>* aTarget,
                         const nsACString& aValue)
       : mTarget(aTarget)
       , mValue(aValue)
@@ -225,31 +226,46 @@ public:
     : mTarget(new nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>(aTarget))
   { }
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERUPDATEOBSERVER
 
   class UpdateUrlRequestedRunnable : public nsRunnable
   {
   public:
-    UpdateUrlRequestedRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
+    UpdateUrlRequestedRunnable(nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>* aTarget,
                                const nsACString& aURL,
-                               const nsACString& aTable)
+                               const nsACString& aTable,
+                               const nsACString& aServerMAC)
       : mTarget(aTarget)
       , mURL(aURL)
       , mTable(aTable)
+      , mServerMAC(aServerMAC)
     { }
 
     NS_DECL_NSIRUNNABLE
 
   private:
     nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver> mTarget;
-    nsCString mURL, mTable;
+    nsCString mURL, mTable, mServerMAC;
+  };
+
+  class RekeyRequestedRunnable : public nsRunnable
+  {
+  public:
+    RekeyRequestedRunnable(nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>* aTarget)
+      : mTarget(aTarget)
+    { }
+
+    NS_DECL_NSIRUNNABLE
+
+  private:
+    nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver> mTarget;
   };
 
   class StreamFinishedRunnable : public nsRunnable
   {
   public:
-    StreamFinishedRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
+    StreamFinishedRunnable(nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>* aTarget,
                            nsresult aStatus, uint32_t aDelay)
       : mTarget(aTarget)
       , mStatus(aStatus)
@@ -267,7 +283,7 @@ public:
   class UpdateErrorRunnable : public nsRunnable
   {
   public:
-    UpdateErrorRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
+    UpdateErrorRunnable(nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>* aTarget,
                         nsresult aError)
       : mTarget(aTarget)
       , mError(aError)
@@ -283,7 +299,7 @@ public:
   class UpdateSuccessRunnable : public nsRunnable
   {
   public:
-    UpdateSuccessRunnable(const nsMainThreadPtrHandle<nsIUrlClassifierUpdateObserver>& aTarget,
+    UpdateSuccessRunnable(nsMainThreadPtrHolder<nsIUrlClassifierUpdateObserver>* aTarget,
                           uint32_t aRequestedTimeout)
       : mTarget(aTarget)
       , mRequestedTimeout(aRequestedTimeout)

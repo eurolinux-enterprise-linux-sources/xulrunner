@@ -23,10 +23,10 @@
 ///
 ////////////////////////////////////////////////////////////////////////////////
 //
-// Last changed  : $Date: 2014-01-07 12:25:40 -0600 (Tue, 07 Jan 2014) $
+// Last changed  : $Date$
 // File revision : $Revision: 4 $
 //
-// $Id: sse_optimized.cpp 184 2014-01-07 18:25:40Z oparviai $
+// $Id$
 //
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -71,7 +71,7 @@ using namespace soundtouch;
 #include <math.h>
 
 // Calculates cross correlation of two buffers
-double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &norm) const
+double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2) const
 {
     int i;
     const float *pVec1;
@@ -141,10 +141,11 @@ double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &n
 
     // return value = vSum[0] + vSum[1] + vSum[2] + vSum[3]
     float *pvNorm = (float*)&vNorm;
-    norm = (pvNorm[0] + pvNorm[1] + pvNorm[2] + pvNorm[3]);
+    double norm = sqrt(pvNorm[0] + pvNorm[1] + pvNorm[2] + pvNorm[3]);
+    if (norm < 1e-9) norm = 1.0;    // to avoid div by zero
 
     float *pvSum = (float*)&vSum;
-    return (double)(pvSum[0] + pvSum[1] + pvSum[2] + pvSum[3]) / sqrt(norm < 1e-9 ? 1.0 : norm);
+    return (double)(pvSum[0] + pvSum[1] + pvSum[2] + pvSum[3]) / norm;
 
     /* This is approximately corresponding routine in C-language yet without normalization:
     double corr, norm;
@@ -178,16 +179,6 @@ double TDStretchSSE::calcCrossCorr(const float *pV1, const float *pV2, double &n
     }
     return corr / sqrt(norm);
     */
-}
-
-
-
-double TDStretchSSE::calcCrossCorrAccumulate(const float *pV1, const float *pV2, double &norm) const
-{
-    // call usual calcCrossCorr function because SSE does not show big benefit of 
-    // accumulating "norm" value, and also the "norm" rolling algorithm would get 
-    // complicated due to SSE-specific alignment-vs-nonexact correlation rules.
-    return calcCrossCorr(pV1, pV2, norm);
 }
 
 

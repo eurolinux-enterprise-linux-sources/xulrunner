@@ -41,15 +41,16 @@ exports["test multiple tabs"] = function(assert, done) {
   let { events } = loader.require("sdk/content/events");
   let { on, off } = loader.require("sdk/event/core");
   let actual = [];
-
-  on(events, "data", handler);
-  function handler ({type, target, timeStamp}) {
-    eventFilter(type, target, () => {
+  on(events, "data", function({type, target, timeStamp}) {
+    // ignore about:blank pages and *-document-global-created
+    // events that are not very consistent.
+    if (target.URL !== "about:blank" &&
+        type !== "chrome-document-global-created" &&
+        type !== "content-document-global-created")
       actual.push(type + " -> " + target.URL)
-    });
-  }
+  });
 
-  let window = getMostRecentBrowserWindow();
+  let window =  getMostRecentBrowserWindow();
   let firstTab = open("data:text/html,first-tab", window);
 
   when("pageshow", firstTab).
@@ -73,7 +74,6 @@ exports["test multiple tabs"] = function(assert, done) {
       assert.fail(Error(reason));
     }).then(function() {
       loader.unload();
-      off(events, "data", handler);
       done();
     });
 };
@@ -83,12 +83,14 @@ exports["test nested frames"] = function(assert, done) {
   let { events } = loader.require("sdk/content/events");
   let { on, off } = loader.require("sdk/event/core");
   let actual = [];
-  on(events, "data", handler);
-  function handler ({type, target, timeStamp}) {
-    eventFilter(type, target, () => {
+  on(events, "data", function({type, target, timeStamp}) {
+    // ignore about:blank pages and *-global-created
+    // events that are not very consistent.
+    if (target.URL !== "about:blank" &&
+       type !== "chrome-document-global-created" &&
+       type !== "content-document-global-created")
       actual.push(type + " -> " + target.URL)
-    });
-  }
+  });
 
   let window =  getMostRecentBrowserWindow();
   let uri = encodeURI("data:text/html,<iframe src='data:text/html,iframe'>");
@@ -111,21 +113,8 @@ exports["test nested frames"] = function(assert, done) {
       assert.fail(Error(reason))
     }).then(function() {
       loader.unload();
-      off(events, "data", handler);
       done();
     });
 };
 
-// ignore *-document-global-created events that are not very consistent.
-// only allow data uris that we create to ignore unwanted events, e.g.,
-// about:blank, http:// requests from Fennec's `about:`home page that displays
-// add-ons a user could install, local `searchplugins`, other chrome uris
-// Calls callback if passes filter
-function eventFilter (type, target, callback) {
-  if (target.URL.startsWith("data:text/html,") &&
-    type !== "chrome-document-global-created" &&
-    type !== "content-document-global-created")
-  
-    callback();
-}
 require("test").run(exports);

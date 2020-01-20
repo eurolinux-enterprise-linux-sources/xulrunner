@@ -29,8 +29,8 @@ public:
   DOMStorageDBChild(DOMLocalStorageManager* aManager);
   virtual ~DOMStorageDBChild();
 
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
-  NS_IMETHOD_(MozExternalRefCountType) Release(void);
+  NS_IMETHOD_(nsrefcnt) AddRef(void);
+  NS_IMETHOD_(nsrefcnt) Release(void);
 
   void AddIPDLReference();
   void ReleaseIPDLReference();
@@ -49,11 +49,7 @@ public:
   virtual nsresult AsyncClear(DOMStorageCacheBridge* aCache);
 
   virtual void AsyncClearAll()
-  {
-    if (mScopesHavingData) {
-      mScopesHavingData->Clear(); /* NO-OP on the child process otherwise */
-    }
-  }
+    { mScopesHavingData.Clear(); /* NO-OP on the child process otherwise */ }
 
   virtual void AsyncClearMatchingScope(const nsACString& aScope)
     { /* NO-OP on the child process */ }
@@ -80,14 +76,13 @@ private:
 
   nsTHashtable<nsCStringHashKey>& ScopesHavingData();
 
-  ThreadSafeAutoRefCnt mRefCnt;
-  NS_DECL_OWNINGTHREAD
+  nsAutoRefCnt mRefCnt;
 
   // Held to get caches to forward answers to.
   nsRefPtr<DOMLocalStorageManager> mManager;
 
   // Scopes having data hash, for optimization purposes only
-  nsAutoPtr<nsTHashtable<nsCStringHashKey> > mScopesHavingData;
+  nsTHashtable<nsCStringHashKey> mScopesHavingData;
 
   // List of caches waiting for preload.  This ensures the contract that
   // AsyncPreload call references the cache for time of the preload.
@@ -112,12 +107,8 @@ public:
   DOMStorageDBParent();
   virtual ~DOMStorageDBParent();
 
-  virtual mozilla::ipc::IProtocol*
-  CloneProtocol(Channel* aChannel,
-                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
-
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
-  NS_IMETHOD_(MozExternalRefCountType) Release(void);
+  NS_IMETHOD_(nsrefcnt) AddRef(void);
+  NS_IMETHOD_(nsrefcnt) Release(void);
 
   void AddIPDLReference();
   void ReleaseIPDLReference();
@@ -188,8 +179,7 @@ private:
 private:
   CacheParentBridge* NewCache(const nsACString& aScope);
 
-  ThreadSafeAutoRefCnt mRefCnt;
-  NS_DECL_OWNINGTHREAD
+  nsAutoRefCnt mRefCnt;
 	
 	// True when IPC channel is open and Send*() methods are OK to use.
   bool mIPCOpen;

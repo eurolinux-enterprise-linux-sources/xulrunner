@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/arm/BaselineCompiler-arm.h"
+#include "BaselineCompiler-arm.h"
 
 using namespace js;
 using namespace js::jit;
 
-BaselineCompilerARM::BaselineCompilerARM(JSContext *cx, TempAllocator &alloc, JSScript *script)
-  : BaselineCompilerShared(cx, alloc, script)
+BaselineCompilerARM::BaselineCompilerARM(JSContext *cx, HandleScript script)
+  : BaselineCompilerShared(cx, script)
 {
 }

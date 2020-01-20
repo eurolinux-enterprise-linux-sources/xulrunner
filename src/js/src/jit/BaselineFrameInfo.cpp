@@ -4,21 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/BaselineFrameInfo.h"
+#include "BaselineFrameInfo.h"
+#include "IonSpewer.h"
+#include "shared/BaselineCompiler-shared.h"
 
-#ifdef DEBUG
-# include "jit/BytecodeAnalysis.h"
-#endif
+#include "jsanalyze.h"
+#include "jsinferinlines.h"
 
 using namespace js;
 using namespace js::jit;
 
 bool
-FrameInfo::init(TempAllocator &alloc)
-{
+FrameInfo::init() {
     // One slot is always needed for this/arguments type checks.
-    size_t nstack = Max(script->nslots() - script->nfixed(), size_t(1));
-    if (!stack.init(alloc, nstack))
+    size_t nstack = Max(script->nslots - script->nfixed, 1);
+    if (!stack.init(nstack))
         return false;
 
     return true;
@@ -46,7 +46,8 @@ FrameInfo::sync(StackValue *val)
         masm.pushValue(val->constant());
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Invalid kind");
+        JS_NOT_REACHED("Invalid kind");
+        break;
     }
 
     val->setStack();
@@ -102,7 +103,7 @@ FrameInfo::popValue(ValueOperand dest)
         masm.moveValue(val->reg(), dest);
         break;
       default:
-        MOZ_ASSUME_UNREACHABLE("Invalid kind");
+        JS_NOT_REACHED("Invalid kind");
     }
 
     // masm.popValue already adjusted the stack pointer, don't do it twice.
@@ -138,7 +139,7 @@ FrameInfo::popRegsAndSync(uint32_t uses)
         break;
       }
       default:
-        MOZ_ASSUME_UNREACHABLE("Invalid uses");
+        JS_NOT_REACHED("Invalid uses");
     }
 }
 
@@ -175,7 +176,7 @@ FrameInfo::assertValidState(const BytecodeInfo &info)
                 JS_ASSERT(!usedR1);
                 usedR1 = true;
             } else {
-                MOZ_ASSUME_UNREACHABLE("Invalid register");
+                JS_NOT_REACHED("Invalid register");
             }
         }
     }

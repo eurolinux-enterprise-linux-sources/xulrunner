@@ -5,9 +5,9 @@
 "use strict";
 
 let {Cu} = require("chrome");
-let {DebuggerServer} = require("devtools/server/main");
+let {DebuggerServer} = Cu.import("resource://gre/modules/devtools/dbg-server.jsm", {});
 
-let {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
+let promise = require("sdk/core/promise");
 let {Class} = require("sdk/core/heritage");
 
 let protocol = require("devtools/server/protocol");

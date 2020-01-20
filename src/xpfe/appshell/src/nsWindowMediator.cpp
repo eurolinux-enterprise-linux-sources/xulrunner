@@ -27,6 +27,9 @@
 
 using namespace mozilla;
 
+static nsresult GetDOMWindow(nsIXULWindow* inWindow,
+                             nsCOMPtr< nsIDOMWindow>& outDOMWindow);
+
 static bool notifyOpenWindow(nsIWindowMediatorListener *aElement, void* aData);
 static bool notifyCloseWindow(nsIWindowMediatorListener *aElement, void* aData);
 static bool notifyWindowTitleChange(nsIWindowMediatorListener *aElement, void* aData);
@@ -34,12 +37,11 @@ static bool notifyWindowTitleChange(nsIWindowMediatorListener *aElement, void* a
 // for notifyWindowTitleChange
 struct WindowTitleData {
   nsIXULWindow* mWindow;
-  const char16_t *mTitle;
+  const PRUnichar *mTitle;
 };
 
 nsresult
-nsWindowMediator::GetDOMWindow(nsIXULWindow* inWindow,
-                               nsCOMPtr<nsIDOMWindow>& outDOMWindow)
+GetDOMWindow(nsIXULWindow* inWindow, nsCOMPtr<nsIDOMWindow>& outDOMWindow)
 {
   nsCOMPtr<nsIDocShell> docShell;
 
@@ -187,7 +189,7 @@ nsWindowMediator::GetInfoFor(nsIWidget *aWindow)
 }
 
 NS_IMETHODIMP
-nsWindowMediator::GetEnumerator(const char16_t* inType, nsISimpleEnumerator** outEnumerator)
+nsWindowMediator::GetEnumerator(const PRUnichar* inType, nsISimpleEnumerator** outEnumerator)
 {
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
@@ -200,7 +202,7 @@ nsWindowMediator::GetEnumerator(const char16_t* inType, nsISimpleEnumerator** ou
 }
 
 NS_IMETHODIMP
-nsWindowMediator::GetXULWindowEnumerator(const char16_t* inType, nsISimpleEnumerator** outEnumerator)
+nsWindowMediator::GetXULWindowEnumerator(const PRUnichar* inType, nsISimpleEnumerator** outEnumerator)
 {
   NS_ENSURE_ARG_POINTER(outEnumerator);
   NS_ENSURE_STATE(mReady);
@@ -214,7 +216,7 @@ nsWindowMediator::GetXULWindowEnumerator(const char16_t* inType, nsISimpleEnumer
 
 NS_IMETHODIMP
 nsWindowMediator::GetZOrderDOMWindowEnumerator(
-            const char16_t *aWindowType, bool aFrontToBack,
+            const PRUnichar *aWindowType, bool aFrontToBack,
             nsISimpleEnumerator **_retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
@@ -233,7 +235,7 @@ nsWindowMediator::GetZOrderDOMWindowEnumerator(
 
 NS_IMETHODIMP
 nsWindowMediator::GetZOrderXULWindowEnumerator(
-            const char16_t *aWindowType, bool aFrontToBack,
+            const PRUnichar *aWindowType, bool aFrontToBack,
             nsISimpleEnumerator **_retval)
 {
   NS_ENSURE_ARG_POINTER(_retval);
@@ -265,7 +267,7 @@ nsWindowMediator::RemoveEnumerator(nsAppShellWindowEnumerator * inEnumerator)
 // Returns the window of type inType ( if null return any window type ) which has the most recent
 // time stamp
 NS_IMETHODIMP
-nsWindowMediator::GetMostRecentWindow(const char16_t* inType, nsIDOMWindow** outWindow)
+nsWindowMediator::GetMostRecentWindow(const PRUnichar* inType, nsIDOMWindow** outWindow)
 {
   NS_ENSURE_ARG_POINTER(outWindow);
   *outWindow = nullptr;
@@ -292,7 +294,7 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType, nsIDOMWindow** out
 }
 
 nsWindowInfo*
-nsWindowMediator::MostRecentWindowInfo(const char16_t* inType)
+nsWindowMediator::MostRecentWindowInfo(const PRUnichar* inType)
 {
   int32_t       lastTimeStamp = -1;
   nsAutoString  typeString(inType);
@@ -366,7 +368,7 @@ nsWindowMediator::UpdateWindowTimeStamp(nsIXULWindow* inWindow)
 
 NS_IMETHODIMP
 nsWindowMediator::UpdateWindowTitle(nsIXULWindow* inWindow,
-                                    const char16_t* inTitle)
+                                    const PRUnichar* inTitle)
 {
   NS_ENSURE_STATE(mReady);
   MutexAutoLock lock(mListLock);
@@ -743,7 +745,7 @@ nsWindowMediator::SortZOrderBackToFront()
   mSortingZOrder = false;
 }
 
-NS_IMPL_ISUPPORTS(nsWindowMediator,
+NS_IMPL_ISUPPORTS3(nsWindowMediator,
   nsIWindowMediator,
   nsIObserver,
   nsISupportsWeakReference)
@@ -771,7 +773,7 @@ nsWindowMediator::RemoveListener(nsIWindowMediatorListener* aListener)
 NS_IMETHODIMP
 nsWindowMediator::Observe(nsISupports* aSubject,
                           const char* aTopic,
-                          const char16_t* aData)
+                          const PRUnichar* aData)
 {
   if (!strcmp(aTopic, "xpcom-shutdown") && mReady) {
     // Unregistering a window may cause its destructor to run, causing it to

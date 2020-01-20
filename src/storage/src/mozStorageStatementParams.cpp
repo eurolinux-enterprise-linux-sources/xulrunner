@@ -7,8 +7,6 @@
 #include "nsMemory.h"
 #include "nsString.h"
 
-#include "jsapi.h"
-
 #include "mozStoragePrivateHelpers.h"
 #include "mozStorageStatementParams.h"
 #include "mozIStorageStatement.h"
@@ -26,7 +24,7 @@ StatementParams::StatementParams(mozIStorageStatement *aStatement) :
   (void)mStatement->GetParameterCount(&mParamCount);
 }
 
-NS_IMPL_ISUPPORTS(
+NS_IMPL_ISUPPORTS2(
   StatementParams,
   mozIStorageStatementParams,
   nsIXPCScriptable
@@ -48,7 +46,7 @@ StatementParams::SetProperty(nsIXPConnectWrappedNative *aWrapper,
                              JSContext *aCtx,
                              JSObject *aScopeObj,
                              jsid aId,
-                             JS::Value *_vp,
+                             jsval *_vp,
                              bool *_retval)
 {
   NS_ENSURE_TRUE(mStatement, NS_ERROR_NOT_INITIALIZED);
@@ -123,17 +121,15 @@ StatementParams::NewEnumerate(nsIXPConnectWrappedNative *aWrapper,
       NS_ENSURE_SUCCESS(rv, rv);
 
       // But drop the first character, which is going to be a ':'.
-      JS::RootedString jsname(aCtx, ::JS_NewStringCopyN(aCtx, &(name.get()[1]),
-                                                        name.Length() - 1));
+      JSString *jsname = ::JS_NewStringCopyN(aCtx, &(name.get()[1]),
+                                             name.Length() - 1);
       NS_ENSURE_TRUE(jsname, NS_ERROR_OUT_OF_MEMORY);
 
       // Set our name.
-      JS::Rooted<jsid> id(aCtx);
-      if (!::JS_StringToId(aCtx, jsname, &id)) {
+      if (!::JS_ValueToId(aCtx, STRING_TO_JSVAL(jsname), _idp)) {
         *_retval = false;
         return NS_OK;
       }
-      *_idp = id;
 
       // And increment our index.
       *_statep = INT_TO_JSVAL(++index);
@@ -157,6 +153,7 @@ StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
                             JSContext *aCtx,
                             JSObject *aScopeObj,
                             jsid aId,
+                            uint32_t aFlags,
                             JSObject **_objp,
                             bool *_retval)
 {

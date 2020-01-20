@@ -18,9 +18,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Attributes.h"
 #include "nsIPermissionManager.h"
-#include "mozilla/dom/DeviceLightEvent.h"
-#include "mozilla/dom/DeviceProximityEvent.h"
-#include "mozilla/dom/UserProximityEvent.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -94,7 +91,7 @@ NS_IMETHODIMP nsDeviceSensorData::GetZ(double *aZ)
   return NS_OK;
 }
 
-NS_IMPL_ISUPPORTS(nsDeviceSensors, nsIDeviceSensors)
+NS_IMPL_ISUPPORTS1(nsDeviceSensors, nsIDeviceSensors)
 
 nsDeviceSensors::nsDeviceSensors()
 {
@@ -175,7 +172,7 @@ WindowCannotReceiveSensorEvent (nsPIDOMWindow* aWindow)
   // Check to see if this window is in the background.  If
   // it is and it does not have the "background-sensors" permission,
   // don't send any device motion events to it.
-  if (!aWindow || !aWindow->IsCurrentInnerWindow()) {
+  if (!aWindow || !aWindow->GetOuterWindow()) {
     return true;
   }
 
@@ -239,12 +236,14 @@ void
 nsDeviceSensors::FireDOMLightEvent(mozilla::dom::EventTarget* aTarget,
                                    double aValue)
 {
-  DeviceLightEventInit init;
-  init.mBubbles = true;
-  init.mCancelable = false;
-  init.mValue = aValue;
-  nsRefPtr<DeviceLightEvent> event =
-    DeviceLightEvent::Constructor(aTarget, NS_LITERAL_STRING("devicelight"), init);
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMDeviceLightEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
+
+  nsCOMPtr<nsIDOMDeviceLightEvent> oe = do_QueryInterface(event);
+  oe->InitDeviceLightEvent(NS_LITERAL_STRING("devicelight"),
+                          true,
+                          false,
+                          aValue);
 
   event->SetTrusted(true);
 
@@ -258,16 +257,17 @@ nsDeviceSensors::FireDOMProximityEvent(mozilla::dom::EventTarget* aTarget,
                                        double aMin,
                                        double aMax)
 {
-  DeviceProximityEventInit init;
-  init.mBubbles = true;
-  init.mCancelable = false;
-  init.mValue = aValue;
-  init.mMin = aMin;
-  init.mMax = aMax;
-  nsRefPtr<DeviceProximityEvent> event =
-    DeviceProximityEvent::Constructor(aTarget,
-                                      NS_LITERAL_STRING("deviceproximity"),
-                                      init);
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMDeviceProximityEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
+  nsCOMPtr<nsIDOMDeviceProximityEvent> oe = do_QueryInterface(event);
+
+  oe->InitDeviceProximityEvent(NS_LITERAL_STRING("deviceproximity"),
+                               true,
+                               false,
+                               aValue,
+                               aMin,
+                               aMax);
+
   event->SetTrusted(true);
 
   bool defaultActionEnabled;
@@ -289,14 +289,14 @@ void
 nsDeviceSensors::FireDOMUserProximityEvent(mozilla::dom::EventTarget* aTarget,
                                            bool aNear)
 {
-  UserProximityEventInit init;
-  init.mBubbles = true;
-  init.mCancelable = false;
-  init.mNear = aNear;
-  nsRefPtr<UserProximityEvent> event =
-    UserProximityEvent::Constructor(aTarget,
-                                    NS_LITERAL_STRING("userproximity"),
-                                    init);
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMUserProximityEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
+  nsCOMPtr<nsIDOMUserProximityEvent> pe = do_QueryInterface(event);
+
+  pe->InitUserProximityEvent(NS_LITERAL_STRING("userproximity"),
+                             true,
+                             false,
+                             aNear);
 
   event->SetTrusted(true);
 
@@ -348,69 +348,43 @@ nsDeviceSensors::FireDOMMotionEvent(nsIDOMDocument *domdoc,
 
   switch (type) {
   case nsIDeviceSensorData::TYPE_LINEAR_ACCELERATION:
-    if (mLastAcceleration.empty()) {
-      mLastAcceleration.construct();
-    }
-    mLastAcceleration.ref().mX.SetValue(x);
-    mLastAcceleration.ref().mY.SetValue(y);
-    mLastAcceleration.ref().mZ.SetValue(z);
+    mLastAcceleration = new nsDOMDeviceAcceleration(x, y, z);
     break;
   case nsIDeviceSensorData::TYPE_ACCELERATION:
-    if (mLastAccelerationIncluduingGravity.empty()) {
-      mLastAccelerationIncluduingGravity.construct();
-    }
-    mLastAccelerationIncluduingGravity.ref().mX.SetValue(x);
-    mLastAccelerationIncluduingGravity.ref().mY.SetValue(y);
-    mLastAccelerationIncluduingGravity.ref().mZ.SetValue(z);
+    mLastAccelerationIncluduingGravity = new nsDOMDeviceAcceleration(x, y, z);
     break;
   case nsIDeviceSensorData::TYPE_GYROSCOPE:
-    if (mLastRotationRate.empty()) {
-      mLastRotationRate.construct();
-    }
-    mLastRotationRate.ref().mAlpha.SetValue(x);
-    mLastRotationRate.ref().mBeta.SetValue(y);
-    mLastRotationRate.ref().mGamma.SetValue(z);
+    mLastRotationRate = new nsDOMDeviceRotationRate(x, y, z);
     break;
   }
 
-  if (fireEvent) {
-    if (mLastAcceleration.empty()) {
-      mLastAcceleration.construct();
-    }
-    if (mLastAccelerationIncluduingGravity.empty()) {
-      mLastAccelerationIncluduingGravity.construct();
-    }
-    if (mLastRotationRate.empty()) {
-      mLastRotationRate.construct();
-    }
-  } else if (mLastAcceleration.empty() ||
-             mLastAccelerationIncluduingGravity.empty() ||
-             mLastRotationRate.empty()) {
+  if (!fireEvent && (!mLastAcceleration || !mLastAccelerationIncluduingGravity || !mLastRotationRate)) {
     return;
   }
 
   nsCOMPtr<nsIDOMEvent> event;
   domdoc->CreateEvent(NS_LITERAL_STRING("DeviceMotionEvent"), getter_AddRefs(event));
 
-  DeviceMotionEvent* me = static_cast<DeviceMotionEvent*>(event.get());
+  nsCOMPtr<nsIDOMDeviceMotionEvent> me = do_QueryInterface(event);
 
-  ErrorResult rv;
+  if (!me)
+    return;
+
   me->InitDeviceMotionEvent(NS_LITERAL_STRING("devicemotion"),
                             true,
                             false,
-                            mLastAcceleration.ref(),
-                            mLastAccelerationIncluduingGravity.ref(),
-                            mLastRotationRate.ref(),
-                            Nullable<double>(DEFAULT_SENSOR_POLL),
-                            rv);
+                            mLastAcceleration,
+                            mLastAccelerationIncluduingGravity,
+                            mLastRotationRate,
+                            DEFAULT_SENSOR_POLL);
 
   event->SetTrusted(true);
 
   bool defaultActionEnabled = true;
   target->DispatchEvent(event, &defaultActionEnabled);
 
-  mLastRotationRate.destroy();
-  mLastAccelerationIncluduingGravity.destroy();
-  mLastAcceleration.destroy();
+  mLastRotationRate = nullptr;
+  mLastAccelerationIncluduingGravity = nullptr;
+  mLastAcceleration = nullptr;
   mLastDOMMotionEventTime = TimeStamp::Now();
 }

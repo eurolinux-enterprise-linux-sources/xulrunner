@@ -11,15 +11,9 @@
 interface TextTrackList : EventTarget {
   readonly attribute unsigned long length;
   getter TextTrack (unsigned long index);
-  TextTrack? getTrackById(DOMString id);
 
-           attribute EventHandler onchange;
+           [SetterThrows]
            attribute EventHandler onaddtrack;
+           [SetterThrows]
            attribute EventHandler onremovetrack;
-};
-
-// Mozilla extensions
-partial interface TextTrackList {
-  [ChromeOnly]
-  readonly attribute HTMLMediaElement? mediaElement;
 };

@@ -3,19 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsIPlatformCharset.h"
+#include "nsIServiceManager.h"
+#include "nsIComponentManager.h"
 #include "nsCollation.h"
 #include "nsCollationCID.h"
 #include "nsUnicharUtils.h"
 #include "prmem.h"
-#include "nsIUnicodeEncoder.h"
-#include "nsICharsetConverterManager.h"
-#include "nsServiceManagerUtils.h"
+#include "nsReadableUtils.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 NS_DEFINE_CID(kCollationCID, NS_COLLATION_CID);
 
-NS_IMPL_ISUPPORTS(nsCollationFactory, nsICollationFactory)
+NS_IMPL_ISUPPORTS1(nsCollationFactory, nsICollationFactory)
 
 nsresult nsCollationFactory::CreateCollation(nsILocale* locale, nsICollation** instancePtr)
 {
@@ -52,13 +53,13 @@ nsresult nsCollation::NormalizeString(const nsAString& stringIn, nsAString& stri
   int32_t aLength = stringIn.Length();
 
   if (aLength <= 64) {
-    char16_t conversionBuffer[64];
+    PRUnichar conversionBuffer[64];
     ToLowerCase(PromiseFlatString(stringIn).get(), conversionBuffer, aLength);
     stringOut.Assign(conversionBuffer, aLength);
   }
   else {
-    char16_t* conversionBuffer;
-    conversionBuffer = new char16_t[aLength];
+    PRUnichar* conversionBuffer;
+    conversionBuffer = new PRUnichar[aLength];
     if (!conversionBuffer) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -92,7 +93,7 @@ nsresult nsCollation::UnicodeToChar(const nsAString& aSrc, char** dst)
 
   if (NS_SUCCEEDED(res)) {
     const nsPromiseFlatString& src = PromiseFlatString(aSrc);
-    const char16_t *unichars = src.get();
+    const PRUnichar *unichars = src.get();
     int32_t unicharLength = src.Length();
     int32_t dstLength;
     res = mEncoder->GetMaxLength(unichars, unicharLength, &dstLength);

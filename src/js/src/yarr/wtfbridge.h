@@ -14,12 +14,13 @@
 
 #include <stdio.h>
 #include <stdarg.h>
-#include "jscntxt.h"
 #include "jsstr.h"
+#include "jsprvtd.h"
 #include "vm/String.h"
 #include "assembler/wtf/Platform.h"
 #include "assembler/jit/ExecutableAllocator.h"
-#include "yarr/CheckedArithmetic.h"
+#include "CheckedArithmetic.h"
+#include "js/TemplateLib.h"
 
 namespace JSC { namespace Yarr {
 
@@ -83,7 +84,8 @@ class OwnPtr {
     OwnPtr(PassOwnPtr<T> p) : ptr(p.get()) { }
 
     ~OwnPtr() {
-        js_delete(ptr);
+        if (ptr)
+            js_delete(ptr);
     }
 
     OwnPtr<T> &operator=(PassOwnPtr<T> p) {
@@ -165,18 +167,18 @@ class Vector {
     template <typename U>
     void append(const U &u) {
         if (!impl.append(static_cast<T>(u)))
-            js::CrashAtUnhandlableOOM("Yarr");
+            MOZ_CRASH();
     }
 
     template <size_t M>
     void append(const Vector<T,M> &v) {
-        if (!impl.appendAll(v.impl))
-            js::CrashAtUnhandlableOOM("Yarr");
+        if (!impl.append(v.impl))
+            MOZ_CRASH();
     }
 
     void insert(size_t i, const T& t) {
         if (!impl.insert(&impl[i], t))
-            js::CrashAtUnhandlableOOM("Yarr");
+            MOZ_CRASH();
     }
 
     void remove(size_t i) {
@@ -190,7 +192,7 @@ class Vector {
     void shrink(size_t newLength) {
         JS_ASSERT(newLength <= impl.length());
         if (!impl.resize(newLength))
-            js::CrashAtUnhandlableOOM("Yarr");
+            MOZ_CRASH();
     }
 
     void swap(Vector &other) {
@@ -220,7 +222,7 @@ class Vector<OwnPtr<T> > {
 
     void append(T *t) {
         if (!impl.append(t))
-            js::CrashAtUnhandlableOOM("Yarr");
+            MOZ_CRASH();
     }
 
     PassOwnPtr<T> operator[](size_t i) {
@@ -235,7 +237,7 @@ class Vector<OwnPtr<T> > {
 
     void reserve(size_t capacity) {
         if (!impl.reserve(capacity))
-            js::CrashAtUnhandlableOOM("Yarr");
+            MOZ_CRASH();
     }
 };
 
@@ -246,7 +248,7 @@ deleteAllValues(Vector<T, N> &v) {
 }
 
 static inline void
-dataLogF(const char *fmt, ...)
+dataLog(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -275,61 +277,10 @@ class JSGlobalData {
   */
 #define UNUSED_PARAM(e)
 
-/*
- * Like SpiderMonkey's allocation templates, but with more crashing.
- */
-template <class T>
-T *newOrCrash()
-{
-    T *t = js_new<T>();
-    if (!t)
-        js::CrashAtUnhandlableOOM("Yarr");
-    return t;
-}
-
-template <class T, class P1>
-T *newOrCrash(P1 &&p1)
-{
-    T *t = js_new<T>(mozilla::Forward<P1>(p1));
-    if (!t)
-        js::CrashAtUnhandlableOOM("Yarr");
-    return t;
-}
-
-template <class T, class P1, class P2>
-T *newOrCrash(P1 &&p1, P2 &&p2)
-{
-    T *t = js_new<T>(mozilla::Forward<P1>(p1), mozilla::Forward<P2>(p2));
-    if (!t)
-        js::CrashAtUnhandlableOOM("Yarr");
-    return t;
-}
-
-template <class T, class P1, class P2, class P3>
-T *newOrCrash(P1 &&p1, P2 &&p2, P3 &&p3)
-{
-    T *t = js_new<T>(mozilla::Forward<P1>(p1), mozilla::Forward<P2>(p2), mozilla::Forward<P3>(p3));
-    if (!t)
-        js::CrashAtUnhandlableOOM("Yarr");
-    return t;
-}
-
-template <class T, class P1, class P2, class P3, class P4>
-T *newOrCrash(P1 &&p1, P2 &&p2, P3 &&p3, P4 &&p4)
-{
-    T *t = js_new<T>(mozilla::Forward<P1>(p1),
-                     mozilla::Forward<P2>(p2),
-                     mozilla::Forward<P3>(p3),
-                     mozilla::Forward<P4>(p4));
-    if (!t)
-        js::CrashAtUnhandlableOOM("Yarr");
-    return t;
-}
-
 } /* namespace Yarr */
 
 /*
- * Replacements for std:: functions used in Yarr. We put them in
+ * Replacements for std:: functions used in Yarr. We put them in 
  * namespace JSC::std so that they can still be called as std::X
  * in Yarr.
  */

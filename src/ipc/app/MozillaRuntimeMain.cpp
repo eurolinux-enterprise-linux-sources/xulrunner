@@ -18,14 +18,8 @@
 // but we don't want its DLL load protection, because we'll handle it here
 #define XRE_DONT_PROTECT_DLL_LOAD
 #include "nsWindowsWMain.cpp"
-#include "nsSetDllDirectory.h"
-#endif
 
-#if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
-#include "sandbox/chromium/base/basictypes.h"
-#include "sandbox/win/src/sandbox.h"
-#include "sandbox/win/src/sandbox_factory.h"
-#include "mozilla/sandboxTarget.h"
+#include "nsSetDllDirectory.h"
 #endif
 
 #ifdef MOZ_WIDGET_GONK
@@ -47,14 +41,15 @@
 
 #endif
 
-#ifdef MOZ_NUWA_PROCESS
-#include <binder/ProcessState.h>
-#include "ipc/Nuwa.h"
-#endif
-
+int
+main(int argc, char* argv[])
+{
 #ifdef MOZ_WIDGET_GONK
-static void
-InitializeBinder(void *aDummy) {
+    // This creates a ThreadPool for binder ipc. A ThreadPool is necessary to
+    // receive binder calls, though not necessary to send binder calls.
+    // ProcessState::Self() also needs to be called once on the main thread to
+    // register the main thread with the binder driver.
+
     // Change thread priority to 0 only during calling ProcessState::self().
     // The priority is registered to binder driver and used for default Binder
     // Thread's priority. 
@@ -65,59 +60,16 @@ InitializeBinder(void *aDummy) {
     LOGE_IF(err, "setpriority failed. Current process needs root permission.");
     android::ProcessState::self()->startThreadPool();
     setpriority(PRIO_PROCESS, 0, curPrio);
-}
 #endif
 
-#if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
-static bool gIsSandboxEnabled = false;
-void StartSandboxCallback()
-{
-    if (gIsSandboxEnabled) {
-        sandbox::TargetServices* target_service =
-            sandbox::SandboxFactory::GetTargetServices();
-        target_service->LowerToken();
-    }
-}
-#endif
-
-int
-main(int argc, char* argv[])
-{
-    bool isNuwa = false;
-    for (int i = 1; i < argc; i++) {
-        isNuwa |= strcmp(argv[i], "-nuwa") == 0;
-#if defined(XP_WIN) && defined(MOZ_CONTENT_SANDBOX)
-        gIsSandboxEnabled |= strcmp(argv[i], "-sandbox") == 0;
-#endif
-    }
-
-#ifdef MOZ_NUWA_PROCESS
-    if (isNuwa) {
-        PrepareNuwaProcess();
-    }
-#endif
-
-#ifdef MOZ_WIDGET_GONK
-    // This creates a ThreadPool for binder ipc. A ThreadPool is necessary to
-    // receive binder calls, though not necessary to send binder calls.
-    // ProcessState::Self() also needs to be called once on the main thread to
-    // register the main thread with the binder driver.
-
-#ifdef MOZ_NUWA_PROCESS
-    if (!isNuwa) {
-        InitializeBinder(nullptr);
-    } else {
-        NuwaAddFinalConstructor(&InitializeBinder, nullptr);
-    }
-#else
-    InitializeBinder(nullptr);
-#endif
+#if defined(XP_WIN) && defined(DEBUG_bent)
+    MessageBox(NULL, L"Hi", L"Hi", MB_OK);
 #endif
 
     // Check for the absolute minimum number of args we need to move
     // forward here. We expect the last arg to be the child process type.
     if (argc < 1)
-      return 3;
+      return 1;
     GeckoProcessType proctype = XRE_StringToChildProcessType(argv[--argc]);
 
 #ifdef XP_WIN
@@ -128,22 +80,6 @@ main(int argc, char* argv[])
         mozilla::SanitizeEnvironmentVariables();
         SetDllDirectory(L"");
     }
-
-#ifdef MOZ_CONTENT_SANDBOX
-    if (gIsSandboxEnabled) {
-        sandbox::TargetServices* target_service =
-            sandbox::SandboxFactory::GetTargetServices();
-        if (!target_service) {
-            return 1;
-        }
-
-        sandbox::ResultCode result = target_service->Init();
-        if (result != sandbox::SBOX_ALL_OK) {
-           return 2;
-        }
-        mozilla::SandboxTarget::Instance()->SetStartSandboxCallback(StartSandboxCallback);
-    }
-#endif
 #endif
 
     nsresult rv = XRE_InitChildProcess(argc, argv, proctype);

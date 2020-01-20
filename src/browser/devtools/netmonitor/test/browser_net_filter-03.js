@@ -10,9 +10,6 @@ function test() {
   initNetMonitor(FILTERING_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    // It seems that this test may be slow on Ubuntu builds running on ec2.
-    requestLongerTimeout(2);
-
     let { $, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
@@ -28,18 +25,18 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should not be hidden after toggle button was pressed.");
 
-      testFilterButtons(aMonitor, "all");
+      testButtons("all");
       testContents([0, 1, 2, 3, 4, 5, 6], 7, 0)
         .then(() => {
           info("Sorting by size, ascending.");
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-size-button"));
-          testFilterButtons(aMonitor, "all");
+          testButtons("all");
           return testContents([6, 4, 5, 0, 1, 2, 3], 7, 6);
         })
         .then(() => {
           info("Testing html filtering.");
           EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-filter-html-button"));
-          testFilterButtons(aMonitor, "html");
+          testButtons("html");
           return testContents([6, 4, 5, 0, 1, 2, 3], 1, 6);
         })
         .then(() => {
@@ -50,7 +47,7 @@ function test() {
         .then(() => {
           info("Testing html filtering again.");
           resetSorting();
-          testFilterButtons(aMonitor, "html");
+          testButtons("html");
           return testContents([8, 13, 9, 11, 10, 12, 0, 4, 1, 5, 2, 6, 3, 7], 2, 13);
         })
         .then(() => {
@@ -61,7 +58,7 @@ function test() {
         .then(() => {
           info("Testing html filtering again.");
           resetSorting();
-          testFilterButtons(aMonitor, "html");
+          testButtons("html");
           return testContents([12, 13, 20, 14, 16, 18, 15, 17, 19, 0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11], 3, 20);
         })
         .then(() => {
@@ -75,6 +72,22 @@ function test() {
       EventUtils.sendMouseEvent({ type: "click" }, $("#requests-menu-size-button"));
     }
 
+    function testButtons(aFilterType) {
+      let doc = aMonitor.panelWin.document;
+      let target = doc.querySelector("#requests-menu-filter-" + aFilterType + "-button");
+      let buttons = doc.querySelectorAll(".requests-menu-footer-button");
+
+      for (let button of buttons) {
+        if (button != target) {
+          is(button.hasAttribute("checked"), false,
+            "The " + button.id + " button should not have a 'checked' attribute.");
+        } else {
+          is(button.hasAttribute("checked"), true,
+            "The " + button.id + " button should have a 'checked' attribute.");
+        }
+      }
+    }
+
     function testContents(aOrder, aVisible, aSelection) {
       isnot(RequestsMenu.selectedItem, null,
         "There should still be a selected item after filtering.");
@@ -83,13 +96,13 @@ function test() {
       is(NetMonitorView.detailsPaneHidden, false,
         "The details pane should still be visible after filtering.");
 
-      is(RequestsMenu.items.length, aOrder.length,
+      is(RequestsMenu.orderedItems.length, aOrder.length,
         "There should be a specific amount of items in the requests menu.");
       is(RequestsMenu.visibleItems.length, aVisible,
         "There should be a specific amount of visbile items in the requests menu.");
 
       for (let i = 0; i < aOrder.length; i++) {
-        is(RequestsMenu.getItemAtIndex(i), RequestsMenu.items[i],
+        is(RequestsMenu.getItemAtIndex(i), RequestsMenu.orderedItems[i],
           "The requests menu items aren't ordered correctly. Misplaced item " + i + ".");
       }
 
@@ -164,7 +177,7 @@ function test() {
         });
       }
 
-      return promise.resolve(null);
+      return Promise.resolve(null);
     }
 
     let str = "'<p>'" + new Array(10).join(Math.random(10)) + "'</p>'";

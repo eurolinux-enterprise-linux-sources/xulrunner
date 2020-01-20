@@ -8,8 +8,6 @@
 #include "RawReader.h"
 #include "RawDecoder.h"
 #include "VideoUtils.h"
-#include "nsISeekableStream.h"
-#include "gfx2DGlue.h"
 
 using namespace mozilla;
 
@@ -36,8 +34,8 @@ nsresult RawReader::ResetDecode()
   return MediaDecoderReader::ResetDecode();
 }
 
-nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
-                                 MetadataTags** aTags)
+nsresult RawReader::ReadMetadata(VideoInfo* aInfo,
+                                   MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(),
                "Should be on decode thread.");
@@ -71,13 +69,14 @@ nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
   ScaleDisplayByAspectRatio(display, pixelAspectRatio);
   mPicture = nsIntRect(0, 0, mMetadata.frameWidth, mMetadata.frameHeight);
   nsIntSize frameSize(mMetadata.frameWidth, mMetadata.frameHeight);
-  if (!IsValidVideoRegion(frameSize, mPicture, display)) {
+  if (!VideoInfo::ValidateVideoRegion(frameSize, mPicture, display)) {
     // Video track's frame sizes will overflow. Fail.
     return NS_ERROR_FAILURE;
   }
 
-  mInfo.mVideo.mHasVideo = true;
-  mInfo.mVideo.mDisplay = display;
+  mInfo.mHasVideo = true;
+  mInfo.mHasAudio = false;
+  mInfo.mDisplay = display;
 
   mFrameRate = static_cast<float>(mMetadata.framerateNumerator) /
                mMetadata.framerateDenominator;
@@ -208,15 +207,15 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   b.mPlanes[2].mWidth = mMetadata.frameWidth / 2;
   b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-  VideoData *v = VideoData::Create(mInfo.mVideo,
+  VideoData *v = VideoData::Create(mInfo,
                                    mDecoder->GetImageContainer(),
                                    -1,
                                    currentFrameTime,
-                                   (USECS_PER_S / mFrameRate),
+                                   currentFrameTime + (USECS_PER_S / mFrameRate),
                                    b,
                                    1, // In raw video every frame is a keyframe
                                    -1,
-                                   ToIntRect(mPicture));
+                                   mPicture);
   if (!v)
     return false;
 
@@ -248,7 +247,7 @@ nsresult RawReader::Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, in
   nsresult rv = resource->Seek(nsISeekableStream::NS_SEEK_SET, offset.value());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mVideoQueue.Reset();
+  mVideoQueue.Erase();
 
   while(mVideoQueue.GetSize() == 0) {
     bool keyframeSkip = false;
@@ -266,7 +265,7 @@ nsresult RawReader::Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, in
     }
 
     nsAutoPtr<VideoData> video(mVideoQueue.PeekFront());
-    if (video && video->GetEndTime() < aTime) {
+    if (video && video->mEndTime < aTime) {
       mVideoQueue.PopFront();
       video = nullptr;
     } else {
@@ -277,7 +276,7 @@ nsresult RawReader::Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, in
   return NS_OK;
 }
 
-nsresult RawReader::GetBuffered(dom::TimeRanges* aBuffered, int64_t aStartTime)
+nsresult RawReader::GetBuffered(TimeRanges* aBuffered, int64_t aStartTime)
 {
   return NS_OK;
 }

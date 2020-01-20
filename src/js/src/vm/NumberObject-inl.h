@@ -7,7 +7,7 @@
 #ifndef vm_NumberObject_inl_h
 #define vm_NumberObject_inl_h
 
-#include "vm/NumberObject.h"
+#include "NumberObject.h"
 
 #include "jsobjinlines.h"
 
@@ -18,7 +18,7 @@ NumberObject::create(JSContext *cx, double d)
 {
     JSObject *obj = NewBuiltinClassInstance(cx, &class_);
     if (!obj)
-        return nullptr;
+        return NULL;
     NumberObject &numobj = obj->as<NumberObject>();
     numobj.setPrimitiveValue(d);
     return &numobj;

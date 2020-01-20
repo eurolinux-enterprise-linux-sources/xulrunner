@@ -4,102 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/x64/MacroAssembler-x64.h"
-
-#include "jit/Bailouts.h"
-#include "jit/BaselineFrame.h"
-#include "jit/IonFrames.h"
-#include "jit/JitCompartment.h"
+#include "MacroAssembler-x64.h"
 #include "jit/MoveEmitter.h"
+#include "jit/IonFrames.h"
+
+#include "jsscriptinlines.h"
 
 using namespace js;
 using namespace js::jit;
-
-void
-MacroAssemblerX64::loadConstantDouble(double d, const FloatRegister &dest)
-{
-    if (maybeInlineDouble(d, dest))
-        return;
-
-    if (!doubleMap_.initialized()) {
-        enoughMemory_ &= doubleMap_.init();
-        if (!enoughMemory_)
-            return;
-    }
-    size_t doubleIndex;
-    if (DoubleMap::AddPtr p = doubleMap_.lookupForAdd(d)) {
-        doubleIndex = p->value();
-    } else {
-        doubleIndex = doubles_.length();
-        enoughMemory_ &= doubles_.append(Double(d));
-        enoughMemory_ &= doubleMap_.add(p, d, doubleIndex);
-        if (!enoughMemory_)
-            return;
-    }
-    Double &dbl = doubles_[doubleIndex];
-    JS_ASSERT(!dbl.uses.bound());
-
-    // The constants will be stored in a pool appended to the text (see
-    // finish()), so they will always be a fixed distance from the
-    // instructions which reference them. This allows the instructions to use
-    // PC-relative addressing. Use "jump" label support code, because we need
-    // the same PC-relative address patching that jumps use.
-    JmpSrc j = masm.movsd_ripr(dest.code());
-    JmpSrc prev = JmpSrc(dbl.uses.use(j.offset()));
-    masm.setNextJump(j, prev);
-}
-
-void
-MacroAssemblerX64::loadConstantFloat32(float f, const FloatRegister &dest)
-{
-    if (maybeInlineFloat(f, dest))
-        return;
-
-    if (!floatMap_.initialized()) {
-        enoughMemory_ &= floatMap_.init();
-        if (!enoughMemory_)
-            return;
-    }
-    size_t floatIndex;
-    if (FloatMap::AddPtr p = floatMap_.lookupForAdd(f)) {
-        floatIndex = p->value();
-    } else {
-        floatIndex = floats_.length();
-        enoughMemory_ &= floats_.append(Float(f));
-        enoughMemory_ &= floatMap_.add(p, f, floatIndex);
-        if (!enoughMemory_)
-            return;
-    }
-    Float &flt = floats_[floatIndex];
-    JS_ASSERT(!flt.uses.bound());
-
-    // See comment in loadConstantDouble
-    JmpSrc j = masm.movss_ripr(dest.code());
-    JmpSrc prev = JmpSrc(flt.uses.use(j.offset()));
-    masm.setNextJump(j, prev);
-}
-
-void
-MacroAssemblerX64::finish()
-{
-    if (!doubles_.empty())
-        masm.align(sizeof(double));
-    for (size_t i = 0; i < doubles_.length(); i++) {
-        Double &dbl = doubles_[i];
-        bind(&dbl.uses);
-        masm.doubleConstant(dbl.value);
-    }
-
-    if (!floats_.empty())
-        masm.align(sizeof(float));
-    for (size_t i = 0; i < floats_.length(); i++) {
-        Float &flt = floats_[i];
-        bind(&flt.uses);
-        masm.floatConstant(flt.value);
-    }
-
-    MacroAssemblerX86Shared::finish();
-}
 
 void
 MacroAssemblerX64::setupABICall(uint32_t args)
@@ -108,7 +20,7 @@ MacroAssemblerX64::setupABICall(uint32_t args)
     inCall_ = true;
 
     args_ = args;
-    passedIntArgs_ = 0;
+    passedIntArgs_ = 0; 
     passedFloatArgs_ = 0;
     stackForCall_ = ShadowStackSpace;
 }
@@ -132,12 +44,10 @@ MacroAssemblerX64::setupUnalignedABICall(uint32_t args, const Register &scratch)
 }
 
 void
-MacroAssemblerX64::passABIArg(const MoveOperand &from, MoveOp::Type type)
+MacroAssemblerX64::passABIArg(const MoveOperand &from)
 {
     MoveOperand to;
-    switch (type) {
-      case MoveOp::FLOAT32:
-      case MoveOp::DOUBLE: {
+    if (from.isDouble()) {
         FloatRegister dest;
         if (GetFloatArgReg(passedIntArgs_, passedFloatArgs_++, &dest)) {
             if (from.isFloatReg() && from.floatReg() == dest) {
@@ -147,15 +57,10 @@ MacroAssemblerX64::passABIArg(const MoveOperand &from, MoveOp::Type type)
             to = MoveOperand(dest);
         } else {
             to = MoveOperand(StackPointer, stackForCall_);
-            switch (type) {
-              case MoveOp::FLOAT32: stackForCall_ += sizeof(float);  break;
-              case MoveOp::DOUBLE:  stackForCall_ += sizeof(double); break;
-              default: MOZ_ASSUME_UNREACHABLE("Unexpected float register class argument type");
-            }
+            stackForCall_ += sizeof(double);
         }
-        break;
-      }
-      case MoveOp::GENERAL: {
+        enoughMemory_ = moveResolver_.addMove(from, to, Move::DOUBLE);
+    } else {
         Register dest;
         if (GetIntArgReg(passedIntArgs_++, passedFloatArgs_, &dest)) {
             if (from.isGeneralReg() && from.reg() == dest) {
@@ -167,25 +72,20 @@ MacroAssemblerX64::passABIArg(const MoveOperand &from, MoveOp::Type type)
             to = MoveOperand(StackPointer, stackForCall_);
             stackForCall_ += sizeof(int64_t);
         }
-        break;
-      }
-      default:
-        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
+        enoughMemory_ = moveResolver_.addMove(from, to, Move::GENERAL);
     }
-
-    enoughMemory_ = moveResolver_.addMove(from, to, type);
 }
 
 void
 MacroAssemblerX64::passABIArg(const Register &reg)
 {
-    passABIArg(MoveOperand(reg), MoveOp::GENERAL);
+    passABIArg(MoveOperand(reg));
 }
 
 void
-MacroAssemblerX64::passABIArg(const FloatRegister &reg, MoveOp::Type type)
+MacroAssemblerX64::passABIArg(const FloatRegister &reg)
 {
-    passABIArg(MoveOperand(reg), type);
+    passABIArg(MoveOperand(reg));
 }
 
 void
@@ -196,7 +96,7 @@ MacroAssemblerX64::callWithABIPre(uint32_t *stackAdjust)
 
     if (dynamicAlignment_) {
         *stackAdjust = stackForCall_
-                     + ComputeByteAlignment(stackForCall_ + sizeof(intptr_t),
+                     + ComputeByteAlignment(stackForCall_ + STACK_SLOT_SIZE,
                                             StackAlignment);
     } else {
         *stackAdjust = stackForCall_
@@ -229,7 +129,7 @@ MacroAssemblerX64::callWithABIPre(uint32_t *stackAdjust)
 }
 
 void
-MacroAssemblerX64::callWithABIPost(uint32_t stackAdjust, MoveOp::Type result)
+MacroAssemblerX64::callWithABIPost(uint32_t stackAdjust, Result result)
 {
     freeStack(stackAdjust);
     if (dynamicAlignment_)
@@ -240,20 +140,11 @@ MacroAssemblerX64::callWithABIPost(uint32_t stackAdjust, MoveOp::Type result)
 }
 
 void
-MacroAssemblerX64::callWithABI(void *fun, MoveOp::Type result)
+MacroAssemblerX64::callWithABI(void *fun, Result result)
 {
     uint32_t stackAdjust;
     callWithABIPre(&stackAdjust);
-    call(ImmPtr(fun));
-    callWithABIPost(stackAdjust, result);
-}
-
-void
-MacroAssemblerX64::callWithABI(AsmJSImmPtr imm, MoveOp::Type result)
-{
-    uint32_t stackAdjust;
-    callWithABIPre(&stackAdjust);
-    call(imm);
+    call(ImmWord(fun));
     callWithABIPost(stackAdjust, result);
 }
 
@@ -269,12 +160,12 @@ IsIntArgReg(Register reg)
 }
 
 void
-MacroAssemblerX64::callWithABI(Address fun, MoveOp::Type result)
+MacroAssemblerX64::callWithABI(Address fun, Result result)
 {
     if (IsIntArgReg(fun.base)) {
         // Callee register may be clobbered for an argument. Move the callee to
         // r10, a volatile, non-argument register.
-        moveResolver_.addMove(MoveOperand(fun.base), MoveOperand(r10), MoveOp::GENERAL);
+        moveResolver_.addMove(MoveOperand(fun.base), MoveOperand(r10), Move::GENERAL);
         fun.base = r10;
     }
 
@@ -287,13 +178,13 @@ MacroAssemblerX64::callWithABI(Address fun, MoveOp::Type result)
 }
 
 void
-MacroAssemblerX64::handleFailureWithHandlerTail(void *handler)
+MacroAssemblerX64::handleFailureWithHandler(void *handler)
 {
     // Reserve space for exception information.
     subq(Imm32(sizeof(ResumeFromException)), rsp);
     movq(rsp, rax);
 
-    // Call the handler.
+    // Ask for an exception handler.
     setupUnalignedABICall(1, rcx);
     passABIArg(rax);
     callWithABI(handler);
@@ -302,14 +193,12 @@ MacroAssemblerX64::handleFailureWithHandlerTail(void *handler)
     Label catch_;
     Label finally;
     Label return_;
-    Label bailout;
 
     loadPtr(Address(rsp, offsetof(ResumeFromException, kind)), rax);
     branch32(Assembler::Equal, rax, Imm32(ResumeFromException::RESUME_ENTRY_FRAME), &entryFrame);
     branch32(Assembler::Equal, rax, Imm32(ResumeFromException::RESUME_CATCH), &catch_);
     branch32(Assembler::Equal, rax, Imm32(ResumeFromException::RESUME_FINALLY), &finally);
     branch32(Assembler::Equal, rax, Imm32(ResumeFromException::RESUME_FORCED_RETURN), &return_);
-    branch32(Assembler::Equal, rax, Imm32(ResumeFromException::RESUME_BAILOUT), &bailout);
 
     breakpoint(); // Invalid kind.
 
@@ -317,15 +206,15 @@ MacroAssemblerX64::handleFailureWithHandlerTail(void *handler)
     // and return from the entry frame.
     bind(&entryFrame);
     moveValue(MagicValue(JS_ION_ERROR), JSReturnOperand);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
+    movq(Operand(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
     ret();
 
     // If we found a catch handler, this must be a baseline frame. Restore state
     // and jump to the catch block.
     bind(&catch_);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, target)), rax);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, framePointer)), rbp);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
+    movq(Operand(rsp, offsetof(ResumeFromException, target)), rax);
+    movq(Operand(rsp, offsetof(ResumeFromException, framePointer)), rbp);
+    movq(Operand(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
     jmp(Operand(rax));
 
     // If we found a finally block, this must be a baseline frame. Push
@@ -333,11 +222,11 @@ MacroAssemblerX64::handleFailureWithHandlerTail(void *handler)
     // exception.
     bind(&finally);
     ValueOperand exception = ValueOperand(rcx);
-    loadValue(Address(esp, offsetof(ResumeFromException, exception)), exception);
+    loadValue(Operand(esp, offsetof(ResumeFromException, exception)), exception);
 
-    loadPtr(Address(rsp, offsetof(ResumeFromException, target)), rax);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, framePointer)), rbp);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
+    movq(Operand(rsp, offsetof(ResumeFromException, target)), rax);
+    movq(Operand(rsp, offsetof(ResumeFromException, framePointer)), rbp);
+    movq(Operand(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
 
     pushValue(BooleanValue(true));
     pushValue(exception);
@@ -345,45 +234,18 @@ MacroAssemblerX64::handleFailureWithHandlerTail(void *handler)
 
     // Only used in debug mode. Return BaselineFrame->returnValue() to the caller.
     bind(&return_);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, framePointer)), rbp);
-    loadPtr(Address(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
+    movq(Operand(rsp, offsetof(ResumeFromException, framePointer)), rbp);
+    movq(Operand(rsp, offsetof(ResumeFromException, stackPointer)), rsp);
     loadValue(Address(rbp, BaselineFrame::reverseOffsetOfReturnValue()), JSReturnOperand);
     movq(rbp, rsp);
     pop(rbp);
     ret();
-
-    // If we are bailing out to baseline to handle an exception, jump to
-    // the bailout tail stub.
-    bind(&bailout);
-    loadPtr(Address(esp, offsetof(ResumeFromException, bailoutInfo)), r9);
-    mov(ImmWord(BAILOUT_RETURN_OK), rax);
-    jmp(Operand(rsp, offsetof(ResumeFromException, target)));
 }
 
-#ifdef JSGC_GENERATIONAL
-
-void
-MacroAssemblerX64::branchPtrInNurseryRange(Register ptr, Register temp, Label *label)
+Assembler::Condition
+MacroAssemblerX64::testNegativeZero(const FloatRegister &reg, const Register &scratch)
 {
-    JS_ASSERT(ptr != temp);
-    JS_ASSERT(ptr != ScratchReg);
-
-    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
-    movePtr(ImmWord(-ptrdiff_t(nursery.start())), ScratchReg);
-    addPtr(ptr, ScratchReg);
-    branchPtr(Assembler::Below, ScratchReg, Imm32(Nursery::NurserySize), label);
+    movqsd(reg, scratch);
+    subq(Imm32(1), scratch);
+    return Overflow;
 }
-
-void
-MacroAssemblerX64::branchValueIsNurseryObject(ValueOperand value, Register temp, Label *label)
-{
-    // 'Value' representing the start of the nursery tagged as a JSObject
-    const Nursery &nursery = GetIonContext()->runtime->gcNursery();
-    Value start = ObjectValue(*reinterpret_cast<JSObject *>(nursery.start()));
-
-    movePtr(ImmWord(-ptrdiff_t(start.asRawBits())), ScratchReg);
-    addPtr(value.valueReg(), ScratchReg);
-    branchPtr(Assembler::Below, ScratchReg, Imm32(Nursery::NurserySize), label);
-}
-
-#endif

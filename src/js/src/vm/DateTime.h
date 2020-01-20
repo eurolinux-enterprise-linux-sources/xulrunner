@@ -9,11 +9,9 @@
 
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/StandardInteger.h"
 
-#include <stdint.h>
-
-#include "js/Value.h"
-#include "vm/NumericConversions.h"
+#include "NumericConversions.h"
 
 namespace js {
 
@@ -47,7 +45,7 @@ TimeClip(double time)
 {
     /* Steps 1-2. */
     if (!mozilla::IsFinite(time) || mozilla::Abs(time) > MaxTimeMagnitude)
-        return JS::GenericNaN();
+        return js_NaN;
 
     /* Step 3. */
     return ToInteger(time + (+0.0));

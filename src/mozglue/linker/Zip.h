@@ -29,9 +29,8 @@ class ZipCollection;
 class Zip: public mozilla::AtomicRefCounted<Zip>
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(Zip)
   /**
-   * Create a Zip instance for the given file name. Returns nullptr in case
+   * Create a Zip instance for the given file name. Returns NULL in case
    * of failure.
    */
   static mozilla::TemporaryRef<Zip> Create(const char *filename);
@@ -40,7 +39,7 @@ public:
    * Create a Zip instance using the given buffer.
    */
   static mozilla::TemporaryRef<Zip> Create(void *buffer, size_t size) {
-    return Create(nullptr, buffer, size);
+    return Create(NULL, buffer, size);
   }
 
 private:
@@ -75,7 +74,7 @@ public:
     /**
      * Constructor
      */
-    Stream(): compressedBuf(nullptr), compressedSize(0), uncompressedSize(0)
+    Stream(): compressedBuf(NULL), compressedSize(0), uncompressedSize(0)
             , type(STORE) { }
 
     /**
@@ -179,7 +178,7 @@ public:
       const T *ret = static_cast<const T *>(buf);
       if (ret->signature == T::magic)
         return ret;
-      return nullptr;
+      return NULL;
     }
 
     SignedEntity(uint32_t magic): signature(magic) { }

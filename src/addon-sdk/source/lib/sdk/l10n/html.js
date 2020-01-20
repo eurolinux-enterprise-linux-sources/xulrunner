@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 "use strict";
 
 module.metadata = {
@@ -46,11 +47,9 @@ function onDocumentReady2Translate(event) {
 
   try {
     // Finally display document when we finished replacing all text content
-    if (document.defaultView) {
-      let winUtils = document.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
-                                         .getInterface(Ci.nsIDOMWindowUtils);
-      winUtils.removeSheet(hideSheetUri, winUtils.USER_SHEET);
-    }
+    let winUtils = document.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+                                       .getInterface(Ci.nsIDOMWindowUtils);
+    winUtils.removeSheet(hideSheetUri, winUtils.USER_SHEET);
   }
   catch(e) {
     console.exception(e);

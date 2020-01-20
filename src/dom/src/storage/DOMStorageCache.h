@@ -20,7 +20,6 @@ namespace mozilla {
 namespace dom {
 
 class DOMStorage;
-class DOMStorageUsage;
 class DOMStorageManager;
 class DOMStorageDBBridge;
 
@@ -29,7 +28,7 @@ class DOMStorageDBBridge;
 class DOMStorageCacheBridge
 {
 public:
-  NS_IMETHOD_(MozExternalRefCountType) AddRef(void);
+  NS_IMETHOD_(nsrefcnt) AddRef(void);
   NS_IMETHOD_(void) Release(void);
 
   virtual ~DOMStorageCacheBridge() {}
@@ -56,8 +55,7 @@ public:
   virtual void LoadWait() = 0;
 
 protected:
-  ThreadSafeAutoRefCnt mRefCnt;
-  NS_DECL_OWNINGTHREAD
+  nsAutoRefCnt mRefCnt;
 };
 
 // Implementation of scope cache that is responsible for preloading data
@@ -123,7 +121,7 @@ public:
   class Data
   {
   public:
-    Data() : mOriginQuotaUsage(0) {}
+    Data() : mOriginQuotaUsage(0) { mKeys.Init(); }
     int64_t mOriginQuotaUsage;
     nsDataHashtable<nsStringHashKey, nsString> mKeys;
   };
@@ -170,10 +168,6 @@ private:
   // table is handled in the destructor by call to the manager.
   // Cache could potentially overlive the manager, hence the hard ref.
   nsRefPtr<DOMStorageManager> mManager;
-
-  // Reference to the usage counter object we check on for eTLD+1 quota limit.
-  // Obtained from the manager during initialization (Init method).
-  nsRefPtr<DOMStorageUsage> mUsage;
 
   // Timer that holds this cache alive for a while after it has been preloaded.
   nsCOMPtr<nsITimer> mKeepAliveTimer;
@@ -225,9 +219,6 @@ private:
   // DOMStorageDBThread on the parent or single process,
   // DOMStorageDBChild on the child process.
   static DOMStorageDBBridge* sDatabase;
-
-  // False until we shut the database down.
-  static bool sDatabaseDown;
 };
 
 // DOMStorageUsage
@@ -235,14 +226,10 @@ private:
 class DOMStorageUsageBridge
 {
 public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DOMStorageUsageBridge)
+  virtual ~DOMStorageUsageBridge() {}
 
   virtual const nsCString& Scope() = 0;
   virtual void LoadUsage(const int64_t aUsage) = 0;
-
-protected:
-  // Protected destructor, to discourage deletion outside of Release():
-  virtual ~DOMStorageUsageBridge() {}
 };
 
 class DOMStorageUsage : public DOMStorageUsageBridge

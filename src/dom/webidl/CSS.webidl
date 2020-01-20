@@ -10,17 +10,11 @@
  * liability, trademark and document use rules apply.
  */
 
-[Pref="layout.css.supports-rule.enabled"]
+[PrefControlled]
 interface CSS {
   [Throws, Pref="layout.css.supports-rule.enabled"]
   static boolean supports(DOMString property, DOMString value);
 
   [Throws, Pref="layout.css.supports-rule.enabled"]
   static boolean supports(DOMString conditionText);
-};
-
-// http://dev.w3.org/csswg/cssom/#the-css.escape%28%29-method
-partial interface CSS {
-  [Throws]
-  static DOMString escape(DOMString ident);
 };

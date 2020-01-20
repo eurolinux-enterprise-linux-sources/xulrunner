@@ -7,60 +7,41 @@
 #ifndef mozilla_dom_TextTrack_h
 #define mozilla_dom_TextTrack_h
 
-#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/TextTrackBinding.h"
+#include "mozilla/dom/TextTrackCue.h"
+#include "mozilla/dom/TextTrackCueList.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsDOMEventTargetHelper.h"
 #include "nsString.h"
+#include "nsWrapperCache.h"
 
 namespace mozilla {
 namespace dom {
 
-class TextTrackList;
 class TextTrackCue;
 class TextTrackCueList;
-class TextTrackRegion;
-class HTMLTrackElement;
 
-enum TextTrackSource {
-  Track,
-  AddTextTrack,
-  MediaResourceSpecific
-};
-
-// Constants for numeric readyState property values.
-enum TextTrackReadyState {
-  NotLoaded = 0U,
-  Loading = 1U,
-  Loaded = 2U,
-  FailedToLoad = 3U
-};
-
-class TextTrack MOZ_FINAL : public DOMEventTargetHelper
+class TextTrack MOZ_FINAL : public nsDOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrack, DOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(TextTrack,
+                                                         nsDOMEventTargetHelper)
 
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
+  TextTrack(nsISupports* aParent);
+  TextTrack(nsISupports* aParent,
             TextTrackKind aKind,
             const nsAString& aLabel,
-            const nsAString& aLanguage,
-            TextTrackMode aMode,
-            TextTrackReadyState aReadyState,
-            TextTrackSource aTextTrackSource);
-  TextTrack(nsPIDOMWindow* aOwnerWindow,
-            TextTrackList* aTextTrackList,
-            TextTrackKind aKind,
-            const nsAString& aLabel,
-            const nsAString& aLanguage,
-            TextTrackMode aMode,
-            TextTrackReadyState aReadyState,
-            TextTrackSource aTextTrackSource);
+            const nsAString& aLanguage);
 
-  void SetDefaultSettings();
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  nsISupports* GetParentObject() const
+  {
+    return mParent;
+  }
 
   TextTrackKind Kind() const
   {
@@ -78,7 +59,6 @@ public:
   {
     aType = mType;
   }
-  void GetId(nsAString& aId) const;
 
   TextTrackMode Mode() const
   {
@@ -94,33 +74,25 @@ public:
     return mCueList;
   }
 
-  TextTrackCueList* GetActiveCues();
-  void UpdateActiveCueList();
-  void GetActiveCueArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues);
+  TextTrackCueList* GetActiveCues() const
+  {
+    if (mMode == TextTrackMode::Disabled) {
+      return nullptr;
+    }
+    return mActiveCueList;
+  }
 
-  TextTrackReadyState ReadyState() const;
-  void SetReadyState(TextTrackReadyState aState);
-  void SetReadyState(uint32_t aReadyState);
+  // Time is in seconds.
+  void Update(double aTime);
 
   void AddCue(TextTrackCue& aCue);
-  void RemoveCue(TextTrackCue& aCue, ErrorResult& aRv);
-  void SetDirty() { mDirty = true; }
-  void SetCuesDirty();
-
-  TextTrackList* GetTextTrackList();
-  void SetTextTrackList(TextTrackList* aTextTrackList);
+  void RemoveCue(TextTrackCue& aCue);
+  void CueChanged(TextTrackCue& aCue);
 
   IMPL_EVENT_HANDLER(cuechange)
 
-  HTMLTrackElement* GetTrackElement();
-  void SetTrackElement(HTMLTrackElement* aTrackElement);
-
-  TextTrackSource GetTextTrackSource() {
-    return mTextTrackSource;
-  }
-
 private:
-  nsRefPtr<TextTrackList> mTextTrackList;
+  nsCOMPtr<nsISupports> mParent;
 
   TextTrackKind mKind;
   nsString mLabel;
@@ -130,14 +102,6 @@ private:
 
   nsRefPtr<TextTrackCueList> mCueList;
   nsRefPtr<TextTrackCueList> mActiveCueList;
-  nsRefPtr<HTMLTrackElement> mTrackElement;
-
-  uint32_t mCuePos;
-  TextTrackReadyState mReadyState;
-  bool mDirty;
-
-  // An enum that represents where the track was sourced from.
-  TextTrackSource mTextTrackSource;
 };
 
 } // namespace dom

@@ -21,14 +21,6 @@ CRCCheck on
 
 RequestExecutionLevel user
 
-; The commands inside this ifdef require NSIS 3.0a2 or greater so the ifdef can
-; be removed after we require NSIS 3.0a2 or greater.
-!ifdef NSIS_PACKEDVERSION
-  Unicode true
-  ManifestSupportedOS all
-  ManifestDPIAware true
-!endif
-
 !addplugindir ./
 
 Var TmpVal
@@ -38,7 +30,6 @@ Var AddQuickLaunchSC
 Var AddDesktopSC
 Var InstallMaintenanceService
 Var PageName
-Var PreventRebootRequired
 
 ; By defining NO_STARTMENU_DIR an installer that doesn't provide an option for
 ; an application's Start Menu PROGRAMS directory and doesn't define the
@@ -96,7 +87,6 @@ VIAddVersionKey "OriginalFilename" "setup.exe"
 !insertmacro LogQuickLaunchShortcut
 !insertmacro LogStartMenuShortcut
 !insertmacro ManualCloseAppPrompt
-!insertmacro OnStubInstallUninstall
 !insertmacro PinnedToStartMenuLnkCount
 !insertmacro RegCleanAppHandler
 !insertmacro RegCleanMain
@@ -205,24 +195,7 @@ Section "-InstallStartCleanup"
   SetOutPath "$INSTDIR"
   ${StartInstallLog} "${BrandFullName}" "${AB_CD}" "${AppVersion}" "${GREVersion}"
 
-  StrCpy $PreventRebootRequired "false"
-  ${GetParameters} $R8
-  ${GetOptions} "$R8" "/INI=" $R7
-  ${Unless} ${Errors}
-    ; The configuration file must also exist
-    ${If} ${FileExists} "$R7"
-      ReadINIStr $R8 $R7 "Install" "PreventRebootRequired"
-      ${If} $R8 == "true"
-        StrCpy $PreventRebootRequired "true"
-        StrCpy $R2 "false"
-        StrCpy $R3 "false"
-        ${OnStubInstallUninstall} "$R2" "$R3"
-      ${EndIf}
-    ${EndIf}
-  ${EndUnless}
-
-  ; Delete the app exe if present to prevent launching the app while we are
-  ; installing.
+  ; Delete the app exe to prevent launching the app while we are installing.
   ClearErrors
   ${DeleteFile} "$INSTDIR\${FileMainEXE}"
   ${If} ${Errors}
@@ -314,7 +287,7 @@ Section "-Application" APP_IDX
   ${RegCleanMain} "Software\Mozilla"
   ${RegCleanUninstall}
 !ifdef MOZ_METRO
-  ${ResetWin8PromptKeys} "HKCU" ""
+  ${ResetWin8PromptKeys}
 !endif
   ${UpdateProtocolHandlers}
 
@@ -336,6 +309,9 @@ Section "-Application" APP_IDX
     ${EndIf}
   ${EndIf}
 
+!ifdef MOZ_METRO
+  ${ResetWin8MetroSplash}
+!endif
   ${RemoveDeprecatedKeys}
 
   ; The previous installer adds several regsitry values to both HKLM and HKCU.
@@ -402,22 +378,12 @@ Section "-Application" APP_IDX
       WriteRegDWORD HKCU "$0" "IconsVisible" 0
     ${EndIf}
 !ifdef MOZ_METRO
-    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
-                                        "FirefoxURL" \
-                                        "FirefoxHTML"
+    ${CleanupMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID}
     ${AddMetroBrowserHandlerValues} ${DELEGATE_EXECUTE_HANDLER_ID} \
                                     "$INSTDIR\CommandExecuteHandler.exe" \
                                     $AppUserModelID \
                                     "FirefoxURL" \
                                     "FirefoxHTML"
-!else
-  ; The metro browser is not enabled by the mozconfig.
-  ${If} ${AtLeastWin8}
-    ${RemoveDEHRegistration} ${DELEGATE_EXECUTE_HANDLER_ID} \
-                             $AppUserModelID \
-                             "FirefoxURL" \
-                             "FirefoxHTML"
-  ${EndIf}
 !endif
   ${EndIf}
 
@@ -602,10 +568,6 @@ Section "-InstallEndCleanup"
 
   ${InstallEndCleanupCommon}
 
-  ${If} $PreventRebootRequired == "true"
-    SetRebootFlag false
-  ${EndIf}
-
   ${If} ${RebootFlag}
     ; When a reboot is required give SHChangeNotify time to finish the
     ; refreshing the icons so the OS doesn't display the icons from helper.exe
@@ -775,25 +737,7 @@ Function LaunchApp
   ${GetParameters} $0
   ${GetOptions} "$0" "/UAC:" $1
   ${If} ${Errors}
-    StrCpy $1 "0"
-    StrCpy $2 "0"
-!ifdef MOZ_METRO
-    ; Check to see if this install location is currently set as the
-    ; default browser.
-    AppAssocReg::QueryAppIsDefaultAll "${AppRegName}" "effective"
-    Pop $1
-    ; Check for a last run type to see if metro was the last browser
-    ; front end in use.
-    ReadRegDWORD $2 HKCU "Software\Mozilla\Firefox" "MetroLastAHE"
-!endif
-    ${If} $1 == "1"
-    ${AndIf} $2 == "1" ; 1 equals AHE_IMMERSIVE
-      ; Launch into metro
-      Exec "$\"$INSTDIR\CommandExecuteHandler.exe$\" --launchmetro"
-    ${Else}
-      ; Launch into desktop
-      Exec "$\"$INSTDIR\${FileMainEXE}$\""
-    ${EndIf}
+    Exec "$\"$INSTDIR\${FileMainEXE}$\""
   ${Else}
     GetFunctionAddress $0 LaunchAppFromElevatedProcess
     UAC::ExecCodeSegment $0
@@ -810,25 +754,7 @@ Function LaunchAppFromElevatedProcess
   ; Set our current working directory to the application's install directory
   ; otherwise the 7-Zip temp directory will be in use and won't be deleted.
   SetOutPath "$1"
-  StrCpy $2 "0"
-  StrCpy $3 "0"
-!ifdef MOZ_METRO
-  ; Check to see if this install location is currently set as the
-  ; default browser.
-  AppAssocReg::QueryAppIsDefaultAll "${AppRegName}" "effective"
-  Pop $2
-  ; Check for a last run type to see if metro was the last browser
-  ; front end in use.
-  ReadRegDWORD $3 HKCU "Software\Mozilla\Firefox" "MetroLastAHE"
-!endif
-  ${If} $2 == "1"
-  ${AndIf} $3 == "1" ; 1 equals AHE_IMMERSIVE
-    ; Launch into metro
-    Exec "$\"$1\CommandExecuteHandler.exe$\" --launchmetro"
-  ${Else}
-    ; Launch into desktop
-    Exec "$\"$0$\""
-  ${EndIf}
+  Exec "$\"$0$\""
 FunctionEnd
 
 ################################################################################
@@ -1121,14 +1047,6 @@ Function .onInit
   ${SetBrandNameVars} "$EXEDIR\core\distribution\setup.ini"
 
   ${InstallOnInitCommon} "$(WARN_MIN_SUPPORTED_OS_MSG)"
-
-; The commands inside this ifndef are needed prior to NSIS 3.0a2 and can be
-; removed after we require NSIS 3.0a2 or greater.
-!ifndef NSIS_PACKEDVERSION
-  ${If} ${AtLeastWinVista}
-    System::Call 'user32::SetProcessDPIAware()'
-  ${EndIf}
-!endif
 
   !insertmacro InitInstallOptionsFile "options.ini"
   !insertmacro InitInstallOptionsFile "shortcuts.ini"

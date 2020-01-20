@@ -448,27 +448,27 @@ void
 nsFrameUtil::Tag::ToString(nsString& aResult)
 {
   aResult.Truncate();
-  aResult.Append(char16_t('<'));
+  aResult.Append(PRUnichar('<'));
   if (type == close) {
-    aResult.Append(char16_t('/'));
+    aResult.Append(PRUnichar('/'));
   }
   aResult.AppendASCII(name);
   if (0 != num) {
     int32_t i, n = num;
     for (i = 0; i < n; i++) {
-      aResult.Append(char16_t(' '));
+      aResult.Append(PRUnichar(' '));
       aResult.AppendASCII(attributes[i]);
       if (values[i]) {
         aResult.AppendLiteral("=\"");
         aResult.AppendASCII(values[i]);
-        aResult.Append(char16_t('\"'));
+        aResult.Append(PRUnichar('\"'));
       }
     }
   }
   if (type == openClose) {
-    aResult.Append(char16_t('/'));
+    aResult.Append(PRUnichar('/'));
   }
-  aResult.Append(char16_t('>'));
+  aResult.Append(PRUnichar('>'));
 }
 
 //----------------------------------------------------------------------
@@ -495,7 +495,7 @@ nsFrameUtil::~nsFrameUtil()
 {
 }
 
-NS_IMPL_ISUPPORTS(nsFrameUtil, nsIFrameUtil)
+NS_IMPL_ISUPPORTS1(nsFrameUtil, nsIFrameUtil)
 
 void
 nsFrameUtil::DumpNode(Node* aNode, FILE* aOutputFile, int32_t aIndent)

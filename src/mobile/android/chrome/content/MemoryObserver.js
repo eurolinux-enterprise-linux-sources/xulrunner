@@ -50,7 +50,6 @@ var MemoryObserver = {
     browser.__SS_data = data;
     browser.__SS_extdata = extra;
     browser.__SS_restore = true;
-    browser.setAttribute("pending", "true");
   },
 
   gc: function() {
@@ -60,6 +59,6 @@ var MemoryObserver = {
 
   dumpMemoryStats: function(aLabel) {
     let memDumper = Cc["@mozilla.org/memory-info-dumper;1"].getService(Ci.nsIMemoryInfoDumper);
-    memDumper.dumpMemoryInfoToTempDir(aLabel, /* minimize = */ false);
+    memDumper.dumpMemoryInfoToTempDir(aLabel, false, true);
   },
 };

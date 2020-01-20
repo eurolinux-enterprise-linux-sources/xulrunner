@@ -6,6 +6,8 @@
 
 #include "SpeechRecognitionAlternative.h"
 
+#include "nsContentUtils.h"
+
 #include "mozilla/dom/SpeechRecognitionAlternativeBinding.h"
 
 #include "SpeechRecognition.h"
@@ -34,15 +36,16 @@ SpeechRecognitionAlternative::~SpeechRecognitionAlternative()
 }
 
 JSObject*
-SpeechRecognitionAlternative::WrapObject(JSContext* aCx)
+SpeechRecognitionAlternative::WrapObject(JSContext* aCx,
+                                         JS::Handle<JSObject*> aScope)
 {
-  return SpeechRecognitionAlternativeBinding::Wrap(aCx, this);
+  return SpeechRecognitionAlternativeBinding::Wrap(aCx, aScope, this);
 }
 
 nsISupports*
 SpeechRecognitionAlternative::GetParentObject() const
 {
-  return static_cast<DOMEventTargetHelper*>(mParent.get());
+  return static_cast<nsDOMEventTargetHelper*>(mParent.get());
 }
 
 void

@@ -4,14 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ContentChild.h"
-#include "mozilla/dom/PermissionMessageUtils.h"
 #include "nsXULAppAPI.h"
 
 #include "nsAlertsService.h"
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "AndroidBridge.h"
-using namespace mozilla::widget::android;
 #else
 
 #include "nsXPCOM.h"
@@ -26,7 +24,7 @@ using namespace mozilla;
 
 using mozilla::dom::ContentChild;
 
-NS_IMPL_ISUPPORTS(nsAlertsService, nsIAlertsService, nsIAlertsProgressListener)
+NS_IMPL_THREADSAFE_ISUPPORTS2(nsAlertsService, nsIAlertsService, nsIAlertsProgressListener)
 
 nsAlertsService::nsAlertsService()
 {
@@ -68,8 +66,7 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
                                                      nsIObserver * aAlertListener,
                                                      const nsAString & aAlertName,
                                                      const nsAString & aBidi,
-                                                     const nsAString & aLang,
-                                                     nsIPrincipal * aPrincipal)
+                                                     const nsAString & aLang)
 {
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cpc = ContentChild::GetSingleton();
@@ -84,8 +81,7 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
                                    PromiseFlatString(aAlertCookie),
                                    PromiseFlatString(aAlertName),
                                    PromiseFlatString(aBidi),
-                                   PromiseFlatString(aLang),
-                                   IPC::Principal(aPrincipal));
+                                   PromiseFlatString(aLang));
     return NS_OK;
   }
 
@@ -100,13 +96,13 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
   if (sysAlerts) {
     return sysAlerts->ShowAlertNotification(aImageUrl, aAlertTitle, aAlertText, aAlertTextClickable,
                                             aAlertCookie, aAlertListener, aAlertName,
-                                            aBidi, aLang, IPC::Principal(aPrincipal));
+                                            aBidi, aLang);
   }
 
   if (!ShouldShowAlert()) {
     // Do not display the alert. Instead call alertfinished and get out.
     if (aAlertListener)
-      aAlertListener->Observe(nullptr, "alertfinished", PromiseFlatString(aAlertCookie).get());
+      aAlertListener->Observe(NULL, "alertfinished", PromiseFlatString(aAlertCookie).get());
     return NS_OK;
   }
 
@@ -118,24 +114,23 @@ NS_IMETHODIMP nsAlertsService::ShowAlertNotification(const nsAString & aImageUrl
 #endif // !MOZ_WIDGET_ANDROID
 }
 
-NS_IMETHODIMP nsAlertsService::CloseAlert(const nsAString& aAlertName,
-                                          nsIPrincipal* aPrincipal)
+NS_IMETHODIMP nsAlertsService::CloseAlert(const nsAString& aAlertName)
 {
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
     ContentChild* cpc = ContentChild::GetSingleton();
-    cpc->SendCloseAlert(nsAutoString(aAlertName), IPC::Principal(aPrincipal));
+    cpc->SendCloseAlert(nsAutoString(aAlertName));
     return NS_OK;
   }
 
 #ifdef MOZ_WIDGET_ANDROID
-  mozilla::widget::android::GeckoAppShell::CloseNotification(aAlertName);
+  mozilla::AndroidBridge::Bridge()->CloseNotification(aAlertName);
   return NS_OK;
 #else
 
   // Try the system notification service.
   nsCOMPtr<nsIAlertsService> sysAlerts(do_GetService(NS_SYSTEMALERTSERVICE_CONTRACTID));
   if (sysAlerts) {
-    return sysAlerts->CloseAlert(aAlertName, nullptr);
+    return sysAlerts->CloseAlert(aAlertName);
   }
 
   return mXULAlerts.CloseAlert(aAlertName);
@@ -149,9 +144,7 @@ NS_IMETHODIMP nsAlertsService::OnProgress(const nsAString & aAlertName,
                                           const nsAString & aAlertText)
 {
 #ifdef MOZ_WIDGET_ANDROID
-  mozilla::widget::android::GeckoAppShell::AlertsProgressListener_OnProgress(aAlertName,
-                                                                             aProgress, aProgressMax,
-                                                                             aAlertText);
+  mozilla::AndroidBridge::Bridge()->AlertsProgressListener_OnProgress(aAlertName, aProgress, aProgressMax, aAlertText);
   return NS_OK;
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -161,7 +154,7 @@ NS_IMETHODIMP nsAlertsService::OnProgress(const nsAString & aAlertName,
 NS_IMETHODIMP nsAlertsService::OnCancel(const nsAString & aAlertName)
 {
 #ifdef MOZ_WIDGET_ANDROID
-  mozilla::widget::android::GeckoAppShell::CloseNotification(aAlertName);
+  mozilla::AndroidBridge::Bridge()->CloseNotification(aAlertName);
   return NS_OK;
 #else
   return NS_ERROR_NOT_IMPLEMENTED;

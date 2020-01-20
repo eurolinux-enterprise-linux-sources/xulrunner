@@ -9,7 +9,6 @@
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
 #include "mozilla/dom/Element.h"
-#include "prtime.h"
 
 namespace mozilla {
 namespace dom {
@@ -17,19 +16,11 @@ namespace dom {
 //----------------------------------------------------------------------
 // Implementation
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(SVGZoomEvent, UIEvent, mPreviousTranslate, mNewTranslate)
-
-NS_IMPL_ADDREF_INHERITED(SVGZoomEvent, UIEvent)
-NS_IMPL_RELEASE_INHERITED(SVGZoomEvent, UIEvent)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SVGZoomEvent)
-NS_INTERFACE_MAP_END_INHERITING(UIEvent)
-
 SVGZoomEvent::SVGZoomEvent(EventTarget* aOwner,
                            nsPresContext* aPresContext,
-                           WidgetGUIEvent* aEvent)
-  : UIEvent(aOwner, aPresContext,
-            aEvent ? aEvent : new WidgetGUIEvent(false, NS_SVG_ZOOM, 0))
+                           nsGUIEvent* aEvent)
+  : nsDOMUIEvent(aOwner, aPresContext,
+                 aEvent ? aEvent : new nsGUIEvent(false, NS_SVG_ZOOM, 0))
   , mPreviousScale(0)
   , mNewScale(0)
 {
@@ -92,7 +83,7 @@ nsresult
 NS_NewDOMSVGZoomEvent(nsIDOMEvent** aInstancePtrResult,
                       mozilla::dom::EventTarget* aOwner,
                       nsPresContext* aPresContext,
-                      mozilla::WidgetGUIEvent* aEvent)
+                      nsGUIEvent *aEvent)
 {
   mozilla::dom::SVGZoomEvent* it =
     new mozilla::dom::SVGZoomEvent(aOwner, aPresContext, aEvent);

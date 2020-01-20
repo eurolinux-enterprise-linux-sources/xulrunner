@@ -17,19 +17,22 @@
 /* Definitions of functions and operators that allocate memory. */
 #if !defined(XPCOM_GLUE) && !defined(NS_NO_XPCOM) && !defined(MOZ_NO_MOZALLOC)
 #  include "mozilla/mozalloc.h"
+#  include "mozilla/mozalloc_macro_wrappers.h"
 #endif
 
 /**
  * Incorporate the integer data types which XPCOM uses.
  */
-#include <stddef.h>
-#include <stdint.h>
+#include "mozilla/StandardInteger.h"
+#include "stddef.h"
 
-#ifdef __cplusplus
-#  include "mozilla/NullPtr.h"
-#endif
+#include "mozilla/NullPtr.h"
 
-#include "mozilla/RefCountType.h"
+/*
+ * This is for functions that are like malloc_usable_size.  Such functions are
+ * used for measuring the size of data structures.
+ */
+typedef size_t(*nsMallocSizeOfFun)(const void *p);
 
 /* Core XPCOM declarations. */
 
@@ -114,7 +117,7 @@
  *           NS_HIDDEN_(int) NS_FASTCALL func2(char *foo);
  */
 
-#if defined(__i386__) && defined(__GNUC__)
+#if defined(__i386__) && defined(__GNUC__) && !defined(XP_OS2)
 #define NS_FASTCALL __attribute__ ((regparm (3), stdcall))
 #define NS_CONSTRUCTOR_FASTCALL __attribute__ ((regparm (3), stdcall))
 #elif defined(XP_WIN) && !defined(_WIN64)
@@ -135,13 +138,7 @@
 #define NS_IMETHODIMP_(type) type __stdcall
 #define NS_METHOD_(type) type __stdcall
 #define NS_CALLBACK_(_type, _name) _type (__stdcall * _name)
-#ifndef _WIN64
-// Win64 has only one calling convention.  __stdcall will be ignored by the compiler.
 #define NS_STDCALL __stdcall
-#define NS_HAVE_STDCALL
-#else
-#define NS_STDCALL
-#endif
 #define NS_FROZENCALL __cdecl
 
 /*
@@ -151,6 +148,21 @@
 
 #define NS_EXPORT_STATIC_MEMBER_(type) type
 #define NS_IMPORT_STATIC_MEMBER_(type) type
+
+#elif defined(XP_OS2)
+
+#define NS_IMPORT __declspec(dllimport)
+#define NS_IMPORT_(type) type __declspec(dllimport)
+#define NS_EXPORT __declspec(dllexport)
+#define NS_EXPORT_(type) type __declspec(dllexport)
+#define NS_IMETHOD_(type) virtual type
+#define NS_IMETHODIMP_(type) type
+#define NS_METHOD_(type) type
+#define NS_CALLBACK_(_type, _name) _type (* _name)
+#define NS_STDCALL
+#define NS_FROZENCALL
+#define NS_EXPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
+#define NS_IMPORT_STATIC_MEMBER_(type) NS_EXTERNAL_VIS_(type)
 
 #else
 
@@ -229,7 +241,7 @@
 #define IMPORT_XPCOM_API(type) NS_EXTERN_C NS_IMPORT type NS_FROZENCALL
 #define GLUE_XPCOM_API(type) NS_EXTERN_C NS_HIDDEN_(type) NS_FROZENCALL
 
-#ifdef IMPL_LIBXUL
+#ifdef _IMPL_NS_COM
 #define XPCOM_API(type) EXPORT_XPCOM_API(type)
 #elif defined(XPCOM_GLUE)
 #define XPCOM_API(type) GLUE_XPCOM_API(type)
@@ -259,7 +271,7 @@
 #if (defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING))
 /* Make refcnt logging part of the build. This doesn't mean that
  * actual logging will occur (that requires a separate enable; see
- * nsTraceRefcnt and nsISupportsImpl.h for more information).  */
+ * nsTraceRefcnt.h for more information).  */
 #define NS_BUILD_REFCNT_LOGGING
 #endif
 
@@ -299,7 +311,40 @@
  */
 #include "nsError.h"
 
-typedef MozRefCountType nsrefcnt;
+/**
+ * Reference count values
+ *
+ * This is the return type for AddRef() and Release() in nsISupports.
+ * IUnknown of COM returns an unsigned long from equivalent functions.
+ * The following ifdef exists to maintain binary compatibility with
+ * IUnknown.
+ */
+#ifdef XP_WIN
+typedef unsigned long nsrefcnt;
+#else
+typedef uint32_t nsrefcnt;
+#endif
+
+/* ------------------------------------------------------------------------ */
+/* Casting macros for hiding C++ features from older compilers */
+
+  /* under VC++ (Windows), we don't have autoconf yet */
+#if defined(_MSC_VER)
+  #define HAVE_CPP_2BYTE_WCHAR_T
+#endif
+
+#ifndef __PRUNICHAR__
+#define __PRUNICHAR__
+  /* For now, don't use wchar_t on Unix because it breaks the Netscape
+   * commercial build.  When this is fixed there will be no need for the
+   * |reinterpret_cast| in nsLiteralString.h either.
+   */
+  #if defined(HAVE_CPP_2BYTE_WCHAR_T) && defined(XP_WIN)
+    typedef wchar_t PRUnichar;
+  #else
+    typedef uint16_t PRUnichar;
+  #endif
+#endif
 
 /*
  * Use these macros to do 64bit safe pointer conversions.

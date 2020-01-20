@@ -10,6 +10,11 @@
  * <copied from="test_authentication.js"/>
  */
 
+const Cc = Components.classes;
+const Ci = Components.interfaces;
+const Cu = Components.utils;
+const Cr = Components.results;
+
 Cu.import("resource://testing-common/httpd.js");
 
 const FLAG_RETURN_FALSE   = 1 << 0;
@@ -172,12 +177,6 @@ var listener = {
       // If we expect 200, the request should have succeeded
       do_check_eq(this.expectedCode == 200, request.requestSucceeded);
 
-      var cookie = "";
-      try {
-        cookie = request.getRequestHeader("Cookie");
-      } catch (e) { }
-      do_check_eq(cookie, "");
-
     } catch (e) {
       do_throw("Unexpected exception: " + e);
     }
@@ -227,12 +226,12 @@ function run_test() {
   httpserv = new HttpServer();
   httpserv.registerPathHandler("/", proxyAuthHandler);
   httpserv.identity.add("http", "somesite", 80);
-  httpserv.start(-1);
+  httpserv.start(4444);
 
   const prefs = Cc["@mozilla.org/preferences-service;1"]
                          .getService(Ci.nsIPrefBranch);
   prefs.setCharPref("network.proxy.http", "localhost");
-  prefs.setIntPref("network.proxy.http_port", httpserv.identity.primaryPort);
+  prefs.setIntPref("network.proxy.http_port", 4444);
   prefs.setCharPref("network.proxy.no_proxies_on", "");
   prefs.setIntPref("network.proxy.type", 1);
 
@@ -262,25 +261,6 @@ function test_all_ok() {
   dump("\ntest: all ok\n");
   var chan = makeChan();
   chan.notificationCallbacks = new Requestor(0, 0);
-  listener.expectedCode = 200; // OK
-  chan.asyncOpen(listener, null);
-  do_test_pending();
-}
-
-function test_proxy_407_cookie() {
-  var chan = makeChan();
-  chan.notificationCallbacks = new Requestor(FLAG_RETURN_FALSE, 0);
-  chan.setRequestHeader("X-Set-407-Cookie", "1", false);
-  listener.expectedCode = 407; // Proxy Unauthorized
-  chan.asyncOpen(listener, null);
-
-  do_test_pending();
-}
-
-function test_proxy_200_cookie() {
-  var chan = makeChan();
-  chan.notificationCallbacks = new Requestor(0, 0);
-  chan.setRequestHeader("X-Set-407-Cookie", "1", false);
   listener.expectedCode = 200; // OK
   chan.asyncOpen(listener, null);
   do_test_pending();
@@ -326,7 +306,6 @@ function test_proxy_wrongpw_host_returnfalse() {
 }
 
 var tests = [test_proxy_returnfalse, test_proxy_wrongpw, test_all_ok,
-        test_proxy_407_cookie, test_proxy_200_cookie,
         test_host_returnfalse, test_host_wrongpw,
         test_proxy_wrongpw_host_wrongpw, test_proxy_wrongpw_host_returnfalse];
 
@@ -357,9 +336,6 @@ function proxyAuthHandler(metadata, response) {
           "Unauthorized by HTTP proxy");
       response.setHeader("Proxy-Authenticate",
           'Basic realm="' + realm + '"', false);
-      if (metadata.hasHeader("X-Set-407-Cookie")) {
-          response.setHeader("Set-Cookie", "chewy", false);
-      }
       body = "failed";
       response.bodyOutputStream.write(body, body.length);
     }

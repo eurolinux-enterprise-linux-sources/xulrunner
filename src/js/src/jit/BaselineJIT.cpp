@@ -4,25 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/BaselineJIT.h"
+#include "BaselineCompiler.h"
+#include "BaselineIC.h"
+#include "BaselineJIT.h"
+#include "CompileInfo.h"
+#include "IonSpewer.h"
+#include "IonFrames-inl.h"
 
-#include "mozilla/MemoryReporting.h"
-
-#include "jit/BaselineCompiler.h"
-#include "jit/BaselineIC.h"
-#include "jit/CompileInfo.h"
-#include "jit/IonSpewer.h"
-#include "jit/JitCommon.h"
-#include "vm/Interpreter.h"
-#include "vm/TraceLogging.h"
-
-#include "jsgcinlines.h"
-#include "jsobjinlines.h"
-#include "jsopcodeinlines.h"
-#include "jsscriptinlines.h"
-
-#include "jit/IonFrames-inl.h"
 #include "vm/Stack-inl.h"
+
+#include "jsopcodeinlines.h"
 
 using namespace js;
 using namespace js::jit;
@@ -40,18 +31,14 @@ PCMappingSlotInfo::ToSlotLocation(const StackValue *stackVal)
     return SlotIgnore;
 }
 
-BaselineScript::BaselineScript(uint32_t prologueOffset, uint32_t epilogueOffset,
-                               uint32_t spsPushToggleOffset, uint32_t postDebugPrologueOffset)
-  : method_(nullptr),
-    templateScope_(nullptr),
+BaselineScript::BaselineScript(uint32_t prologueOffset, uint32_t spsPushToggleOffset)
+  : method_(NULL),
     fallbackStubSpace_(),
     prologueOffset_(prologueOffset),
-    epilogueOffset_(epilogueOffset),
 #ifdef DEBUG
     spsOn_(false),
 #endif
     spsPushToggleOffset_(spsPushToggleOffset),
-    postDebugPrologueOffset_(postDebugPrologueOffset),
     flags_(0)
 { }
 
@@ -59,7 +46,7 @@ static const size_t BASELINE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 4096;
 static const unsigned BASELINE_MAX_ARGS_LENGTH = 20000;
 
 static bool
-CheckFrame(InterpreterFrame *fp)
+CheckFrame(StackFrame *fp)
 {
     if (fp->isGeneratorFrame()) {
         IonSpew(IonSpew_BaselineAbort, "generator frame");
@@ -91,20 +78,11 @@ IsJSDEnabled(JSContext *cx)
 static IonExecStatus
 EnterBaseline(JSContext *cx, EnterJitData &data)
 {
-    if (data.osrFrame) {
-        // Check for potential stack overflow before OSR-ing.
-        uint8_t spDummy;
-        uint32_t extra = BaselineFrame::Size() + (data.osrNumStackValues * sizeof(Value));
-        uint8_t *checkSp = (&spDummy) - extra;
-        JS_CHECK_RECURSION_WITH_SP(cx, checkSp, return IonExec_Aborted);
-    } else {
-        JS_CHECK_RECURSION(cx, return IonExec_Aborted);
-    }
-
+    JS_CHECK_RECURSION(cx, return IonExec_Aborted);
     JS_ASSERT(jit::IsBaselineEnabled(cx));
     JS_ASSERT_IF(data.osrFrame, CheckFrame(data.osrFrame));
 
-    EnterJitCode enter = cx->runtime()->jitRuntime()->enterBaseline();
+    EnterIonCode enter = cx->compartment()->ionCompartment()->enterBaselineJIT();
 
     // Caller must construct |this| before invoking the Ion function.
     JS_ASSERT_IF(data.constructing, data.maxArgv[0].isObject());
@@ -112,7 +90,10 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
     data.result.setInt32(data.numActualArgs);
     {
         AssertCompartmentUnchanged pcc(cx);
+        IonContext ictx(cx, NULL);
         JitActivation activation(cx, data.constructing);
+        JSAutoResolveFlags rf(cx, RESOLVE_INFER);
+        AutoFlushInhibitor afi(cx->compartment()->ionCompartment());
 
         if (data.osrFrame)
             data.osrFrame->setRunningInJit();
@@ -120,8 +101,8 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
         JS_ASSERT_IF(data.osrFrame, !IsJSDEnabled(cx));
 
         // Single transition point from Interpreter to Baseline.
-        CALL_GENERATED_CODE(enter, data.jitcode, data.maxArgc, data.maxArgv, data.osrFrame, data.calleeToken,
-                            data.scopeChain.get(), data.osrNumStackValues, data.result.address());
+        enter(data.jitcode, data.maxArgc, data.maxArgv, data.osrFrame, data.calleeToken,
+              data.scopeChain, data.osrNumStackValues, data.result.address());
 
         if (data.osrFrame)
             data.osrFrame->clearRunningInJit();
@@ -134,7 +115,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
         data.result = data.maxArgv[0];
 
     // Release temporary buffer used for OSR into Ion.
-    cx->runtime()->getJitRuntime(cx)->freeOsrTempData();
+    cx->runtime()->getIonRuntime(cx)->freeOsrTempData();
 
     JS_ASSERT_IF(data.result.isMagic(), data.result.isMagic(JS_ION_ERROR));
     return data.result.isMagic() ? IonExec_Error : IonExec_Ok;
@@ -161,7 +142,7 @@ jit::EnterBaselineMethod(JSContext *cx, RunState &state)
 }
 
 IonExecStatus
-jit::EnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, jsbytecode *pc)
+jit::EnterBaselineAtBranch(JSContext *cx, StackFrame *fp, jsbytecode *pc)
 {
     JS_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
 
@@ -176,7 +157,7 @@ jit::EnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, jsbytecode *pc)
         data.jitcode += MacroAssembler::ToggledCallSize();
 
     data.osrFrame = fp;
-    data.osrNumStackValues = fp->script()->nfixed() + cx->interpreterRegs().stackDepth();
+    data.osrNumStackValues = fp->script()->nfixed + cx->interpreterRegs().stackDepth();
 
     RootedValue thisv(cx);
 
@@ -185,7 +166,7 @@ jit::EnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, jsbytecode *pc)
         data.numActualArgs = fp->numActualArgs();
         data.maxArgc = Max(fp->numActualArgs(), fp->numFormalArgs()) + 1; // +1 = include |this|
         data.maxArgv = fp->argv() - 1; // -1 = include |this|
-        data.scopeChain = nullptr;
+        data.scopeChain = NULL;
         data.calleeToken = CalleeToToken(&fp->callee());
     } else {
         thisv = fp->thisValue();
@@ -202,10 +183,6 @@ jit::EnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, jsbytecode *pc)
             data.calleeToken = CalleeToToken(fp->script());
     }
 
-    TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
-    TraceLogStopEvent(logger, TraceLogger::Interpreter);
-    TraceLogStartEvent(logger, TraceLogger::Baseline);
-
     IonExecStatus status = EnterBaseline(cx, data);
     if (status != IonExec_Ok)
         return status;
@@ -214,15 +191,13 @@ jit::EnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, jsbytecode *pc)
     return IonExec_Ok;
 }
 
-MethodStatus
-jit::BaselineCompile(JSContext *cx, JSScript *script)
+static MethodStatus
+BaselineCompile(JSContext *cx, HandleScript script)
 {
     JS_ASSERT(!script->hasBaselineScript());
     JS_ASSERT(script->canBaselineCompile());
-    JS_ASSERT(IsBaselineEnabled(cx));
-    LifoAlloc alloc(BASELINE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
 
-    script->ensureNonLazyCanonicalFunction(cx);
+    LifoAlloc alloc(BASELINE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
 
     TempAllocator *temp = alloc.new_<TempAllocator>(&alloc);
     if (!temp)
@@ -230,17 +205,18 @@ jit::BaselineCompile(JSContext *cx, JSScript *script)
 
     IonContext ictx(cx, temp);
 
-    BaselineCompiler compiler(cx, *temp, script);
+    BaselineCompiler compiler(cx, script);
     if (!compiler.init())
         return Method_Error;
 
+    AutoFlushCache afc("BaselineJIT", cx->runtime()->ionRuntime());
     MethodStatus status = compiler.compile();
 
     JS_ASSERT_IF(status == Method_Compiled, script->hasBaselineScript());
     JS_ASSERT_IF(status != Method_Compiled, !script->hasBaselineScript());
 
     if (status == Method_CantCompile)
-        script->setBaselineScript(cx, BASELINE_DISABLED_SCRIPT);
+        script->setBaselineScript(BASELINE_DISABLED_SCRIPT);
 
     return status;
 }
@@ -254,13 +230,10 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
     if (!script->canBaselineCompile())
         return Method_Skipped;
 
-    if (script->length() > BaselineScript::MAX_JSSCRIPT_LENGTH)
+    if (script->length > BaselineScript::MAX_JSSCRIPT_LENGTH)
         return Method_CantCompile;
 
-    if (script->nslots() > BaselineScript::MAX_JSSCRIPT_SLOTS)
-        return Method_CantCompile;
-
-    if (!cx->compartment()->ensureJitCompartmentExists(cx))
+    if (!cx->compartment()->ensureIonCompartmentExists(cx))
         return Method_Error;
 
     if (script->hasBaselineScript())
@@ -269,23 +242,17 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
     // Check script use count. However, always eagerly compile scripts if JSD
     // is enabled, so that we don't have to OSR and don't have to update the
     // frame pointer stored in JSD's frames list.
-    //
-    // Also eagerly compile if we are in parallel warmup, the point of which
-    // is to gather type information so that the script may be compiled for
-    // parallel execution. We want to avoid the situation of OSRing during
-    // warmup and only gathering type information for the loop, and not the
-    // rest of the function.
-    if (IsJSDEnabled(cx) || cx->runtime()->forkJoinWarmup > 0) {
+    if (IsJSDEnabled(cx)) {
         if (osr)
             return Method_Skipped;
-    } else if (script->incUseCount() <= js_JitOptions.baselineUsesBeforeCompile) {
+    } else if (script->incUseCount() <= js_IonOptions.baselineUsesBeforeCompile) {
         return Method_Skipped;
     }
 
-    if (script->isCallsiteClone()) {
+    if (script->isCallsiteClone) {
         // Ensure the original function is compiled too, so that bailouts from
         // Ion code have a BaselineScript to resume into.
-        RootedScript original(cx, script->donorFunction()->nonLazyScript());
+        RootedScript original(cx, script->originalFunction()->nonLazyScript());
         JS_ASSERT(original != script);
 
         if (!original->canBaselineCompile())
@@ -302,12 +269,12 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
 }
 
 MethodStatus
-jit::CanEnterBaselineAtBranch(JSContext *cx, InterpreterFrame *fp, bool newType)
+jit::CanEnterBaselineAtBranch(JSContext *cx, StackFrame *fp, bool newType)
 {
    // If constructing, allocate a new |this| object.
    if (fp->isConstructing() && fp->functionThis().isPrimitive()) {
        RootedObject callee(cx, &fp->callee());
-       RootedObject obj(cx, CreateThisForFunction(cx, callee, newType ? SingletonObject : GenericObject));
+       RootedObject obj(cx, CreateThisForFunction(cx, callee, newType));
        if (!obj)
            return Method_Skipped;
        fp->functionThis().setObject(*obj);
@@ -334,10 +301,7 @@ jit::CanEnterBaselineMethod(JSContext *cx, RunState &state)
         // If constructing, allocate a new |this| object.
         if (invoke.constructing() && invoke.args().thisv().isPrimitive()) {
             RootedObject callee(cx, &invoke.args().callee());
-            RootedObject obj(cx, CreateThisForFunction(cx, callee,
-                                                       invoke.useNewType()
-                                                       ? SingletonObject
-                                                       : GenericObject));
+            RootedObject obj(cx, CreateThisForFunction(cx, callee, invoke.useNewType()));
             if (!obj)
                 return Method_Skipped;
             invoke.args().setThis(ObjectValue(*obj));
@@ -358,38 +322,34 @@ jit::CanEnterBaselineMethod(JSContext *cx, RunState &state)
     return CanEnterBaselineJIT(cx, script, /* osr = */false);
 };
 
-BaselineScript *
-BaselineScript::New(JSContext *cx, uint32_t prologueOffset, uint32_t epilogueOffset,
-                    uint32_t spsPushToggleOffset, uint32_t postDebugPrologueOffset,
-                    size_t icEntries, size_t pcMappingIndexEntries, size_t pcMappingSize,
-                    size_t bytecodeTypeMapEntries)
-{
-    static const unsigned DataAlignment = sizeof(uintptr_t);
+// Be safe, align IC entry list to 8 in all cases.
+static const unsigned DataAlignment = sizeof(uintptr_t);
 
+BaselineScript *
+BaselineScript::New(JSContext *cx, uint32_t prologueOffset,
+                    uint32_t spsPushToggleOffset, size_t icEntries,
+                    size_t pcMappingIndexEntries, size_t pcMappingSize)
+{
     size_t paddedBaselineScriptSize = AlignBytes(sizeof(BaselineScript), DataAlignment);
 
     size_t icEntriesSize = icEntries * sizeof(ICEntry);
     size_t pcMappingIndexEntriesSize = pcMappingIndexEntries * sizeof(PCMappingIndexEntry);
-    size_t bytecodeTypeMapSize = bytecodeTypeMapEntries * sizeof(uint32_t);
 
     size_t paddedICEntriesSize = AlignBytes(icEntriesSize, DataAlignment);
     size_t paddedPCMappingIndexEntriesSize = AlignBytes(pcMappingIndexEntriesSize, DataAlignment);
     size_t paddedPCMappingSize = AlignBytes(pcMappingSize, DataAlignment);
-    size_t paddedBytecodeTypesMapSize = AlignBytes(bytecodeTypeMapSize, DataAlignment);
 
     size_t allocBytes = paddedBaselineScriptSize +
         paddedICEntriesSize +
         paddedPCMappingIndexEntriesSize +
-        paddedPCMappingSize +
-        paddedBytecodeTypesMapSize;
+        paddedPCMappingSize;
 
     uint8_t *buffer = (uint8_t *)cx->malloc_(allocBytes);
     if (!buffer)
-        return nullptr;
+        return NULL;
 
     BaselineScript *script = reinterpret_cast<BaselineScript *>(buffer);
-    new (script) BaselineScript(prologueOffset, epilogueOffset,
-                                spsPushToggleOffset, postDebugPrologueOffset);
+    new (script) BaselineScript(prologueOffset, spsPushToggleOffset);
 
     size_t offsetCursor = paddedBaselineScriptSize;
 
@@ -405,17 +365,13 @@ BaselineScript::New(JSContext *cx, uint32_t prologueOffset, uint32_t epilogueOff
     script->pcMappingSize_ = pcMappingSize;
     offsetCursor += paddedPCMappingSize;
 
-    script->bytecodeTypeMapOffset_ = bytecodeTypeMapEntries ? offsetCursor : 0;
-
     return script;
 }
 
 void
 BaselineScript::trace(JSTracer *trc)
 {
-    MarkJitCode(trc, &method_, "baseline-method");
-    if (templateScope_)
-        MarkObject(trc, &templateScope_, "baseline-template-scope");
+    MarkIonCode(trc, &method_, "baseline-method");
 
     // Mark all IC stub codes hanging off the IC stub entries.
     for (size_t i = 0; i < numICEntries(); i++) {
@@ -446,16 +402,6 @@ BaselineScript::Trace(JSTracer *trc, BaselineScript *script)
 void
 BaselineScript::Destroy(FreeOp *fop, BaselineScript *script)
 {
-#ifdef JSGC_GENERATIONAL
-    /*
-     * When the script contains pointers to nursery things, the store buffer
-     * will contain entries refering to the referenced things. Since we can
-     * destroy scripts outside the context of a GC, this situation can result
-     * in invalid store buffer entries. Assert that if we do destroy scripts
-     * outside of a GC that we at least emptied the nursery first.
-     */
-    JS_ASSERT(fop->runtime()->gcNursery.isEmpty());
-#endif
     fop->delete_(script);
 }
 
@@ -491,20 +437,20 @@ BaselineScript::maybeICEntryFromReturnOffset(CodeOffsetLabel returnOffset)
 {
     size_t bottom = 0;
     size_t top = numICEntries();
-    size_t mid = bottom + (top - bottom) / 2;
+    size_t mid = (bottom + top) / 2;
     while (mid < top) {
         ICEntry &midEntry = icEntry(mid);
         if (midEntry.returnOffset().offset() < returnOffset.offset())
             bottom = mid + 1;
         else // if (midEntry.returnOffset().offset() >= returnOffset.offset())
             top = mid;
-        mid = bottom + (top - bottom) / 2;
+        mid = (bottom + top) / 2;
     }
     if (mid >= numICEntries())
-        return nullptr;
+        return NULL;
 
     if (icEntry(mid).returnOffset().offset() != returnOffset.offset())
-        return nullptr;
+        return NULL;
 
     return &icEntry(mid);
 }
@@ -530,7 +476,7 @@ BaselineScript::icEntryFromPCOffset(uint32_t pcOffset)
     // those which have isForOp() set.
     size_t bottom = 0;
     size_t top = numICEntries();
-    size_t mid = bottom + (top - bottom) / 2;
+    size_t mid = (bottom + top) / 2;
     while (mid < top) {
         ICEntry &midEntry = icEntry(mid);
         if (midEntry.pcOffset() < pcOffset)
@@ -539,7 +485,7 @@ BaselineScript::icEntryFromPCOffset(uint32_t pcOffset)
             top = mid;
         else
             break;
-        mid = bottom + (top - bottom) / 2;
+        mid = (bottom + top) / 2;
     }
     // Found an IC entry with a matching PC offset.  Search backward, and then
     // forward from this IC entry, looking for one with the same PC offset which
@@ -552,7 +498,8 @@ BaselineScript::icEntryFromPCOffset(uint32_t pcOffset)
         if (icEntry(i).isForOp())
             return icEntry(i);
     }
-    MOZ_ASSUME_UNREACHABLE("Invalid PC offset for IC entry.");
+    JS_NOT_REACHED("Invalid PC offset for IC entry.");
+    return icEntry(mid);
 }
 
 ICEntry &
@@ -597,7 +544,7 @@ BaselineScript::icEntryFromReturnAddress(uint8_t *returnAddr)
 }
 
 void
-BaselineScript::copyICEntries(JSScript *script, const ICEntry *entries, MacroAssembler &masm)
+BaselineScript::copyICEntries(HandleScript script, const ICEntry *entries, MacroAssembler &masm)
 {
     // Fix up the return offset in the IC entries and copy them in.
     // Also write out the IC entry ptrs in any fallback stubs that were added.
@@ -653,9 +600,11 @@ BaselineScript::copyPCMappingIndexEntries(const PCMappingIndexEntry *entries)
 uint8_t *
 BaselineScript::nativeCodeForPC(JSScript *script, jsbytecode *pc, PCMappingSlotInfo *slotInfo)
 {
-    JS_ASSERT_IF(script->hasBaselineScript(), script->baselineScript() == this);
+    JS_ASSERT(script->baselineScript() == this);
+    JS_ASSERT(pc >= script->code);
+    JS_ASSERT(pc < script->code + script->length);
 
-    uint32_t pcOffset = script->pcToOffset(pc);
+    uint32_t pcOffset = pc - script->code;
 
     // Look for the first PCMappingIndexEntry with pc > the pc we are
     // interested in.
@@ -673,10 +622,10 @@ BaselineScript::nativeCodeForPC(JSScript *script, jsbytecode *pc, PCMappingSlotI
     JS_ASSERT(pcOffset >= entry.pcOffset);
 
     CompactBufferReader reader(pcMappingReader(i));
-    jsbytecode *curPC = script->offsetToPC(entry.pcOffset);
+    jsbytecode *curPC = script->code + entry.pcOffset;
     uint32_t nativeOffset = entry.nativeOffset;
 
-    JS_ASSERT(script->containsPC(curPC));
+    JS_ASSERT(curPC >= script->code);
     JS_ASSERT(curPC <= pc);
 
     while (true) {
@@ -695,7 +644,8 @@ BaselineScript::nativeCodeForPC(JSScript *script, jsbytecode *pc, PCMappingSlotI
         curPC += GetBytecodeLength(curPC);
     }
 
-    MOZ_ASSUME_UNREACHABLE("Invalid pc");
+    JS_NOT_REACHED("Invalid pc");
+    return NULL;
 }
 
 jsbytecode *
@@ -720,10 +670,10 @@ BaselineScript::pcForReturnOffset(JSScript *script, uint32_t nativeOffset)
     JS_ASSERT(nativeOffset >= entry.nativeOffset);
 
     CompactBufferReader reader(pcMappingReader(i));
-    jsbytecode *curPC = script->offsetToPC(entry.pcOffset);
+    jsbytecode *curPC = script->code + entry.pcOffset;
     uint32_t curNativeOffset = entry.nativeOffset;
 
-    JS_ASSERT(script->containsPC(curPC));
+    JS_ASSERT(curPC >= script->code);
     JS_ASSERT(curNativeOffset <= nativeOffset);
 
     while (true) {
@@ -739,7 +689,8 @@ BaselineScript::pcForReturnOffset(JSScript *script, uint32_t nativeOffset)
         curPC += GetBytecodeLength(curPC);
     }
 
-    MOZ_ASSUME_UNREACHABLE("Invalid pc");
+    JS_NOT_REACHED("Invalid pc");
+    return NULL;
 }
 
 jsbytecode *
@@ -756,27 +707,27 @@ BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 {
     JS_ASSERT(script->baselineScript() == this);
 
-    // Only scripts compiled for debug mode have toggled calls.
-    if (!debugMode())
-        return;
+    SrcNoteLineScanner scanner(script->notes(), script->lineno);
 
-    SrcNoteLineScanner scanner(script->notes(), script->lineno());
+    IonContext ictx(script->compartment(), NULL);
+    AutoFlushCache afc("DebugTraps");
 
     for (uint32_t i = 0; i < numPCMappingIndexEntries(); i++) {
         PCMappingIndexEntry &entry = pcMappingIndexEntry(i);
 
         CompactBufferReader reader(pcMappingReader(i));
-        jsbytecode *curPC = script->offsetToPC(entry.pcOffset);
+        jsbytecode *curPC = script->code + entry.pcOffset;
         uint32_t nativeOffset = entry.nativeOffset;
 
-        JS_ASSERT(script->containsPC(curPC));
+        JS_ASSERT(curPC >= script->code);
+        JS_ASSERT(curPC < script->code + script->length);
 
         while (reader.more()) {
             uint8_t b = reader.readByte();
             if (b & 0x80)
                 nativeOffset += reader.readUnsigned();
 
-            scanner.advanceTo(script->pcToOffset(curPC));
+            scanner.advanceTo(curPC - script->code);
 
             if (!pc || pc == curPC) {
                 bool enabled = (script->stepModeEnabled() && scanner.isLineHeader()) ||
@@ -828,7 +779,7 @@ BaselineScript::purgeOptimizedStubs(Zone *zone)
         if (lastStub->isFallback()) {
             // Unlink all stubs allocated in the optimized space.
             ICStub *stub = entry.firstStub();
-            ICStub *prev = nullptr;
+            ICStub *prev = NULL;
 
             while (stub->next()) {
                 if (!stub->allocatedInFallbackSpace()) {
@@ -889,31 +840,34 @@ jit::FinishDiscardBaselineScript(FreeOp *fop, JSScript *script)
     }
 
     BaselineScript *baseline = script->baselineScript();
-    script->setBaselineScript(nullptr, nullptr);
+    script->setBaselineScript(NULL);
     BaselineScript::Destroy(fop, baseline);
 }
 
 void
-jit::JitCompartment::toggleBaselineStubBarriers(bool enabled)
+jit::IonCompartment::toggleBaselineStubBarriers(bool enabled)
 {
     for (ICStubCodeMap::Enum e(*stubCodes_); !e.empty(); e.popFront()) {
-        JitCode *code = *e.front().value().unsafeGet();
+        IonCode *code = *e.front().value.unsafeGet();
         code->togglePreBarriers(enabled);
     }
 }
 
 void
-jit::AddSizeOfBaselineData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf, size_t *data,
-                           size_t *fallbackStubs)
+jit::SizeOfBaselineData(JSScript *script, JSMallocSizeOfFun mallocSizeOf, size_t *data,
+                        size_t *fallbackStubs)
 {
+    *data = 0;
+    *fallbackStubs = 0;
+
     if (script->hasBaselineScript())
-        script->baselineScript()->addSizeOfIncludingThis(mallocSizeOf, data, fallbackStubs);
+        script->baselineScript()->sizeOfIncludingThis(mallocSizeOf, data, fallbackStubs);
 }
 
 void
 jit::ToggleBaselineSPS(JSRuntime *runtime, bool enable)
 {
-    for (ZonesIter zone(runtime, SkipAtoms); !zone.done(); zone.next()) {
+    for (ZonesIter zone(runtime); !zone.done(); zone.next()) {
         for (gc::CellIter i(zone, gc::FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
             if (!script->hasBaselineScript())
@@ -924,18 +878,18 @@ jit::ToggleBaselineSPS(JSRuntime *runtime, bool enable)
 }
 
 static void
-MarkActiveBaselineScripts(JSRuntime *rt, const JitActivationIterator &activation)
+MarkActiveBaselineScripts(JSContext *cx, const JitActivationIterator &activation)
 {
-    for (jit::JitFrameIterator iter(activation); !iter.done(); ++iter) {
+    for (jit::IonFrameIterator iter(activation); !iter.done(); ++iter) {
         switch (iter.type()) {
-          case JitFrame_BaselineJS:
+          case IonFrame_BaselineJS:
             iter.script()->baselineScript()->setActive();
             break;
-          case JitFrame_IonJS: {
+          case IonFrame_OptimizedJS: {
             // Keep the baseline script around, since bailouts from the ion
             // jitcode might need to re-enter into the baseline jitcode.
             iter.script()->baselineScript()->setActive();
-            for (InlineFrameIterator inlineIter(rt, &iter); inlineIter.more(); ++inlineIter)
+            for (InlineFrameIterator inlineIter(cx, &iter); inlineIter.more(); ++inlineIter)
                 inlineIter.script()->baselineScript()->setActive();
             break;
           }
@@ -947,9 +901,19 @@ MarkActiveBaselineScripts(JSRuntime *rt, const JitActivationIterator &activation
 void
 jit::MarkActiveBaselineScripts(Zone *zone)
 {
-    JSRuntime *rt = zone->runtimeFromMainThread();
-    for (JitActivationIterator iter(rt); !iter.done(); ++iter) {
-        if (iter->compartment()->zone() == zone)
-            MarkActiveBaselineScripts(rt, iter);
+    // First check if there is a JitActivation on the stack, so that there
+    // must be a valid IonContext.
+    JitActivationIterator iter(zone->rt);
+    if (iter.done())
+        return;
+
+    // If baseline is disabled, there are no baseline scripts on the stack.
+    JSContext *cx = GetIonContext()->cx;
+    if (!jit::IsBaselineEnabled(cx))
+        return;
+
+    for (; !iter.done(); ++iter) {
+        if (iter.activation()->compartment()->zone() == zone)
+            MarkActiveBaselineScripts(cx, iter);
     }
 }

@@ -7,16 +7,22 @@
 #ifndef jsapi_tests_tests_h
 #define jsapi_tests_tests_h
 
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "mozilla/Util.h"
 
+#include "jsapi.h"
+#include "jsprvtd.h"
 #include "jsalloc.h"
-#include "jscntxt.h"
+
+// For js::gc::AutoSuppressGC
 #include "jsgc.h"
+#include "jsgcinlines.h"
 
 #include "js/Vector.h"
+
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 /* Note: Aborts on OOM. */
 class JSAPITestString {
@@ -54,13 +60,12 @@ class JSAPITest
 
     JSRuntime *rt;
     JSContext *cx;
-    JS::Heap<JSObject *> global;
+    JSObject *global;
     bool knownFail;
     JSAPITestString msgs;
     JSCompartment *oldCompartment;
 
-    JSAPITest() : rt(nullptr), cx(nullptr), global(nullptr),
-                  knownFail(false), oldCompartment(nullptr) {
+    JSAPITest() : rt(NULL), cx(NULL), global(NULL), knownFail(false), oldCompartment(NULL) {
         next = list;
         list = this;
     }
@@ -72,19 +77,18 @@ class JSAPITest
     virtual void uninit() {
         if (oldCompartment) {
             JS_LeaveCompartment(cx, oldCompartment);
-            oldCompartment = nullptr;
+            oldCompartment = NULL;
         }
-        global = nullptr;
         if (cx) {
-            JS::RemoveObjectRoot(cx, &global);
-            JS_LeaveCompartment(cx, nullptr);
+            JS_RemoveObjectRoot(cx, &global);
+            JS_LeaveCompartment(cx, NULL);
             JS_EndRequest(cx);
             JS_DestroyContext(cx);
-            cx = nullptr;
+            cx = NULL;
         }
         if (rt) {
             destroyRuntime();
-            rt = nullptr;
+            rt = NULL;
         }
     }
 
@@ -97,9 +101,9 @@ class JSAPITest
 
 #define EVAL(s, vp) do { if (!evaluate(s, __FILE__, __LINE__, vp)) return false; } while (false)
 
-    bool evaluate(const char *bytes, const char *filename, int lineno, JS::MutableHandleValue vp);
+    bool evaluate(const char *bytes, const char *filename, int lineno, jsval *vp);
 
-    JSAPITestString jsvalToSource(JS::HandleValue v) {
+    JSAPITestString jsvalToSource(jsval v) {
         JSString *str = JS_ValueToSource(cx, v);
         if (str) {
             JSAutoByteString bytes(cx, str);
@@ -147,8 +151,7 @@ class JSAPITest
     }
 
     JSAPITestString toSource(JSAtom *v) {
-        JS::RootedValue val(cx, JS::StringValue((JSString *)v));
-        return jsvalToSource(val);
+        return jsvalToSource(STRING_TO_JSVAL((JSString*)v));
     }
 
     JSAPITestString toSource(JSVersion v) {
@@ -186,7 +189,7 @@ class JSAPITest
     bool checkSame(jsval actualArg, jsval expectedArg,
                    const char *actualExpr, const char *expectedExpr,
                    const char *filename, int lineno) {
-        bool same;
+        JSBool same;
         JS::RootedValue actual(cx, actualArg), expected(cx, expectedArg);
         return (JS_SameValue(cx, actual, expected, &same) && same) ||
                fail(JSAPITestString("CHECK_SAME failed: expected JS_SameValue(cx, ") +
@@ -210,9 +213,9 @@ class JSAPITest
         if (JS_IsExceptionPending(cx)) {
             js::gc::AutoSuppressGC gcoff(cx);
             JS::RootedValue v(cx);
-            JS_GetPendingException(cx, &v);
+            JS_GetPendingException(cx, v.address());
             JS_ClearPendingException(cx);
-            JSString *s = JS::ToString(cx, v);
+            JSString *s = JS_ValueToString(cx, v);
             if (s) {
                 JSAutoByteString bytes(cx, s);
                 if (!!bytes)
@@ -226,44 +229,44 @@ class JSAPITest
 
     JSAPITestString messages() const { return msgs; }
 
-    static const JSClass * basicGlobalClass() {
-        static const JSClass c = {
+    static JSClass * basicGlobalClass() {
+        static JSClass c = {
             "global", JSCLASS_GLOBAL_FLAGS,
             JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
-            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub, nullptr,
-            nullptr, nullptr, nullptr,
-            JS_GlobalObjectTraceHook
+            JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
         };
         return &c;
     }
 
   protected:
-    static bool
+    static JSBool
     print(JSContext *cx, unsigned argc, jsval *vp)
     {
-        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-
-        for (unsigned i = 0; i < args.length(); i++) {
-            JSString *str = JS::ToString(cx, args[i]);
+        jsval *argv = JS_ARGV(cx, vp);
+        for (unsigned i = 0; i < argc; i++) {
+            JSString *str = JS_ValueToString(cx, argv[i]);
             if (!str)
-                return false;
+                return JS_FALSE;
             char *bytes = JS_EncodeString(cx, str);
             if (!bytes)
-                return false;
+                return JS_FALSE;
             printf("%s%s", i ? " " : "", bytes);
             JS_free(cx, bytes);
         }
 
         putchar('\n');
         fflush(stdout);
-        args.rval().setUndefined();
-        return true;
+        JS_SET_RVAL(cx, vp, JSVAL_VOID);
+        return JS_TRUE;
     }
 
     bool definePrint();
 
-    static void setNativeStackQuota(JSRuntime *rt)
-    {
+    virtual JSRuntime * createRuntime() {
+        JSRuntime *rt = JS_NewRuntime(8L * 1024 * 1024, JS_USE_HELPER_THREADS);
+        if (!rt)
+            return NULL;
+
         const size_t MAX_STACK_SIZE =
 /* Assume we can't use more than 5e5 bytes of C stack by default. */
 #if (defined(DEBUG) && defined(__SUNPRO_CC))  || defined(JS_CPU_SPARC)
@@ -278,13 +281,6 @@ class JSAPITest
         ;
 
         JS_SetNativeStackQuota(rt, MAX_STACK_SIZE);
-    }
-
-    virtual JSRuntime * createRuntime() {
-        JSRuntime *rt = JS_NewRuntime(8L * 1024 * 1024, JS_USE_HELPER_THREADS);
-        if (!rt)
-            return nullptr;
-        setNativeStackQuota(rt);
         return rt;
     }
 
@@ -304,17 +300,17 @@ class JSAPITest
     virtual JSContext * createContext() {
         JSContext *cx = JS_NewContext(rt, 8192);
         if (!cx)
-            return nullptr;
-        JS::ContextOptionsRef(cx).setVarObjFix(true);
+            return NULL;
+        JS_SetOptions(cx, JSOPTION_VAROBJFIX);
         JS_SetErrorReporter(cx, &reportError);
         return cx;
     }
 
-    virtual const JSClass * getGlobalClass() {
+    virtual JSClass * getGlobalClass() {
         return basicGlobalClass();
     }
 
-    virtual JSObject * createGlobal(JSPrincipals *principals = nullptr);
+    virtual JSObject * createGlobal(JSPrincipals *principals = NULL);
 };
 
 #define BEGIN_TEST(testname)                                            \
@@ -390,7 +386,7 @@ class TempFile {
                     name, strerror(errno));
             exit(1);
         }
-        stream = nullptr;
+        stream = NULL;
     }
 
     /* Delete the temporary file. */
@@ -400,18 +396,7 @@ class TempFile {
                     name, strerror(errno));
             exit(1);
         }
-        name = nullptr;
-    }
-};
-
-// Just a wrapper around JSPrincipals that allows static construction.
-class TestJSPrincipals : public JSPrincipals
-{
-  public:
-    TestJSPrincipals(int rc = 0)
-      : JSPrincipals()
-    {
-        refcount = rc;
+        name = NULL;
     }
 };
 

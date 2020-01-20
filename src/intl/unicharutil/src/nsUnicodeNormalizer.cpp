@@ -51,13 +51,17 @@
  *    ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
  */
 
+#include <stdlib.h>
 #include <string.h>
 
+#include "nsUnicharUtils.h"
 #include "nsMemory.h"
+#include "nsCRT.h"
 #include "nsUnicodeNormalizer.h"
 #include "nsString.h"
+#include "nsReadableUtils.h"
 
-NS_IMPL_ISUPPORTS(nsUnicodeNormalizer, nsIUnicodeNormalizer)
+NS_IMPL_ISUPPORTS1(nsUnicodeNormalizer, nsIUnicodeNormalizer)
 
 
 nsUnicodeNormalizer::nsUnicodeNormalizer()
@@ -340,7 +344,7 @@ mdn_normalize(bool do_composition, bool compat,
 
 	while (start != end) {
 		uint32_t c;
-		char16_t curChar;
+		PRUnichar curChar;
 
 		//assert(wb.cur == wb.last);
 
@@ -547,10 +551,10 @@ flush_before_cur(workbuf_t *wb, nsAString& aToStr)
 
 	for (i = 0; i < wb->cur; i++) {
 		if (!IS_IN_BMP(wb->ucs[i])) {
-			aToStr.Append((char16_t)H_SURROGATE(wb->ucs[i]));
-			aToStr.Append((char16_t)L_SURROGATE(wb->ucs[i]));
+			aToStr.Append((PRUnichar)H_SURROGATE(wb->ucs[i]));
+			aToStr.Append((PRUnichar)L_SURROGATE(wb->ucs[i]));
 		} else {
-			aToStr.Append((char16_t)(wb->ucs[i]));
+			aToStr.Append((PRUnichar)(wb->ucs[i]));
 		}
 	}
 

@@ -6,11 +6,9 @@
 #ifndef GFX_IMAGETYPES_H
 #define GFX_IMAGETYPES_H
 
-#include "mozilla/TypedEnum.h"
-
 namespace mozilla {
 
-MOZ_BEGIN_ENUM_CLASS(ImageFormat)
+enum ImageFormat {
   /**
    * The PLANAR_YCBCR format creates a PlanarYCbCrImage. All backends should
    * support this format, because the Ogg video decoder depends on it.
@@ -19,9 +17,9 @@ MOZ_BEGIN_ENUM_CLASS(ImageFormat)
   PLANAR_YCBCR,
 
   /**
-   * The GRALLOC_PLANAR_YCBCR format creates a GrallocImage, a subtype of
-   * PlanarYCbCrImage. It takes a PlanarYCbCrImage data or the raw gralloc
-   * data and can be used as a texture by Gonk backend directly.
+   * The GRALLOC_PLANAR_YCBCR format creates a GrallocPlanarYCbCrImage, a
+   * subtype of PlanarYCbCrImage. It takes a PlanarYCbCrImage data and can be
+   * used as a texture by Gonk backend directly.
    */
   GRALLOC_PLANAR_YCBCR,
 
@@ -48,9 +46,11 @@ MOZ_BEGIN_ENUM_CLASS(ImageFormat)
   CAIRO_SURFACE,
 
   /**
-   * A MacIOSurface object.
+   * The GONK_IO_SURFACE format creates a GonkIOSurfaceImage.
+   *
+   * It wraps an GraphicBuffer object and binds it directly to a GL texture.
    */
-  MAC_IOSURFACE,
+  GONK_IO_SURFACE,
 
   /**
    * An bitmap image that can be shared with a remote process.
@@ -72,15 +72,18 @@ MOZ_BEGIN_ENUM_CLASS(ImageFormat)
    * IDirect3DTexture9 in RGB32 layout.
    */
   D3D9_RGB32_TEXTURE
-MOZ_END_ENUM_CLASS(ImageFormat)
 
-MOZ_BEGIN_ENUM_CLASS(StereoMode)
-  MONO,
-  LEFT_RIGHT,
-  RIGHT_LEFT,
-  BOTTOM_TOP,
-  TOP_BOTTOM
-MOZ_END_ENUM_CLASS(StereoMode)
+};
+
+
+enum StereoMode {
+  STEREO_MODE_MONO,
+  STEREO_MODE_LEFT_RIGHT,
+  STEREO_MODE_RIGHT_LEFT,
+  STEREO_MODE_BOTTOM_TOP,
+  STEREO_MODE_TOP_BOTTOM
+};
+
 
 } // namespace
 

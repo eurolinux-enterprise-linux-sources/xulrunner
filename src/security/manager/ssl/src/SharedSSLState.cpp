@@ -18,17 +18,15 @@
 #include "PublicSSL.h"
 #include "ssl.h"
 #include "nsNetCID.h"
-#include "mozilla/Atomics.h"
 #include "mozilla/unused.h"
 
 using mozilla::psm::SyncRunnableBase;
-using mozilla::Atomic;
 using mozilla::unused;
 
 namespace {
 
-static Atomic<bool> sCertOverrideSvcExists(false);
-static Atomic<bool> sCertDBExists(false);
+static int32_t sCertOverrideSvcExists = 0;
+static int32_t sCertDBExists = 0;
 
 class MainThreadClearer : public SyncRunnableBase
 {
@@ -40,9 +38,9 @@ public:
     // is in progress. We want to avoid this, since they do not handle the situation well,
     // hence the flags to avoid instantiating the services if they don't already exist.
 
-    bool certOverrideSvcExists = sCertOverrideSvcExists.exchange(false);
+    bool certOverrideSvcExists = (bool)PR_ATOMIC_SET(&sCertOverrideSvcExists, 0);
     if (certOverrideSvcExists) {
-      sCertOverrideSvcExists = true;
+      unused << PR_ATOMIC_SET(&sCertOverrideSvcExists, 1);
       nsCOMPtr<nsICertOverrideService> icos = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
       if (icos) {
         icos->ClearValidityOverride(
@@ -51,9 +49,9 @@ public:
       }
     }
 
-    bool certDBExists = sCertDBExists.exchange(false);
+    bool certDBExists = (bool)PR_ATOMIC_SET(&sCertDBExists, 0);
     if (certDBExists) {
-      sCertDBExists = true;
+      unused << PR_ATOMIC_SET(&sCertDBExists, 1);
       nsCOMPtr<nsIX509CertDB> certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
       if (certdb) {
         nsCOMPtr<nsIRecentBadCerts> badCerts;
@@ -118,12 +116,12 @@ SharedSSLState* gPublicState;
 SharedSSLState* gPrivateState;
 } // anonymous namespace
 
-NS_IMPL_ISUPPORTS(PrivateBrowsingObserver, nsIObserver)
+NS_IMPL_ISUPPORTS1(PrivateBrowsingObserver, nsIObserver)
 
 NS_IMETHODIMP
 PrivateBrowsingObserver::Observe(nsISupports     *aSubject,
                                  const char      *aTopic,
-                                 const char16_t *aData)
+                                 const PRUnichar *aData)
 {
   if (!nsCRT::strcmp(aTopic, "last-pb-context-exited")) {
     mOwner->ResetStoredData();
@@ -135,7 +133,6 @@ SharedSSLState::SharedSSLState()
 : mClientAuthRemember(new nsClientAuthRememberService)
 , mMutex("SharedSSLState::mMutex")
 , mSocketCreated(false)
-, mOCSPStaplingEnabled(false)
 {
   mIOLayerHelpers.Init();
   mClientAuthRemember->Init();
@@ -206,13 +203,13 @@ SharedSSLState::GlobalCleanup()
 /*static*/ void
 SharedSSLState::NoteCertOverrideServiceInstantiated()
 {
-  sCertOverrideSvcExists = true;
+  unused << PR_ATOMIC_SET(&sCertOverrideSvcExists, 1);
 }
 
 /*static*/ void
 SharedSSLState::NoteCertDBServiceInstantiated()
 {
-  sCertDBExists = true;
+  unused << PR_ATOMIC_SET(&sCertDBExists, 1);
 }
 
 void

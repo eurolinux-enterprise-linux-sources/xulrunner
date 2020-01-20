@@ -7,11 +7,6 @@
 -->
 <script>
 window.addEventListener("load", function() {
-  var runner = (parent.TestRunner || parent.wrappedJSObject.TestRunner);
-  runner.testUnloaded();
-
-  if (SpecialPowers) {
-    SpecialPowers.DOMWindowUtils.runNextCollectorTimer();
-  }
+  (parent.TestRunner || parent.wrappedJSObject.TestRunner).testUnloaded();
 });
 </script>

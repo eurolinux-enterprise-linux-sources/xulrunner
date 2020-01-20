@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim: set ts=8 sts=4 et sw=4 tw=99: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,13 +8,11 @@
 
 #include "nsContentUtils.h"
 
-using namespace JS;
-
 xpcJSWeakReference::xpcJSWeakReference()
 {
 }
 
-NS_IMPL_ISUPPORTS(xpcJSWeakReference, xpcIJSWeakReference)
+NS_IMPL_ISUPPORTS1(xpcJSWeakReference, xpcIJSWeakReference)
 
 nsresult xpcJSWeakReference::Init(JSContext* cx, const JS::Value& object)
 {
@@ -54,9 +51,9 @@ nsresult xpcJSWeakReference::Init(JSContext* cx, const JS::Value& object)
 }
 
 NS_IMETHODIMP
-xpcJSWeakReference::Get(JSContext* aCx, MutableHandleValue aRetval)
+xpcJSWeakReference::Get(JSContext* aCx, JS::Value* aRetval)
 {
-    aRetval.setNull();
+    *aRetval = JSVAL_NULL;
 
     if (!mReferent) {
         return NS_OK;
@@ -71,8 +68,9 @@ xpcJSWeakReference::Get(JSContext* aCx, MutableHandleValue aRetval)
     if (!wrappedObj) {
         // We have a generic XPCOM object that supports weak references here.
         // Wrap it and pass it out.
-        return nsContentUtils::WrapNative(aCx, supports,
-                                          &NS_GET_IID(nsISupports),
+        JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+        return nsContentUtils::WrapNative(aCx, global,
+                                          supports, &NS_GET_IID(nsISupports),
                                           aRetval);
     }
 
@@ -86,10 +84,10 @@ xpcJSWeakReference::Get(JSContext* aCx, MutableHandleValue aRetval)
     // xpcconvert. However, because we're doing this directly
     // through the native call context, we need to call
     // JS_WrapObject().
-    if (!JS_WrapObject(aCx, &obj)) {
+    if (!JS_WrapObject(aCx, obj.address())) {
         return NS_ERROR_FAILURE;
     }
 
-    aRetval.setObject(*obj);
+    *aRetval = OBJECT_TO_JSVAL(obj);
     return NS_OK;
 }

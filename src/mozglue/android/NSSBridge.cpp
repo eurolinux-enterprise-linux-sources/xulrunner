@@ -13,6 +13,13 @@
 
 #include "ElfLoader.h"
 
+#ifdef MOZ_MEMORY
+// libc's free().
+extern "C" void __real_free(void *);
+#else
+#define __real_free(a) free(a)
+#endif
+
 #ifdef DEBUG
 #define LOG(x...) __android_log_print(ANDROID_LOG_INFO, "GeckoJNI", x)
 #else
@@ -42,12 +49,12 @@ setup_nss_functions(void *nss_handle,
                         void *nspr_handle,
                         void *plc_handle)
 {
-  if (nss_handle == nullptr || nspr_handle == nullptr || plc_handle == nullptr) {
+  if (nss_handle == NULL || nspr_handle == NULL || plc_handle == NULL) {
     LOG("Missing handle\n");
     return FAILURE;
   }
 #define GETFUNC(name) f_ ## name = (name ## _t) (uintptr_t) __wrap_dlsym(nss_handle, #name); \
-  if (!f_ ##name) { __android_log_print(ANDROID_LOG_ERROR, "GeckoJNI", "missing %s", #name);  return FAILURE; }
+                      if (!f_ ##name) return FAILURE;
   GETFUNC(NSS_Initialize);
   GETFUNC(NSS_Shutdown);
   GETFUNC(PK11SDR_Encrypt);
@@ -58,13 +65,13 @@ setup_nss_functions(void *nss_handle,
   GETFUNC(SECITEM_ZfreeItem);
 #undef GETFUNC
 #define NSPRFUNC(name) f_ ## name = (name ## _t) (uintptr_t) __wrap_dlsym(nspr_handle, #name); \
-  if (!f_ ##name) { __android_log_print(ANDROID_LOG_ERROR, "GeckoJNI", "missing %s", #name);  return FAILURE; }
+                       if (!f_ ##name) return FAILURE;
   NSPRFUNC(PR_ErrorToString);
   NSPRFUNC(PR_GetError);
   NSPRFUNC(PR_Free);
 #undef NSPRFUNC
 #define PLCFUNC(name) f_ ## name = (name ## _t) (uintptr_t) __wrap_dlsym(plc_handle, #name); \
-  if (!f_ ##name) { __android_log_print(ANDROID_LOG_ERROR, "GeckoJNI", "missing %s", #name);  return FAILURE; }
+                      if (!f_ ##name) return FAILURE;
   PLCFUNC(PL_Base64Encode);
   PLCFUNC(PL_Base64Decode);
   PLCFUNC(PL_strfree);
@@ -84,7 +91,8 @@ throwError(JNIEnv* jenv, const char * funcString) {
     LOG("Throwing error: %s\n", msg);
 
     JNI_Throw(jenv, "java/lang/Exception", msg);
-    free(msg);
+    // msg is allocated by asprintf, it needs to be freed by libc.
+    __real_free(msg);
     LOG("Error thrown\n");
 }
 
@@ -96,10 +104,10 @@ Java_org_mozilla_gecko_NSSBridge_nativeEncrypt(JNIEnv* jenv, jclass,
     jstring ret = jenv->NewStringUTF("");
 
     const char* path;
-    path = jenv->GetStringUTFChars(jPath, nullptr);
+    path = jenv->GetStringUTFChars(jPath, NULL);
 
     const char* value;
-    value = jenv->GetStringUTFChars(jValue, nullptr);
+    value = jenv->GetStringUTFChars(jValue, NULL);
 
     char* result;
     SECStatus rv = doCrypto(jenv, path, value, &result, true);
@@ -122,10 +130,10 @@ Java_org_mozilla_gecko_NSSBridge_nativeDecrypt(JNIEnv* jenv, jclass,
     jstring ret = jenv->NewStringUTF("");
 
     const char* path;
-    path = jenv->GetStringUTFChars(jPath, nullptr);
+    path = jenv->GetStringUTFChars(jPath, NULL);
 
     const char* value;
-    value = jenv->GetStringUTFChars(jValue, nullptr);
+    value = jenv->GetStringUTFChars(jValue, NULL);
 
     char* result;
     SECStatus rv = doCrypto(jenv, path, value, &result, false);
@@ -165,7 +173,7 @@ doCrypto(JNIEnv* jenv, const char *path, const char *value, char** result, bool 
 
     if (f_PK11_NeedUserInit(slot)) {
       LOG("Initializing key3.db with default blank password.\n");
-      rv = f_PK11_InitPin(slot, nullptr, nullptr);
+      rv = f_PK11_InitPin(slot, NULL, NULL);
       if (rv != SECSuccess) {
         throwError(jenv, "PK11_InitPin");
         return rv;
@@ -187,7 +195,7 @@ doCrypto(JNIEnv* jenv, const char *path, const char *value, char** result, bool 
       SECItem keyid;
       keyid.data = 0;
       keyid.len = 0;
-      rv = f_PK11SDR_Encrypt(&keyid, &request, &reply, nullptr);
+      rv = f_PK11SDR_Encrypt(&keyid, &request, &reply, NULL);
 
       if (rv != SECSuccess) {
         throwError(jenv, "PK11SDR_Encrypt");
@@ -208,7 +216,7 @@ doCrypto(JNIEnv* jenv, const char *path, const char *value, char** result, bool 
           return rv;
       }
 
-      rv = f_PK11SDR_Decrypt(&request, &reply, nullptr);
+      rv = f_PK11SDR_Decrypt(&request, &reply, NULL);
       if (rv != SECSuccess) {
         throwError(jenv, "PK11SDR_Decrypt");
         goto done;
@@ -235,7 +243,7 @@ SECStatus
 encode(const unsigned char *data, int32_t dataLen, char **_retval)
 {
   SECStatus rv = SECSuccess;
-  char *encoded = f_PL_Base64Encode((const char *)data, dataLen, nullptr);
+  char *encoded = f_PL_Base64Encode((const char *)data, dataLen, NULL);
   if (!encoded)
     rv = SECFailure;
   if (!*encoded)
@@ -270,7 +278,7 @@ decode(const char *data, unsigned char **result, int32_t *length)
   }
 
   char *decoded;
-  decoded = f_PL_Base64Decode(data, len, nullptr);
+  decoded = f_PL_Base64Decode(data, len, NULL);
   if (!decoded) {
     return SECFailure;
   }

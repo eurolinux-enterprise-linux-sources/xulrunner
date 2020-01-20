@@ -12,18 +12,19 @@
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/ParseNode.h"
 #include "frontend/SharedContext.h"
+
+#include "jsfuninlines.h"
+
 #include "vm/StringBuffer.h"
 
 using namespace js;
 using namespace js::frontend;
 
-namespace {
-
 class NameResolver
 {
     static const size_t MaxParents = 100;
 
-    ExclusiveContext *cx;
+    JSContext *cx;
     size_t nparents;                /* number of parents in the parents array */
     ParseNode *parents[MaxParents]; /* history of ParseNodes we've been looking at */
     StringBuffer *buf;              /* when resolving, buffer to append to */
@@ -76,9 +77,6 @@ class NameResolver
           case PNK_NAME:
             return buf->append(n->pn_atom);
 
-          case PNK_THIS:
-            return buf->append("this");
-
           case PNK_ELEM:
             return nameExpression(n->pn_left) &&
                    buf->append("[") &&
@@ -106,8 +104,8 @@ class NameResolver
      *
      * This function will walk up the parse tree, gathering relevant nodes used
      * for naming, and return the assignment node if there is one. The provided
-     * array and size will be filled in, and the returned node could be nullptr
-     * if no assignment is found. The first element of the array will be the
+     * array and size will be filled in, and the returned node could be NULL if
+     * no assignment is found. The first element of the array will be the
      * innermost node relevant to naming, and the last element will be the
      * outermost node.
      */
@@ -121,8 +119,7 @@ class NameResolver
 
             switch (cur->getKind()) {
               case PNK_NAME:     return cur;  /* found the initialized declaration */
-              case PNK_THIS:     return cur;  /* Setting a property of 'this'. */
-              case PNK_FUNCTION: return nullptr; /* won't find an assignment or declaration */
+              case PNK_FUNCTION: return NULL; /* won't find an assignment or declaration */
 
               case PNK_RETURN:
                 /*
@@ -151,9 +148,13 @@ class NameResolver
 
               case PNK_COLON:
                 /*
-                 * Record the PNK_COLON but skip the PNK_OBJECT so we're not
+                 * If this is a PNK_COLON, but our parent is not a PNK_OBJECT,
+                 * then this is a label and we're done naming. Otherwise we
+                 * record the PNK_COLON but skip the PNK_OBJECT so we're not
                  * flagged as a contributor.
                  */
+                if (pos == 0 || !parents[pos - 1]->isKind(PNK_OBJECT))
+                    return NULL;
                 pos--;
                 /* fallthrough */
 
@@ -165,7 +166,7 @@ class NameResolver
             }
         }
 
-        return nullptr;
+        return NULL;
     }
 
     /*
@@ -173,32 +174,27 @@ class NameResolver
      * listed, then it is skipped. Otherwise an intelligent name is guessed to
      * assign to the function's displayAtom field
      */
-    bool resolveFun(ParseNode *pn, HandleAtom prefix, MutableHandleAtom retAtom) {
-        JS_ASSERT(pn != nullptr && pn->isKind(PNK_FUNCTION));
+    JSAtom *resolveFun(ParseNode *pn, HandleAtom prefix) {
+        JS_ASSERT(pn != NULL && pn->isKind(PNK_FUNCTION));
         RootedFunction fun(cx, pn->pn_funbox->function());
 
         StringBuffer buf(cx);
         this->buf = &buf;
 
-        retAtom.set(nullptr);
-
         /* If the function already has a name, use that */
-        if (fun->displayAtom() != nullptr) {
-            if (prefix == nullptr) {
-                retAtom.set(fun->displayAtom());
-                return true;
-            }
+        if (fun->displayAtom() != NULL) {
+            if (prefix == NULL)
+                return fun->displayAtom();
             if (!buf.append(prefix) ||
                 !buf.append("/") ||
                 !buf.append(fun->displayAtom()))
-                return false;
-            retAtom.set(buf.finishAtom());
-            return !!retAtom;
+                return NULL;
+            return buf.finishAtom();
         }
 
         /* If a prefix is specified, then it is a form of namespace */
-        if (prefix != nullptr && (!buf.append(prefix) || !buf.append("/")))
-            return false;
+        if (prefix != NULL && (!buf.append(prefix) || !buf.append("/")))
+            return NULL;
 
         /* Gather all nodes relevant to naming */
         ParseNode *toName[MaxParents];
@@ -210,7 +206,7 @@ class NameResolver
             if (assignment->isAssignment())
                 assignment = assignment->pn_left;
             if (!nameExpression(assignment))
-                return true;
+                return NULL;
         }
 
         /*
@@ -225,10 +221,10 @@ class NameResolver
                 ParseNode *left = node->pn_left;
                 if (left->isKind(PNK_NAME) || left->isKind(PNK_STRING)) {
                     if (!appendPropertyReference(left->pn_atom))
-                        return false;
+                        return NULL;
                 } else if (left->isKind(PNK_NUMBER)) {
                     if (!appendNumericPropertyReference(left->pn_dval))
-                        return false;
+                        return NULL;
                 }
             } else {
                 /*
@@ -236,7 +232,7 @@ class NameResolver
                  * with a '<' character.
                  */
                 if (!buf.empty() && *(buf.end() - 1) != '<' && !buf.append("<"))
-                    return false;
+                    return NULL;
             }
         }
 
@@ -246,16 +242,15 @@ class NameResolver
          * function, so give them a contribution symbol here.
          */
         if (!buf.empty() && *(buf.end() - 1) == '/' && !buf.append("<"))
-            return false;
-
+            return NULL;
         if (buf.empty())
-            return true;
+            return NULL;
 
-        retAtom.set(buf.finishAtom());
-        if (!retAtom)
-            return false;
-        fun->setGuessedAtom(retAtom);
-        return true;
+        JSAtom *atom = buf.finishAtom();
+        if (!atom)
+            return NULL;
+        fun->setGuessedAtom(atom);
+        return atom;
     }
 
     /*
@@ -268,23 +263,20 @@ class NameResolver
     }
 
   public:
-    explicit NameResolver(ExclusiveContext *cx) : cx(cx), nparents(0), buf(nullptr) {}
+    explicit NameResolver(JSContext *cx) : cx(cx), nparents(0), buf(NULL) {}
 
     /*
      * Resolve all names for anonymous functions recursively within the
      * ParseNode instance given. The prefix is for each subsequent name, and
-     * should initially be nullptr.
+     * should initially be NULL.
      */
-    bool resolve(ParseNode *cur, HandleAtom prefixArg = js::NullPtr()) {
+    void resolve(ParseNode *cur, HandleAtom prefixArg = NullPtr()) {
         RootedAtom prefix(cx, prefixArg);
-        if (cur == nullptr)
-            return true;
+        if (cur == NULL)
+            return;
 
         if (cur->isKind(PNK_FUNCTION) && cur->isArity(PN_CODE)) {
-            RootedAtom prefix2(cx);
-            if (!resolveFun(cur, prefix, &prefix2))
-                return false;
-
+            RootedAtom prefix2(cx, resolveFun(cur, prefix));
             /*
              * If a function looks like (function(){})() where the parent node
              * of the definition of the function is a call, then it shouldn't
@@ -295,24 +287,20 @@ class NameResolver
                 prefix = prefix2;
         }
         if (nparents >= MaxParents)
-            return true;
+            return;
         parents[nparents++] = cur;
 
         switch (cur->getArity()) {
           case PN_NULLARY:
             break;
           case PN_NAME:
-            if (!resolve(cur->maybeExpr(), prefix))
-                return false;
+            resolve(cur->maybeExpr(), prefix);
             break;
           case PN_UNARY:
-            if (!resolve(cur->pn_kid, prefix))
-                return false;
+            resolve(cur->pn_kid, prefix);
             break;
           case PN_BINARY:
-          case PN_BINARY_OBJ:
-            if (!resolve(cur->pn_left, prefix))
-                return false;
+            resolve(cur->pn_left, prefix);
 
             /*
              * FIXME? Occasionally pn_left == pn_right for something like
@@ -321,38 +309,30 @@ class NameResolver
              * everything at most once.
              */
             if (cur->pn_left != cur->pn_right)
-                if (!resolve(cur->pn_right, prefix))
-                    return false;
+                resolve(cur->pn_right, prefix);
             break;
           case PN_TERNARY:
-            if (!resolve(cur->pn_kid1, prefix))
-                return false;
-            if (!resolve(cur->pn_kid2, prefix))
-                return false;
-            if (!resolve(cur->pn_kid3, prefix))
-                return false;
+            resolve(cur->pn_kid1, prefix);
+            resolve(cur->pn_kid2, prefix);
+            resolve(cur->pn_kid3, prefix);
             break;
           case PN_CODE:
-            JS_ASSERT(cur->isKind(PNK_FUNCTION));
-            if (!resolve(cur->pn_body, prefix))
-                return false;
+            JS_ASSERT(cur->isKind(PNK_MODULE) || cur->isKind(PNK_FUNCTION));
+            resolve(cur->pn_body, prefix);
             break;
           case PN_LIST:
             for (ParseNode *nxt = cur->pn_head; nxt; nxt = nxt->pn_next)
-                if (!resolve(nxt, prefix))
-                    return false;
+                resolve(nxt, prefix);
             break;
         }
         nparents--;
-        return true;
     }
 };
 
-} /* anonymous namespace */
-
 bool
-frontend::NameFunctions(ExclusiveContext *cx, ParseNode *pn)
+frontend::NameFunctions(JSContext *cx, ParseNode *pn)
 {
     NameResolver nr(cx);
-    return nr.resolve(pn);
+    nr.resolve(pn);
+    return true;
 }

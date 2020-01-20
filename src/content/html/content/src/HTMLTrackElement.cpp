@@ -8,7 +8,7 @@
 #include "mozilla/dom/HTMLTrackElement.h"
 #include "mozilla/dom/HTMLTrackElementBinding.h"
 #include "mozilla/dom/HTMLUnknownElement.h"
-#include "WebVTTListener.h"
+#include "WebVTTLoadListener.h"
 #include "nsAttrValueInlines.h"
 #include "nsCOMPtr.h"
 #include "nsContentPolicyUtils.h"
@@ -25,6 +25,7 @@
 #include "nsIDocument.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMHTMLMediaElement.h"
+#include "nsIFrame.h"
 #include "nsIHttpChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsILoadGroup.h"
@@ -37,6 +38,7 @@
 #include "nsStyleConsts.h"
 #include "nsThreadUtils.h"
 #include "nsVideoFrame.h"
+#include "webvtt/parser.h"
 
 #ifdef PR_LOGGING
 static PRLogModuleInfo* gTrackElementLog;
@@ -48,41 +50,33 @@ static PRLogModuleInfo* gTrackElementLog;
 // Replace the usual NS_IMPL_NS_NEW_HTML_ELEMENT(Track) so
 // we can return an UnknownElement instead when pref'd off.
 nsGenericHTMLElement*
-NS_NewHTMLTrackElement(already_AddRefed<nsINodeInfo>&& aNodeInfo,
+NS_NewHTMLTrackElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                        mozilla::dom::FromParser aFromParser)
 {
   if (!mozilla::dom::HTMLTrackElement::IsWebVTTEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
+    return mozilla::dom::NewHTMLElementHelper::Create<nsHTMLUnknownElement,
+           mozilla::dom::HTMLUnknownElement>(aNodeInfo);
   }
 
-  return new mozilla::dom::HTMLTrackElement(aNodeInfo);
+  return mozilla::dom::NewHTMLElementHelper::Create<nsHTMLTrackElement,
+         mozilla::dom::HTMLTrackElement>(aNodeInfo);
 }
 
 namespace mozilla {
 namespace dom {
 
-// Map html attribute string values to TextTrackKind enums.
-static MOZ_CONSTEXPR nsAttrValue::EnumTable kKindTable[] = {
-  { "subtitles", static_cast<int16_t>(TextTrackKind::Subtitles) },
-  { "captions", static_cast<int16_t>(TextTrackKind::Captions) },
-  { "descriptions", static_cast<int16_t>(TextTrackKind::Descriptions) },
-  { "chapters", static_cast<int16_t>(TextTrackKind::Chapters) },
-  { "metadata", static_cast<int16_t>(TextTrackKind::Metadata) },
-  { 0 }
-};
-
-// The default value for kKindTable is "subtitles"
-static MOZ_CONSTEXPR const char* kKindTableDefaultString = kKindTable->tag;
-
 /** HTMLTrackElement */
-HTMLTrackElement::HTMLTrackElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLTrackElement::HTMLTrackElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
+  , mReadyState(NONE)
 {
 #ifdef PR_LOGGING
   if (!gTrackElementLog) {
     gTrackElementLog = PR_NewLogModule("nsTrackElement");
   }
 #endif
+
+  SetIsDOMBinding();
 }
 
 HTMLTrackElement::~HTMLTrackElement()
@@ -94,18 +88,13 @@ NS_IMPL_ELEMENT_CLONE(HTMLTrackElement)
 NS_IMPL_ADDREF_INHERITED(HTMLTrackElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLTrackElement, Element)
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLTrackElement, nsGenericHTMLElement,
-                                   mTrack, mChannel, mMediaParent,
-                                   mListener)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_4(HTMLTrackElement, nsGenericHTMLElement,
+                                     mTrack, mChannel, mMediaParent,
+                                     mLoadListener)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLTrackElement)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
-
-void
-HTMLTrackElement::GetKind(DOMString& aKind) const
-{
-  GetEnumAttr(nsGkAtoms::kind, kKindTableDefaultString, aKind);
-}
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+NS_ELEMENT_INTERFACE_MAP_END
 
 void
 HTMLTrackElement::OnChannelRedirect(nsIChannel* aChannel,
@@ -117,9 +106,9 @@ HTMLTrackElement::OnChannelRedirect(nsIChannel* aChannel,
 }
 
 JSObject*
-HTMLTrackElement::WrapNode(JSContext* aCx)
+HTMLTrackElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLTrackElementBinding::Wrap(aCx, this);
+  return HTMLTrackElementBinding::Wrap(aCx, aScope, this);
 }
 
 bool
@@ -130,10 +119,12 @@ HTMLTrackElement::IsWebVTTEnabled()
 }
 
 TextTrack*
-HTMLTrackElement::GetTrack()
+HTMLTrackElement::Track()
 {
   if (!mTrack) {
-    CreateTextTrack();
+    // We're expected to always have an internal TextTrack so create
+    // an empty object to return if we don't already have one.
+    mTrack = new TextTrack(OwnerDoc()->GetParentObject());
   }
 
   return mTrack;
@@ -145,29 +136,37 @@ HTMLTrackElement::CreateTextTrack()
   nsString label, srcLang;
   GetSrclang(srcLang);
   GetLabel(label);
-
-  TextTrackKind kind;
-  if (const nsAttrValue* value = GetParsedAttr(nsGkAtoms::kind)) {
-    kind = static_cast<TextTrackKind>(value->GetEnumValue());
-  } else {
-    kind = TextTrackKind::Subtitles;
-  }
-
-  nsISupports* parentObject =
-    OwnerDoc()->GetParentObject();
-
-  NS_ENSURE_TRUE_VOID(parentObject);
-
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(parentObject);
-  mTrack = new TextTrack(window, kind, label, srcLang,
-                         TextTrackMode::Disabled,
-                         TextTrackReadyState::NotLoaded,
-                         TextTrackSource::Track);
-  mTrack->SetTrackElement(this);
+  mTrack = new TextTrack(OwnerDoc()->GetParentObject(), Kind(), label, srcLang);
 
   if (mMediaParent) {
     mMediaParent->AddTextTrack(mTrack);
   }
+}
+
+TextTrackKind
+HTMLTrackElement::Kind() const
+{
+  const nsAttrValue* value = GetParsedAttr(nsGkAtoms::kind);
+  if (!value) {
+    return TextTrackKind::Subtitles;
+  }
+  return static_cast<TextTrackKind>(value->GetEnumValue());
+}
+
+static EnumEntry
+StringFromKind(TextTrackKind aKind)
+{
+  return TextTrackKindValues::strings[static_cast<int>(aKind)];
+}
+
+void
+HTMLTrackElement::SetKind(TextTrackKind aKind, ErrorResult& aError)
+{
+  const EnumEntry& string = StringFromKind(aKind);
+  nsAutoString kind;
+
+  kind.AssignASCII(string.value, string.length);
+  SetHTMLAttr(nsGkAtoms::kind, kind, aError);
 }
 
 bool
@@ -176,6 +175,16 @@ HTMLTrackElement::ParseAttribute(int32_t aNamespaceID,
                                  const nsAString& aValue,
                                  nsAttrValue& aResult)
 {
+  // Map html attribute string values to TextTrackKind enums.
+  static const nsAttrValue::EnumTable kKindTable[] = {
+    { "subtitles", static_cast<int16_t>(TextTrackKind::Subtitles) },
+    { "captions", static_cast<int16_t>(TextTrackKind::Captions) },
+    { "descriptions", static_cast<int16_t>(TextTrackKind::Descriptions) },
+    { "chapters", static_cast<int16_t>(TextTrackKind::Chapters) },
+    { "metadata", static_cast<int16_t>(TextTrackKind::Metadata) },
+    { 0 }
+  };
+
   if (aNamespaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::kind) {
     // Case-insensitive lookup, with the first element as the default.
     return aResult.ParseEnumValue(aValue, kKindTable, false, kKindTable);
@@ -217,7 +226,7 @@ HTMLTrackElement::LoadResource()
   rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_MEDIA,
                                  uri,
                                  NodePrincipal(),
-                                 static_cast<Element*>(this),
+                                 static_cast<nsGenericHTMLElement*>(this),
                                  NS_LITERAL_CSTRING("text/vtt"), // mime type
                                  nullptr, // extra
                                  &shouldLoad,
@@ -255,13 +264,13 @@ HTMLTrackElement::LoadResource()
                      channelPolicy);
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
-  mListener = new WebVTTListener(this);
-  rv = mListener->LoadResource();
+  mLoadListener = new WebVTTLoadListener(this);
+  rv = mLoadListener->LoadResource();
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
-  channel->SetNotificationCallbacks(mListener);
+  channel->SetNotificationCallbacks(mLoadListener);
 
   LOG(PR_LOG_DEBUG, ("opening webvtt channel"));
-  rv = channel->AsyncOpen(mListener, nullptr);
+  rv = channel->AsyncOpen(mLoadListener, nullptr);
   NS_ENSURE_TRUE_VOID(NS_SUCCEEDED(rv));
 
   mChannel = channel;
@@ -297,7 +306,7 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
     media->NotifyAddedSource();
     LOG(PR_LOG_DEBUG, ("Track element sent notification to parent."));
 
-    mMediaParent->RunInStableState(
+    nsContentUtils::AddScriptRunner(
       NS_NewRunnableMethod(this, &HTMLTrackElement::LoadResource));
   }
 
@@ -307,66 +316,11 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
 void
 HTMLTrackElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  if (mMediaParent) {
-    // mTrack can be null if HTMLTrackElement::LoadResource has never been
-    // called.
-    if (mTrack) {
-      mMediaParent->RemoveTextTrack(mTrack);
-    }
-    if (aNullParent) {
-      mMediaParent = nullptr;
-    }
+  if (mMediaParent && aNullParent) {
+    mMediaParent = nullptr;
   }
 
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-}
-
-uint16_t
-HTMLTrackElement::ReadyState() const
-{
-  if (!mTrack) {
-    return TextTrackReadyState::NotLoaded;
-  }
-
-  return mTrack->ReadyState();
-}
-
-void
-HTMLTrackElement::SetReadyState(uint16_t aReadyState)
-{
-  if (mTrack) {
-    switch (aReadyState) {
-      case TextTrackReadyState::Loaded:
-        DispatchTrackRunnable(NS_LITERAL_STRING("loaded"));
-        break;
-      case TextTrackReadyState::FailedToLoad:
-        DispatchTrackRunnable(NS_LITERAL_STRING("error"));
-        break;
-    }
-    mTrack->SetReadyState(aReadyState);
-  }
-}
-
-void
-HTMLTrackElement::DispatchTrackRunnable(const nsString& aEventName)
-{
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethodWithArg
-      <const nsString>(this,
-                       &HTMLTrackElement::DispatchTrustedEvent,
-                       aEventName);
-  NS_DispatchToMainThread(runnable);
-}
-
-void
-HTMLTrackElement::DispatchTrustedEvent(const nsAString& aName)
-{
-  nsIDocument* doc = OwnerDoc();
-  if (!doc) {
-    return;
-  }
-  nsContentUtils::DispatchTrustedEvent(doc, static_cast<nsIContent*>(this),
-                                       aName, false, false);
 }
 
 } // namespace dom

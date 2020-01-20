@@ -6,36 +6,31 @@
 #ifndef mozilla_dom_SVGZoomEvent_h
 #define mozilla_dom_SVGZoomEvent_h
 
-#include "DOMSVGPoint.h"
-#include "mozilla/dom/UIEvent.h"
-#include "mozilla/dom/SVGZoomEventBinding.h"
-#include "mozilla/EventForwards.h"
 #include "nsAutoPtr.h"
+#include "nsDOMUIEvent.h"
+#include "DOMSVGPoint.h"
+#include "mozilla/dom/SVGZoomEventBinding.h"
 
+class nsGUIEvent;
+class nsISVGPoint;
 class nsPresContext;
 
 namespace mozilla {
-
-class nsISVGPoint;
-
 namespace dom {
 
-class SVGZoomEvent MOZ_FINAL : public UIEvent
+class SVGZoomEvent MOZ_FINAL : public nsDOMUIEvent
 {
 public:
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SVGZoomEvent, UIEvent)
-  NS_DECL_ISUPPORTS_INHERITED
-
   SVGZoomEvent(EventTarget* aOwner, nsPresContext* aPresContext,
-               WidgetGUIEvent* aEvent);
+               nsGUIEvent* aEvent);
 
   // Forward to base class
-  NS_FORWARD_TO_UIEVENT
+  NS_FORWARD_TO_NSDOMUIEVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
   {
-    return SVGZoomEventBinding::Wrap(aCx, this);
+    return SVGZoomEventBinding::Wrap(aCx, aScope, this);
   }
 
   float PreviousScale() const

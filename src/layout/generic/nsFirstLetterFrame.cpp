@@ -5,6 +5,7 @@
 
 /* rendering object for CSS :first-letter pseudo-element */
 
+#include "nsCOMPtr.h"
 #include "nsFirstLetterFrame.h"
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
@@ -14,7 +15,6 @@
 #include "nsAutoPtr.h"
 #include "nsStyleSet.h"
 #include "nsFrameManager.h"
-#include "RestyleManager.h"
 #include "nsPlaceholderFrame.h"
 #include "nsCSSFrameConstructor.h"
 
@@ -33,8 +33,8 @@ NS_QUERYFRAME_HEAD(nsFirstLetterFrame)
   NS_QUERYFRAME_ENTRY(nsFirstLetterFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsFirstLetterFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Letter"), aResult);
@@ -69,30 +69,30 @@ nsFirstLetterFrame::Init(nsIContent*      aContent,
     if (parentStyleContext) {
       newSC = PresContext()->StyleSet()->
         ResolveStyleForNonElement(parentStyleContext);
-      SetStyleContextWithoutNotification(newSC);
+      if (newSC)
+        SetStyleContextWithoutNotification(newSC);
     }
   }
 
   nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 
-nsresult
+NS_IMETHODIMP
 nsFirstLetterFrame::SetInitialChildList(ChildListID  aListID,
                                         nsFrameList& aChildList)
 {
-  RestyleManager* restyleManager = PresContext()->RestyleManager();
+  nsFrameManager *frameManager = PresContext()->FrameManager();
 
   for (nsFrameList::Enumerator e(aChildList); !e.AtEnd(); e.Next()) {
     NS_ASSERTION(e.get()->GetParent() == this, "Unexpected parent");
-    restyleManager->ReparentStyleContext(e.get());
-    nsLayoutUtils::MarkDescendantsDirty(e.get());
+    frameManager->ReparentStyleContext(e.get());
   }
 
   mFrames.SetFrames(aChildList);
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 nsFirstLetterFrame::GetChildFrameContainingOffset(int32_t inContentOffset,
                                                   bool inHint,
                                                   int32_t* outFrameContentOffset,
@@ -154,7 +154,7 @@ nsFirstLetterFrame::ComputeSize(nsRenderingContext *aRenderingContext,
       aCBSize, aAvailableWidth, aMargin, aBorder, aPadding, aFlags);
 }
 
-nsresult
+NS_IMETHODIMP
 nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
                            nsHTMLReflowMetrics&     aMetrics,
                            const nsHTMLReflowState& aReflowState,
@@ -170,8 +170,8 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
   nsIFrame* kid = mFrames.FirstChild();
 
   // Setup reflow state for our child
-  nsSize availSize(aReflowState.AvailableWidth(), aReflowState.AvailableHeight());
-  const nsMargin& bp = aReflowState.ComputedPhysicalBorderPadding();
+  nsSize availSize(aReflowState.availableWidth, aReflowState.availableHeight);
+  const nsMargin& bp = aReflowState.mComputedBorderPadding;
   nscoord lr = bp.left + bp.right;
   nscoord tb = bp.top + bp.bottom;
   NS_ASSERTION(availSize.width != NS_UNCONSTRAINEDSIZE,
@@ -189,10 +189,21 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
     nsHTMLReflowState rs(aPresContext, aReflowState, kid, availSize);
     nsLineLayout ll(aPresContext, nullptr, &aReflowState, nullptr);
 
+    // For unicode-bidi: plaintext, we need to get the direction of the line
+    // from the resolved paragraph level of the child, not the block frame,
+    // because the block frame could be split by hard line breaks into
+    // multiple paragraphs with different base direction
+    uint8_t direction;
+    nsIFrame* containerFrame = ll.LineContainerFrame();
+    if (containerFrame->StyleTextReset()->mUnicodeBidi &
+        NS_STYLE_UNICODE_BIDI_PLAINTEXT) {
+      FramePropertyTable *propTable = aPresContext->PropertyTable();
+      direction = NS_PTR_TO_INT32(propTable->Get(kid, BaseLevelProperty())) & 1;
+    } else {
+      direction = containerFrame->StyleVisibility()->mDirection;
+    }
     ll.BeginLineReflow(bp.left, bp.top, availSize.width, NS_UNCONSTRAINEDSIZE,
-                       false, true,
-                       ll.LineContainerFrame()->GetWritingMode(kid),
-                       aReflowState.AvailableWidth());
+                       false, true, direction);
     rs.mLineLayout = &ll;
     ll.SetInFirstLetter(true);
     ll.SetFirstLetterStyleOK(true);
@@ -205,7 +216,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
 
     // In the floating first-letter case, we need to set this ourselves;
     // nsLineLayout::BeginSpan will set it in the other case
-    mBaseline = aMetrics.TopAscent();
+    mBaseline = aMetrics.ascent;
   }
   else {
     // Pretend we are a span and reflow the child frame
@@ -221,13 +232,13 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
   }
 
   // Place and size the child and update the output metrics
-  kid->SetRect(nsRect(bp.left, bp.top, aMetrics.Width(), aMetrics.Height()));
+  kid->SetRect(nsRect(bp.left, bp.top, aMetrics.width, aMetrics.height));
   kid->FinishAndStoreOverflow(&aMetrics);
   kid->DidReflow(aPresContext, nullptr, nsDidReflowStatus::FINISHED);
 
-  aMetrics.Width() += lr;
-  aMetrics.Height() += tb;
-  aMetrics.SetTopAscent(aMetrics.TopAscent() + bp.top);
+  aMetrics.width += lr;
+  aMetrics.height += tb;
+  aMetrics.ascent += bp.top;
 
   // Ensure that the overflow rect contains the child textframe's overflow rect.
   // Note that if this is floating, the overline/underline drawable area is in
@@ -246,7 +257,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
       if (kidNextInFlow) {
         // Remove all of the childs next-in-flows
         static_cast<nsContainerFrame*>(kidNextInFlow->GetParent())
-          ->DeleteNextInFlowChild(kidNextInFlow, true);
+          ->DeleteNextInFlowChild(aPresContext, kidNextInFlow, true);
       }
     }
     else {
@@ -254,7 +265,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
       // have one.
       if (!IsFloating()) {
         nsIFrame* nextInFlow;
-        rv = CreateNextInFlow(kid, nextInFlow);
+        rv = CreateNextInFlow(aPresContext, kid, nextInFlow);
         if (NS_FAILED(rv)) {
           return rv;
         }
@@ -262,7 +273,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
         // And then push it to our overflow list
         const nsFrameList& overflow = mFrames.RemoveFramesAfter(kid);
         if (overflow.NotEmpty()) {
-          SetOverflowFrames(overflow);
+          SetOverflowFrames(aPresContext, overflow);
         }
       } else if (!kid->GetNextInFlow()) {
         // For floating first letter frames (if a continuation wasn't already
@@ -309,15 +320,16 @@ nsFirstLetterFrame::CreateContinuationForFloatingParent(nsPresContext* aPresCont
   nsIFrame* continuation = presShell->FrameConstructor()->
     CreateContinuingFrame(aPresContext, aChild, parent, aIsFluid);
 
-  // The continuation will have gotten the first letter style from its
+  // The continuation will have gotten the first letter style from it's
   // prev continuation, so we need to repair the style context so it
   // doesn't have the first letter styling.
   nsStyleContext* parentSC = this->StyleContext()->GetParent();
   if (parentSC) {
     nsRefPtr<nsStyleContext> newSC;
     newSC = presShell->StyleSet()->ResolveStyleForNonElement(parentSC);
-    continuation->SetStyleContext(newSC);
-    nsLayoutUtils::MarkDescendantsDirty(continuation);
+    if (newSC) {
+      continuation->SetStyleContext(newSC);
+    }
   }
 
   //XXX Bidi may not be involved but we have to use the list name
@@ -344,8 +356,8 @@ nsFirstLetterFrame::DrainOverflowFrames(nsPresContext* aPresContext)
 
       // When pushing and pulling frames we need to check for whether any
       // views need to be reparented.
-      nsContainerFrame::ReparentFrameViewList(*overflowFrames, prevInFlow,
-                                              this);
+      nsContainerFrame::ReparentFrameViewList(aPresContext, *overflowFrames,
+                                              prevInFlow, this);
       mFrames.InsertFrames(this, nullptr, *overflowFrames);
     }
   }
@@ -367,11 +379,10 @@ nsFirstLetterFrame::DrainOverflowFrames(nsPresContext* aPresContext)
     if (kidContent) {
       NS_ASSERTION(kidContent->IsNodeOfType(nsINode::eTEXT),
                    "should contain only text nodes");
-      nsStyleContext* parentSC = prevInFlow ? mStyleContext->GetParent() :
-                                              mStyleContext;
-      sc = aPresContext->StyleSet()->ResolveStyleForNonElement(parentSC);
-      kid->SetStyleContext(sc);
-      nsLayoutUtils::MarkDescendantsDirty(kid);
+      sc = aPresContext->StyleSet()->ResolveStyleForNonElement(mStyleContext);
+      if (sc) {
+        kid->SetStyleContext(sc);
+      }
     }
   }
 }
@@ -380,18 +391,4 @@ nscoord
 nsFirstLetterFrame::GetBaseline() const
 {
   return mBaseline;
-}
-
-int
-nsFirstLetterFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
-{
-  if (GetPrevContinuation()) {
-    // We shouldn't get calls to GetSkipSides for later continuations since
-    // they have separate style contexts with initial values for all the
-    // properties that could trigger a call to GetSkipSides.  Then again,
-    // it's not really an error to call GetSkipSides on any frame, so
-    // that's why we handle it properly.
-    return LOGICAL_SIDES_ALL;
-  }
-  return 0;  // first continuation displays all sides
 }

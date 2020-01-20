@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsapi-tests/tests.h"
+#include "tests.h"
 
-static const JSClass ObjectEmulatingUndefinedClass = {
+static JSClass ObjectEmulatingUndefinedClass = {
     "ObjectEmulatingUndefined",
     JSCLASS_EMULATES_UNDEFINED,
     JS_PropertyStub,
@@ -16,29 +16,27 @@ static const JSClass ObjectEmulatingUndefinedClass = {
     JS_ConvertStub
 };
 
-static bool
+static JSBool
 ObjectEmulatingUndefinedConstructor(JSContext *cx, unsigned argc, jsval *vp)
 {
-    JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-    JSObject *obj = JS_NewObjectForConstructor(cx, &ObjectEmulatingUndefinedClass, args);
+    JSObject *obj = JS_NewObjectForConstructor(cx, &ObjectEmulatingUndefinedClass, vp);
     if (!obj)
         return false;
-    args.rval().setObject(*obj);
+    JS_SET_RVAL(cx, vp, OBJECT_TO_JSVAL(obj));
     return true;
 }
 
 BEGIN_TEST(testObjectEmulatingUndefined_truthy)
 {
-    CHECK(JS_InitClass(cx, global, js::NullPtr(), &ObjectEmulatingUndefinedClass,
-                       ObjectEmulatingUndefinedConstructor, 0,
-                       nullptr, nullptr, nullptr, nullptr));
+    CHECK(JS_InitClass(cx, global, NULL, &ObjectEmulatingUndefinedClass,
+                       ObjectEmulatingUndefinedConstructor, 0, NULL, NULL, NULL, NULL));
 
     JS::RootedValue result(cx);
 
-    EVAL("if (new ObjectEmulatingUndefined()) true; else false;", &result);
+    EVAL("if (new ObjectEmulatingUndefined()) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_FALSE);
 
-    EVAL("if (!new ObjectEmulatingUndefined()) true; else false;", &result);
+    EVAL("if (!new ObjectEmulatingUndefined()) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     EVAL("var obj = new ObjectEmulatingUndefined(); \n"
@@ -46,7 +44,7 @@ BEGIN_TEST(testObjectEmulatingUndefined_truthy)
          "for (var i = 0; i < 50; i++) \n"
          "  res.push(Boolean(obj)); \n"
          "res.every(function(v) { return v === false; });",
-         &result);
+         result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     return true;
@@ -55,22 +53,21 @@ END_TEST(testObjectEmulatingUndefined_truthy)
 
 BEGIN_TEST(testObjectEmulatingUndefined_equal)
 {
-    CHECK(JS_InitClass(cx, global, js::NullPtr(), &ObjectEmulatingUndefinedClass,
-                       ObjectEmulatingUndefinedConstructor, 0,
-                       nullptr, nullptr, nullptr, nullptr));
+    CHECK(JS_InitClass(cx, global, NULL, &ObjectEmulatingUndefinedClass,
+                       ObjectEmulatingUndefinedConstructor, 0, NULL, NULL, NULL, NULL));
 
     JS::RootedValue result(cx);
 
-    EVAL("if (new ObjectEmulatingUndefined() == undefined) true; else false;", &result);
+    EVAL("if (new ObjectEmulatingUndefined() == undefined) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
-    EVAL("if (new ObjectEmulatingUndefined() == null) true; else false;", &result);
+    EVAL("if (new ObjectEmulatingUndefined() == null) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
-    EVAL("if (new ObjectEmulatingUndefined() != undefined) true; else false;", &result);
+    EVAL("if (new ObjectEmulatingUndefined() != undefined) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_FALSE);
 
-    EVAL("if (new ObjectEmulatingUndefined() != null) true; else false;", &result);
+    EVAL("if (new ObjectEmulatingUndefined() != null) true; else false;", result.address());
     CHECK_SAME(result, JSVAL_FALSE);
 
     EVAL("var obj = new ObjectEmulatingUndefined(); \n"
@@ -78,7 +75,7 @@ BEGIN_TEST(testObjectEmulatingUndefined_equal)
          "for (var i = 0; i < 50; i++) \n"
          "  res.push(obj == undefined); \n"
          "res.every(function(v) { return v === true; });",
-         &result);
+         result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     EVAL("var obj = new ObjectEmulatingUndefined(); \n"
@@ -86,7 +83,7 @@ BEGIN_TEST(testObjectEmulatingUndefined_equal)
          "for (var i = 0; i < 50; i++) \n"
          "  res.push(obj == null); \n"
          "res.every(function(v) { return v === true; });",
-         &result);
+         result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     EVAL("var obj = new ObjectEmulatingUndefined(); \n"
@@ -94,7 +91,7 @@ BEGIN_TEST(testObjectEmulatingUndefined_equal)
          "for (var i = 0; i < 50; i++) \n"
          "  res.push(obj != undefined); \n"
          "res.every(function(v) { return v === false; });",
-         &result);
+         result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     EVAL("var obj = new ObjectEmulatingUndefined(); \n"
@@ -102,7 +99,7 @@ BEGIN_TEST(testObjectEmulatingUndefined_equal)
          "for (var i = 0; i < 50; i++) \n"
          "  res.push(obj != null); \n"
          "res.every(function(v) { return v === false; });",
-         &result);
+         result.address());
     CHECK_SAME(result, JSVAL_TRUE);
 
     return true;

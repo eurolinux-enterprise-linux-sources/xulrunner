@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "xpcom-config.h"
-#include <new>    // for placement new
+#include NEW_H    // for placement new
 #include "nscore.h"
 #include "nsCRT.h"
 
@@ -13,7 +13,7 @@
 
 using namespace mozilla;
 
-const PLDHashTableOps nsCommandParams::sHashOps =
+PLDHashTableOps nsCommandParams::sHashOps =
 {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
@@ -25,7 +25,7 @@ const PLDHashTableOps nsCommandParams::sHashOps =
 };
 
 
-NS_IMPL_ISUPPORTS(nsCommandParams, nsICommandParams)
+NS_IMPL_ISUPPORTS1(nsCommandParams, nsICommandParams)
 
 nsCommandParams::nsCommandParams()
 : mCurEntry(0)
@@ -42,8 +42,9 @@ nsCommandParams::~nsCommandParams()
 nsresult
 nsCommandParams::Init()
 {
-  PL_DHashTableInit(&mValuesHash, &sHashOps, (void *)this, sizeof(HashEntry), 4);
-
+  if (!PL_DHashTableInit(&mValuesHash, &sHashOps, (void *)this, sizeof(HashEntry), 4))
+    return NS_ERROR_FAILURE;
+    
   return NS_OK;
 }
 

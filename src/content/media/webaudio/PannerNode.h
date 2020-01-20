@@ -8,6 +8,9 @@
 #define PannerNode_h_
 
 #include "AudioNode.h"
+#include "AudioParam.h"
+#include "mozilla/ErrorResult.h"
+#include "mozilla/TypedEnum.h"
 #include "mozilla/dom/PannerNodeBinding.h"
 #include "ThreeDPoint.h"
 #include "mozilla/WeakPtr.h"
@@ -25,31 +28,11 @@ class PannerNode : public AudioNode,
                    public SupportsWeakPtr<PannerNode>
 {
 public:
-  MOZ_DECLARE_REFCOUNTED_TYPENAME(PannerNode)
   explicit PannerNode(AudioContext* aContext);
   virtual ~PannerNode();
 
-
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  virtual void DestroyMediaStream() MOZ_OVERRIDE;
-
-  virtual void SetChannelCount(uint32_t aChannelCount, ErrorResult& aRv) MOZ_OVERRIDE
-  {
-    if (aChannelCount > 2) {
-      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
-    }
-    AudioNode::SetChannelCount(aChannelCount, aRv);
-  }
-  virtual void SetChannelCountModeValue(ChannelCountMode aMode, ErrorResult& aRv) MOZ_OVERRIDE
-  {
-    if (aMode == ChannelCountMode::Max) {
-      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-      return;
-    }
-    AudioNode::SetChannelCountModeValue(aMode, aRv);
-  }
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PannerNode, AudioNode)
@@ -137,14 +120,14 @@ public:
 
   void SetOrientation(double aX, double aY, double aZ)
   {
-    ThreeDPoint orientation(aX, aY, aZ);
-    if (!orientation.IsZero()) {
-      orientation.Normalize();
-    }
-    if (mOrientation.FuzzyEqual(orientation)) {
+    if (WebAudioUtils::FuzzyEqual(mOrientation.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.z, aZ)) {
       return;
     }
-    mOrientation = orientation;
+    mOrientation.x = aX;
+    mOrientation.y = aY;
+    mOrientation.z = aZ;
     SendThreeDPointParameterToStream(ORIENTATION, mOrientation);
   }
 
@@ -245,28 +228,20 @@ public:
   void FindConnectedSources();
   void FindConnectedSources(AudioNode* aNode, nsTArray<AudioBufferSourceNode*>& aSources, std::set<AudioNode*>& aSeenNodes);
 
-  virtual const char* NodeType() const
-  {
-    return "PannerNode";
-  }
-
-  virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
-  virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
-
 private:
   friend class AudioListener;
   friend class PannerNodeEngine;
   enum EngineParameters {
     LISTENER_POSITION,
-    LISTENER_FRONT_VECTOR, // unit length
-    LISTENER_RIGHT_VECTOR, // unit length, orthogonal to LISTENER_FRONT_VECTOR
+    LISTENER_ORIENTATION,
+    LISTENER_UPVECTOR,
     LISTENER_VELOCITY,
     LISTENER_DOPPLER_FACTOR,
     LISTENER_SPEED_OF_SOUND,
     PANNING_MODEL,
     DISTANCE_MODEL,
     POSITION,
-    ORIENTATION, // unit length or zero
+    ORIENTATION,
     VELOCITY,
     REF_DISTANCE,
     MAX_DISTANCE,

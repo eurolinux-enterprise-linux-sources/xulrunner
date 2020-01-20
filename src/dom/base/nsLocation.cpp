@@ -15,36 +15,49 @@
 #include "nsIURIFixup.h"
 #include "nsIURL.h"
 #include "nsIJARURI.h"
+#include "nsIIOService.h"
+#include "nsIServiceManager.h"
 #include "nsNetUtil.h"
 #include "nsCOMPtr.h"
 #include "nsEscape.h"
 #include "nsIDOMWindow.h"
+#include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
+#include "nsXPIDLString.h"
 #include "nsError.h"
 #include "nsDOMClassInfoID.h"
+#include "nsCRT.h"
+#include "nsIProtocolHandler.h"
 #include "nsReadableUtils.h"
 #include "nsITextToSubURI.h"
 #include "nsJSUtils.h"
+#include "jsfriendapi.h"
 #include "nsContentUtils.h"
 #include "mozilla/Likely.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsNullPrincipal.h"
-#include "ScriptSettings.h"
 
 static nsresult
 GetDocumentCharacterSetForURI(const nsAString& aHref, nsACString& aCharset)
 {
   aCharset.Truncate();
 
+  nsresult rv;
+
   JSContext *cx = nsContentUtils::GetCurrentJSContext();
   if (cx) {
-    nsCOMPtr<nsPIDOMWindow> window =
+    nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(cx));
     NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
-    if (nsIDocument* doc = window->GetDoc()) {
+    nsCOMPtr<nsIDOMDocument> domDoc;
+    rv = window->GetDocument(getter_AddRefs(domDoc));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
+
+    if (doc) {
       aCharset = doc->GetDocumentCharacterSet();
     }
   }
@@ -125,10 +138,10 @@ nsLocation::CheckURL(nsIURI* aURI, nsIDocShellLoadInfo** aLoadInfo)
 
     nsCOMPtr<nsIDocument> doc;
     nsCOMPtr<nsIURI> docOriginalURI, docCurrentURI, principalURI;
-    nsCOMPtr<nsPIDOMWindow> incumbent =
-      do_QueryInterface(mozilla::dom::GetIncumbentGlobal());
-    if (incumbent) {
-      doc = incumbent->GetDoc();
+    nsCOMPtr<nsPIDOMWindow> entryPoint =
+      do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(cx));
+    if (entryPoint) {
+      doc = entryPoint->GetDoc();
     }
     if (doc) {
       docOriginalURI = doc->GetOriginalURI();
@@ -146,18 +159,7 @@ nsLocation::CheckURL(nsIURI* aURI, nsIDocShellLoadInfo** aLoadInfo)
       sourceURI = docCurrentURI;
     }
     else {
-      // Use principalURI as long as it is not an nsNullPrincipalURI.
-      // We could add a method such as GetReferrerURI to principals to make this
-      // cleaner, but given that we need to start using Source Browsing Context
-      // for referrer (see Bug 960639) this may be wasted effort at this stage.
-      if (principalURI) {
-        bool isNullPrincipalScheme;
-        rv = principalURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME,
-                                    &isNullPrincipalScheme);
-        if (NS_SUCCEEDED(rv) && !isNullPrincipalScheme) {
-          sourceURI = principalURI;
-        }
-      }
+      sourceURI = principalURI;
     }
 
     owner = do_QueryInterface(ssm->GetCxSubjectPrincipal(cx));
@@ -249,13 +251,6 @@ nsLocation::SetURI(nsIURI* aURI, bool aReplace)
       loadInfo->SetLoadType(nsIDocShellLoadInfo::loadStopContent);
     }
 
-    // Get the incumbent script's browsing context to set as source.
-    nsCOMPtr<nsPIDOMWindow> sourceWindow =
-      do_QueryInterface(mozilla::dom::GetIncumbentGlobal());
-    if (sourceWindow) {
-      loadInfo->SetSourceDocShell(sourceWindow->GetDocShell());
-    }
-
     return docShell->LoadURI(aURI, loadInfo,
                              nsIWebNavigation::LOAD_FLAGS_NONE, true);
   }
@@ -301,7 +296,7 @@ nsLocation::GetHash(nsAString& aHash)
   }
 
   if (NS_SUCCEEDED(rv) && !unicodeRef.IsEmpty()) {
-    aHash.Assign(char16_t('#'));
+    aHash.Assign(PRUnichar('#'));
     aHash.Append(unicodeRef);
   }
 
@@ -327,15 +322,15 @@ nsLocation::SetHash(const nsAString& aHash)
   }
 
   NS_ConvertUTF16toUTF8 hash(aHash);
-  if (hash.IsEmpty() || hash.First() != char16_t('#')) {
-    hash.Insert(char16_t('#'), 0);
+  if (hash.IsEmpty() || hash.First() != PRUnichar('#')) {
+    hash.Insert(PRUnichar('#'), 0);
   }
   rv = uri->SetRef(hash);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  if (NS_SUCCEEDED(rv)) {
+    SetURI(uri);
   }
 
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -372,16 +367,15 @@ nsLocation::SetHost(const nsAString& aHost)
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !uri)) {
-    return rv;
+
+  if (uri) {
+    rv = uri->SetHostPort(NS_ConvertUTF16toUTF8(aHost));
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
+    }
   }
 
-  rv = uri->SetHostPort(NS_ConvertUTF16toUTF8(aHost));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -418,16 +412,15 @@ nsLocation::SetHostname(const nsAString& aHostname)
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !uri)) {
-    return rv;
+
+  if (uri) {
+    rv = uri->SetHost(NS_ConvertUTF16toUTF8(aHostname));
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
+    }
   }
 
-  rv = uri->SetHost(NS_ConvertUTF16toUTF8(aHostname));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -558,7 +551,6 @@ nsLocation::GetOrigin(nsAString& aOrigin)
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetURI(getter_AddRefs(uri), true);
   NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(uri, NS_OK);
 
   nsAutoString origin;
   rv = nsContentUtils::GetUTFOrigin(uri, origin);
@@ -603,16 +595,15 @@ nsLocation::SetPathname(const nsAString& aPathname)
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !uri)) {
-    return rv;
+
+  if (uri) {
+    rv = uri->SetPath(NS_ConvertUTF16toUTF8(aPathname));
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
+    }
   }
 
-  rv = uri->SetPath(NS_ConvertUTF16toUTF8(aPathname));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -653,30 +644,29 @@ nsLocation::SetPort(const nsAString& aPort)
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !uri)) {
-    return rv;
-  }
 
-  // perhaps use nsReadingIterators at some point?
-  NS_ConvertUTF16toUTF8 portStr(aPort);
-  const char *buf = portStr.get();
-  int32_t port = -1;
+  if (uri) {
+    // perhaps use nsReadingIterators at some point?
+    NS_ConvertUTF16toUTF8 portStr(aPort);
+    const char *buf = portStr.get();
+    int32_t port = -1;
 
-  if (!portStr.IsEmpty() && buf) {
-    if (*buf == ':') {
-      port = atol(buf+1);
+    if (buf) {
+      if (*buf == ':') {
+        port = atol(buf+1);
+      }
+      else {
+        port = atol(buf);
+      }
     }
-    else {
-      port = atol(buf);
+
+    rv = uri->SetPort(port);
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
     }
   }
 
-  rv = uri->SetPort(port);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -699,7 +689,7 @@ nsLocation::GetProtocol(nsAString& aProtocol)
 
     if (NS_SUCCEEDED(result)) {
       CopyASCIItoUTF16(protocol, aProtocol);
-      aProtocol.Append(char16_t(':'));
+      aProtocol.Append(PRUnichar(':'));
     }
   }
 
@@ -714,16 +704,15 @@ nsLocation::SetProtocol(const nsAString& aProtocol)
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !uri)) {
-    return rv;
+
+  if (uri) {
+    rv = uri->SetScheme(NS_ConvertUTF16toUTF8(aProtocol));
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
+    }
   }
 
-  rv = uri->SetScheme(NS_ConvertUTF16toUTF8(aProtocol));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -747,7 +736,7 @@ nsLocation::GetSearch(nsAString& aSearch)
     result = url->GetQuery(search);
 
     if (NS_SUCCEEDED(result) && !search.IsEmpty()) {
-      aSearch.Assign(char16_t('?'));
+      aSearch.Assign(PRUnichar('?'));
       AppendUTF8toUTF16(search, aSearch);
     }
   }
@@ -765,16 +754,14 @@ nsLocation::SetSearch(const nsAString& aSearch)
   nsresult rv = GetWritableURI(getter_AddRefs(uri));
 
   nsCOMPtr<nsIURL> url(do_QueryInterface(uri));
-  if (NS_WARN_IF(NS_FAILED(rv) || !url)) {
-    return rv;
+  if (url) {
+    rv = url->SetQuery(NS_ConvertUTF16toUTF8(aSearch));
+    if (NS_SUCCEEDED(rv)) {
+      SetURI(uri);
+    }
   }
 
-  rv = url->SetQuery(NS_ConvertUTF16toUTF8(aSearch));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return SetURI(uri);
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -908,7 +895,7 @@ nsLocation::GetSourceBaseURL(JSContext* cx, nsIURI** sourceURL)
   NS_ENSURE_TRUE(window, NS_ERROR_UNEXPECTED);
   nsIDocument* doc = window->GetDoc();
   NS_ENSURE_TRUE(doc, NS_OK);
-  *sourceURL = doc->GetBaseURI().take();
+  *sourceURL = doc->GetBaseURI().get();
   return NS_OK;
 }
 
@@ -921,7 +908,7 @@ nsLocation::CallerSubsumes()
     return false;
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(outer);
   bool subsumes = false;
-  nsresult rv = nsContentUtils::GetSubjectPrincipal()->SubsumesConsideringDomain(sop->GetPrincipal(), &subsumes);
+  nsresult rv = nsContentUtils::GetSubjectPrincipal()->Subsumes(sop->GetPrincipal(), &subsumes);
   NS_ENSURE_SUCCESS(rv, false);
   return subsumes;
 }

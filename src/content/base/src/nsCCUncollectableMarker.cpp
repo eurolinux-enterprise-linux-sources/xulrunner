@@ -21,18 +21,16 @@
 #include "nsIXULWindow.h"
 #include "nsIAppShellService.h"
 #include "nsAppShellCID.h"
+#include "nsEventListenerManager.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsJSEnvironment.h"
 #include "nsInProcessTabChildGlobal.h"
 #include "nsFrameLoader.h"
-#include "mozilla/EventListenerManager.h"
 #include "mozilla/dom/Element.h"
 #include "xpcpublic.h"
 #include "nsObserverService.h"
-#include "nsFocusManager.h"
 
-using namespace mozilla;
 using namespace mozilla::dom;
 
 static bool sInited = 0;
@@ -41,7 +39,7 @@ uint32_t nsCCUncollectableMarker::sGeneration = 0;
 #include "nsXULPrototypeCache.h"
 #endif
 
-NS_IMPL_ISUPPORTS(nsCCUncollectableMarker, nsIObserver)
+NS_IMPL_ISUPPORTS1(nsCCUncollectableMarker, nsIObserver)
 
 /* static */
 nsresult
@@ -146,7 +144,7 @@ MarkMessageManagers()
           continue;
         }
         static_cast<nsInProcessTabChildGlobal*>(et)->MarkForCC();
-        EventListenerManager* elm = et->GetExistingListenerManager();
+        nsEventListenerManager* elm = et->GetListenerManager(false);
         if (elm) {
           elm->MarkForCC();
         }
@@ -190,13 +188,13 @@ MarkContentViewer(nsIContentViewer* aViewer, bool aCleanupJS,
       doc->GetMarkedCCGeneration() != nsCCUncollectableMarker::sGeneration) {
     doc->MarkUncollectableForCCGeneration(nsCCUncollectableMarker::sGeneration);
     if (aCleanupJS) {
-      EventListenerManager* elm = doc->GetExistingListenerManager();
+      nsEventListenerManager* elm = doc->GetListenerManager(false);
       if (elm) {
         elm->MarkForCC();
       }
       nsCOMPtr<EventTarget> win = do_QueryInterface(doc->GetInnerWindow());
       if (win) {
-        elm = win->GetExistingListenerManager();
+        elm = win->GetListenerManager(false);
         if (elm) {
           elm->MarkForCC();
         }
@@ -212,19 +210,9 @@ MarkContentViewer(nsIContentViewer* aViewer, bool aCleanupJS,
         EnumerateAll(MarkUserData, &nsCCUncollectableMarker::sGeneration);
     }
   }
-  if (doc) {
-    nsPIDOMWindow* inner = doc->GetInnerWindow();
-    if (inner) {
-      inner->MarkUncollectableForCCGeneration(nsCCUncollectableMarker::sGeneration);
-    }
-    nsPIDOMWindow* outer = doc->GetWindow();
-    if (outer) {
-      outer->MarkUncollectableForCCGeneration(nsCCUncollectableMarker::sGeneration);
-    }
-  }
 }
 
-void MarkDocShell(nsIDocShellTreeItem* aNode, bool aCleanupJS,
+void MarkDocShell(nsIDocShellTreeNode* aNode, bool aCleanupJS,
                   bool aPrepareForCC);
 
 void
@@ -257,7 +245,7 @@ MarkSHEntry(nsISHEntry* aSHEntry, bool aCleanupJS, bool aPrepareForCC)
 }
 
 void
-MarkDocShell(nsIDocShellTreeItem* aNode, bool aCleanupJS, bool aPrepareForCC)
+MarkDocShell(nsIDocShellTreeNode* aNode, bool aCleanupJS, bool aPrepareForCC)
 {
   nsCOMPtr<nsIDocShell> shell = do_QueryInterface(aNode);
   if (!shell) {
@@ -275,8 +263,9 @@ MarkDocShell(nsIDocShellTreeItem* aNode, bool aCleanupJS, bool aPrepareForCC)
     int32_t i, historyCount;
     history->GetCount(&historyCount);
     for (i = 0; i < historyCount; ++i) {
-      nsCOMPtr<nsISHEntry> shEntry;
-      history->GetEntryAtIndex(i, false, getter_AddRefs(shEntry));
+      nsCOMPtr<nsIHistoryEntry> historyEntry;
+      history->GetEntryAtIndex(i, false, getter_AddRefs(historyEntry));
+      nsCOMPtr<nsISHEntry> shEntry = do_QueryInterface(historyEntry);
 
       MarkSHEntry(shEntry, aCleanupJS, aPrepareForCC);
     }
@@ -300,7 +289,8 @@ MarkWindowList(nsISimpleEnumerator* aWindowList, bool aCleanupJS,
          iter) {
     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(iter);
     if (window) {
-      nsCOMPtr<nsIDocShell> rootDocShell = window->GetDocShell();
+      nsCOMPtr<nsIDocShellTreeNode> rootDocShell =
+        do_QueryInterface(window->GetDocShell());
 
       MarkDocShell(rootDocShell, aCleanupJS, aPrepareForCC);
     }
@@ -309,7 +299,7 @@ MarkWindowList(nsISimpleEnumerator* aWindowList, bool aCleanupJS,
 
 nsresult
 nsCCUncollectableMarker::Observe(nsISupports* aSubject, const char* aTopic,
-                                 const char16_t* aData)
+                                 const PRUnichar* aData)
 {
   if (!strcmp(aTopic, "xpcom-shutdown")) {
     Element::ClearContentUnbinder();
@@ -347,8 +337,6 @@ nsCCUncollectableMarker::Observe(nsISupports* aSubject, const char* aTopic,
     ++sGeneration;
   }
 
-  nsFocusManager::MarkUncollectableForCCGeneration(sGeneration);
-
   nsresult rv;
 
   // Iterate all toplevel windows
@@ -379,7 +367,8 @@ nsCCUncollectableMarker::Observe(nsISupports* aSubject, const char* aTopic,
     if (hw) {
       nsCOMPtr<nsIDocShell> shell;
       hw->GetDocShell(getter_AddRefs(shell));
-      MarkDocShell(shell, cleanupJS, prepareForCC);
+      nsCOMPtr<nsIDocShellTreeNode> shellTreeNode = do_QueryInterface(shell);
+      MarkDocShell(shellTreeNode, cleanupJS, prepareForCC);
     }
     bool hasHiddenPrivateWindow = false;
     appShell->GetHasHiddenPrivateWindow(&hasHiddenPrivateWindow);
@@ -388,7 +377,8 @@ nsCCUncollectableMarker::Observe(nsISupports* aSubject, const char* aTopic,
       if (hw) {
         nsCOMPtr<nsIDocShell> shell;
         hw->GetDocShell(getter_AddRefs(shell));
-        MarkDocShell(shell, cleanupJS, prepareForCC);
+        nsCOMPtr<nsIDocShellTreeNode> shellTreeNode = do_QueryInterface(shell);
+        MarkDocShell(shellTreeNode, cleanupJS, prepareForCC);
       }
     }
   }

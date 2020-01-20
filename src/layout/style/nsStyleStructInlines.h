@@ -15,16 +15,39 @@
 #include "nsStyleStruct.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "nsIContent.h"
 
 inline void
-nsStyleImage::SetSubImage(uint8_t aIndex, imgIContainer* aSubImage) const
+nsStyleBorder::SetBorderImage(imgRequestProxy* aImage)
 {
-  const_cast<nsStyleImage*>(this)->mSubImages.ReplaceObjectAt(aSubImage, aIndex);
+  mBorderImageSource = aImage;
+  mSubImages.Clear();
+}
+
+inline imgRequestProxy*
+nsStyleBorder::GetBorderImage() const
+{
+  NS_ABORT_IF_FALSE(!mBorderImageSource || mImageTracked,
+                    "Should be tracking any images we're going to use!");
+  return mBorderImageSource;
+}
+
+inline bool nsStyleBorder::IsBorderImageLoaded() const
+{
+  uint32_t status;
+  return mBorderImageSource &&
+         NS_SUCCEEDED(mBorderImageSource->GetImageStatus(&status)) &&
+         (status & imgIRequest::STATUS_LOAD_COMPLETE) &&
+         !(status & imgIRequest::STATUS_ERROR);
+}
+
+inline void
+nsStyleBorder::SetSubImage(uint8_t aIndex, imgIContainer* aSubImage) const
+{
+  const_cast<nsStyleBorder*>(this)->mSubImages.ReplaceObjectAt(aSubImage, aIndex);
 }
 
 inline imgIContainer*
-nsStyleImage::GetSubImage(uint8_t aIndex) const
+nsStyleBorder::GetSubImage(uint8_t aIndex) const
 {
   imgIContainer* subImage = nullptr;
   if (aIndex < mSubImages.Count())
@@ -33,14 +56,19 @@ nsStyleImage::GetSubImage(uint8_t aIndex) const
 }
 
 bool
-nsStyleText::HasTextShadow() const
+nsStyleText::HasTextShadow(const nsIFrame* aContextFrame) const
 {
-  return mTextShadow;
+  NS_ASSERTION(aContextFrame->StyleText() == this, "unexpected aContextFrame");
+  return mTextShadow && !aContextFrame->IsSVGText();
 }
 
 nsCSSShadowArray*
-nsStyleText::GetTextShadow() const
+nsStyleText::GetTextShadow(const nsIFrame* aContextFrame) const
 {
+  NS_ASSERTION(aContextFrame->StyleText() == this, "unexpected aContextFrame");
+  if (aContextFrame->IsSVGText()) {
+    return nullptr;
+  }
   return mTextShadow;
 }
 
@@ -132,8 +160,7 @@ nsStyleDisplay::IsPositioned(const nsIFrame* aContextFrame) const
                "unexpected aContextFrame");
   return (IsAbsolutelyPositionedStyle() ||
           IsRelativelyPositionedStyle() ||
-          HasTransform(aContextFrame) ||
-          HasPerspectiveStyle()) &&
+          HasTransform(aContextFrame)) &&
          !aContextFrame->IsSVGText();
 }
 

@@ -12,14 +12,12 @@
 #include "SpeechRecognitionAlternative.h"
 #include "SpeechRecognitionResult.h"
 #include "SpeechRecognitionResultList.h"
-#include "nsIObserverService.h"
-#include "mozilla/Services.h"
 
 namespace mozilla {
 
 using namespace dom;
 
-NS_IMPL_ISUPPORTS(FakeSpeechRecognitionService, nsISpeechRecognitionService, nsIObserver)
+NS_IMPL_ISUPPORTS2(FakeSpeechRecognitionService, nsISpeechRecognitionService, nsIObserver)
 
 FakeSpeechRecognitionService::FakeSpeechRecognitionService()
 {
@@ -58,7 +56,7 @@ FakeSpeechRecognitionService::Abort()
 }
 
 NS_IMETHODIMP
-FakeSpeechRecognitionService::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
+FakeSpeechRecognitionService::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar* aData)
 {
   MOZ_ASSERT(mRecognition->mTestConfig.mFakeRecognitionService,
              "Got request to fake recognition service event, but "
@@ -76,7 +74,7 @@ FakeSpeechRecognitionService::Observe(nsISupports* aSubject, const char* aTopic,
 
   if (eventName.EqualsLiteral("EVENT_RECOGNITIONSERVICE_ERROR")) {
     mRecognition->DispatchError(SpeechRecognition::EVENT_RECOGNITIONSERVICE_ERROR,
-                                SpeechRecognitionErrorCode::Network, // TODO different codes?
+                                nsIDOMSpeechRecognitionError::NETWORK, // TODO different codes?
                                 NS_LITERAL_STRING("RECOGNITIONSERVICE_ERROR test event"));
 
   } else if (eventName.EqualsLiteral("EVENT_RECOGNITIONSERVICE_FINAL_RESULT")) {

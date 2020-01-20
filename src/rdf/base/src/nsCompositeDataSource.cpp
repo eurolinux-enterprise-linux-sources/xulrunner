@@ -42,12 +42,14 @@
 
 #include "nsEnumeratorUtils.h"
 
-#ifdef PR_LOGGING
+#ifdef DEBUG
 #include "prlog.h"
 #include "prprf.h"
 #include <stdio.h>
 PRLogModuleInfo* nsRDFLog = nullptr;
 #endif
+
+static NS_DEFINE_IID(kISupportsIID,           NS_ISUPPORTS_IID);
 
 //----------------------------------------------------------------------
 //
@@ -160,7 +162,7 @@ CompositeEnumeratorImpl::~CompositeEnumeratorImpl(void)
 
 NS_IMPL_ADDREF(CompositeEnumeratorImpl)
 NS_IMPL_RELEASE(CompositeEnumeratorImpl)
-NS_IMPL_QUERY_INTERFACE(CompositeEnumeratorImpl, nsISimpleEnumerator)
+NS_IMPL_QUERY_INTERFACE1(CompositeEnumeratorImpl, nsISimpleEnumerator)
 
 NS_IMETHODIMP
 CompositeEnumeratorImpl::HasMoreElements(bool* aResult)
@@ -502,8 +504,6 @@ CompositeDataSourceImpl::CompositeDataSourceImpl(void)
 //
 // nsISupports interface
 //
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(CompositeDataSourceImpl)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CompositeDataSourceImpl)
     uint32_t i, count = tmp->mDataSources.Count();

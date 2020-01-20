@@ -6,10 +6,10 @@
  */
 
 function test() {
-  initNetMonitor(CONTENT_TYPE_WITHOUT_CACHE_URL).then(([aTab, aDebuggee, aMonitor]) => {
+  initNetMonitor(CONTENT_TYPE_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    let { document, L10N, Editor, NetMonitorView } = aMonitor.panelWin;
+    let { document, L10N, SourceEditor, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -62,7 +62,6 @@ function test() {
         });
       verifyRequestItemTarget(RequestsMenu.getItemAtIndex(5),
         "GET", TEST_IMAGE, {
-          fuzzyUrl: true,
           status: 200,
           statusText: "OK",
           type: "png",
@@ -76,27 +75,31 @@ function test() {
       EventUtils.sendMouseEvent({ type: "mousedown" },
         document.querySelectorAll("#details-pane tab")[3]);
 
-      Task.spawn(function*() {
-        yield waitForResponseBodyDisplayed();
-        yield testResponseTab("xml");
-        RequestsMenu.selectedIndex = 1;
-        yield waitForTabUpdated();
-        yield testResponseTab("css");
-        RequestsMenu.selectedIndex = 2;
-        yield waitForTabUpdated();
-        yield testResponseTab("js");
-        RequestsMenu.selectedIndex = 3;
-        yield waitForTabUpdated();
-        yield testResponseTab("json");
-        RequestsMenu.selectedIndex = 4;
-        yield waitForTabUpdated();
-        yield testResponseTab("html");
-        RequestsMenu.selectedIndex = 5;
-        yield waitForTabUpdated();
-        yield testResponseTab("png");
-        yield teardown(aMonitor);
-        finish();
-      });
+      testResponseTab("xml")
+        .then(() => {
+          RequestsMenu.selectedIndex = 1;
+          return testResponseTab("css");
+        })
+        .then(() => {
+          RequestsMenu.selectedIndex = 2;
+          return testResponseTab("js");
+        })
+        .then(() => {
+          RequestsMenu.selectedIndex = 3;
+          return testResponseTab("json");
+        })
+        .then(() => {
+          RequestsMenu.selectedIndex = 4;
+          return testResponseTab("html");
+        })
+        .then(() => {
+          RequestsMenu.selectedIndex = 5;
+          return testResponseTab("png");
+        })
+        .then(() => {
+          return teardown(aMonitor);
+        })
+        .then(finish);
 
       function testResponseTab(aType) {
         let tab = document.querySelectorAll("#details-pane tab")[3];
@@ -127,7 +130,7 @@ function test() {
             return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
               is(aEditor.getText(), "<label value='greeting'>Hello XML!</label>",
                 "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.html,
+              is(aEditor.getMode(), SourceEditor.MODES.HTML,
                 "The mode active in the source editor is incorrect for the xml request.");
             });
           }
@@ -137,7 +140,7 @@ function test() {
             return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
               is(aEditor.getText(), "body:pre { content: 'Hello CSS!' }",
                 "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.css,
+              is(aEditor.getMode(), SourceEditor.MODES.CSS,
                 "The mode active in the source editor is incorrect for the xml request.");
             });
           }
@@ -147,7 +150,7 @@ function test() {
             return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
               is(aEditor.getText(), "function() { return 'Hello JS!'; }",
                 "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.js,
+              is(aEditor.getMode(), SourceEditor.MODES.JAVASCRIPT,
                 "The mode active in the source editor is incorrect for the xml request.");
             });
           }
@@ -175,9 +178,9 @@ function test() {
             is(jsonScope.querySelectorAll(".variables-view-property .name")[1].getAttribute("value"),
               "__proto__", "The second json property name was incorrect.");
             is(jsonScope.querySelectorAll(".variables-view-property .value")[1].getAttribute("value"),
-              "Object", "The second json property value was incorrect.");
+              "[object Object]", "The second json property value was incorrect.");
 
-            return promise.resolve();
+            return Promise.resolve();
           }
           case "html": {
             checkVisibility("textarea");
@@ -185,7 +188,7 @@ function test() {
             return NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
               is(aEditor.getText(), "<blink>Not Found</blink>",
                 "The text shown in the source editor is incorrect for the xml request.");
-              is(aEditor.getMode(), Editor.modes.html,
+              is(aEditor.getMode(), SourceEditor.MODES.HTML,
                 "The mode active in the source editor is incorrect for the xml request.");
             });
           }
@@ -193,7 +196,7 @@ function test() {
             checkVisibility("image");
 
             let imageNode = tabpanel.querySelector("#response-content-image");
-            let deferred = promise.defer();
+            let deferred = Promise.defer();
 
             imageNode.addEventListener("load", function onLoad() {
               imageNode.removeEventListener("load", onLoad);
@@ -217,14 +220,6 @@ function test() {
             return deferred.promise;
           }
         }
-      }
-
-      function waitForTabUpdated () {
-        return waitFor(aMonitor.panelWin, aMonitor.panelWin.EVENTS.TAB_UPDATED);
-      }
-
-      function waitForResponseBodyDisplayed () {
-        return waitFor(aMonitor.panelWin, aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED);
       }
     });
 

@@ -47,7 +47,7 @@ typedef NSInteger NSWindowAnimationBehavior;
 #endif
 
 typedef struct _nsCocoaWindowList {
-  _nsCocoaWindowList() : prev(nullptr), window(nullptr) {}
+  _nsCocoaWindowList() : prev(NULL), window(NULL) {}
   struct _nsCocoaWindowList *prev;
   nsCocoaWindow *window; // Weak
 } nsCocoaWindowList;
@@ -70,18 +70,12 @@ typedef struct _nsCocoaWindowList {
   // Shadow
   BOOL mScheduledShadowInvalidation;
 
-  // Invalidation disabling
-  BOOL mDisabledNeedsDisplay;
-
   // DPI cache. Getting the physical screen size (CGDisplayScreenSize)
   // is ridiculously slow, so we cache it in the toplevel window for all
   // descendants to use.
   float mDPI;
 
   NSTrackingArea* mTrackingArea;
-
-  BOOL mBeingShown;
-  BOOL mDrawTitle;
 }
 
 - (void)importState:(NSDictionary*)aState;
@@ -101,19 +95,9 @@ typedef struct _nsCocoaWindowList {
 - (void)updateTrackingArea;
 - (NSView*)trackingAreaView;
 
-- (void)setBeingShown:(BOOL)aValue;
-- (BOOL)isBeingShown;
-- (BOOL)isVisibleOrBeingShown;
-
 - (ChildView*)mainChildView;
 
 - (NSArray*)titlebarControls;
-
-- (void)setWantsTitleDrawn:(BOOL)aDrawTitle;
-- (BOOL)wantsTitleDrawn;
-
-- (void)disableSetNeedsDisplay;
-- (void)enableSetNeedsDisplay;
 
 @end
 
@@ -136,11 +120,6 @@ typedef struct _nsCocoaWindowList {
 // Present in the same form on OS X since at least OS X 10.5.
 - (NSRect)contentRectForFrameRect:(NSRect)windowFrame styleMask:(NSUInteger)windowStyle;
 - (NSRect)frameRectForContentRect:(NSRect)windowContentRect styleMask:(NSUInteger)windowStyle;
-
-// Present since at least OS X 10.5.  The OS calls this method on NSWindow
-// (and its subclasses) to find out which NSFrameView subclass to instantiate
-// to create its "frame view".
-+ (Class)frameViewClassForStyleMask:(NSUInteger)styleMask;
 
 @end
 
@@ -209,8 +188,6 @@ typedef struct _nsCocoaWindowList {
   CGFloat mUnifiedToolbarHeight;
   NSColor *mBackgroundColor;
   NSView *mTitlebarView; // strong
-  NSRect mWindowButtonsRect;
-  NSRect mFullScreenButtonRect;
 }
 // Pass nil here to get the default appearance.
 - (void)setTitlebarColor:(NSColor*)aColor forActiveWindow:(BOOL)aActive;
@@ -221,10 +198,6 @@ typedef struct _nsCocoaWindowList {
 - (void)setTitlebarNeedsDisplayInRect:(NSRect)aRect sync:(BOOL)aSync;
 - (void)setTitlebarNeedsDisplayInRect:(NSRect)aRect;
 - (void)setDrawsContentsIntoWindowFrame:(BOOL)aState;
-- (void)placeWindowButtons:(NSRect)aRect;
-- (void)placeFullScreenButton:(NSRect)aRect;
-- (NSPoint)windowButtonsPositionWithDefaultPosition:(NSPoint)aDefaultPosition;
-- (NSPoint)fullScreenButtonPositionWithDefaultPosition:(NSPoint)aDefaultPosition;
 @end
 
 class nsCocoaWindow : public nsBaseWidget, public nsPIWidgetCocoa
@@ -284,18 +257,16 @@ public:
     CGFloat                 BackingScaleFactor();
     void                    BackingScaleFactorChanged();
     virtual double          GetDefaultScaleInternal();
-    virtual int32_t         RoundsWidgetCoordinatesTo() MOZ_OVERRIDE;
 
     NS_IMETHOD              SetTitle(const nsAString& aTitle);
 
     NS_IMETHOD Invalidate(const nsIntRect &aRect);
     virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations);
     virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
-                                          LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
+                                          LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr);
-    NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
-                             nsEventStatus& aStatus);
+    NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus) ;
     NS_IMETHOD CaptureRollupEvents(nsIRollupListener * aListener, bool aDoCapture);
     NS_IMETHOD GetAttention(int32_t aCycleCount);
     virtual bool HasPendingInputEvent();
@@ -305,8 +276,6 @@ public:
     virtual void SetShowsToolbarButton(bool aShow);
     virtual void SetShowsFullScreenButton(bool aShow);
     virtual void SetWindowAnimationType(WindowAnimationType aType);
-    virtual void SetDrawsTitle(bool aDrawTitle);
-    NS_IMETHOD SetNonClientMargins(nsIntMargin &margins);
     NS_IMETHOD SetWindowTitlebarColor(nscolor aColor, bool aActive);
     virtual void SetDrawsInTitlebar(bool aState);
     virtual nsresult SynthesizeNativeMouseEvent(nsIntPoint aPoint,
@@ -326,7 +295,7 @@ public:
     void SetMenuBar(nsMenuBarX* aMenuBar);
     nsMenuBarX *GetMenuBar();
 
-    NS_IMETHOD NotifyIME(const IMENotification& aIMENotification) MOZ_OVERRIDE;
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
     NS_IMETHOD_(void) SetInputContext(
                         const InputContext& aContext,
                         const InputContextAction& aAction) MOZ_OVERRIDE;
@@ -344,11 +313,6 @@ public:
       }
       return mInputContext;
     }
-    NS_IMETHOD_(bool) ExecuteNativeKeyBinding(
-                        NativeKeyBindingsType aType,
-                        const mozilla::WidgetKeyboardEvent& aEvent,
-                        DoCommandCallback aCallback,
-                        void* aCallbackData) MOZ_OVERRIDE;
 
     void SetPopupWindowLevel();
 
@@ -362,7 +326,8 @@ protected:
                                               nsDeviceContext *aContext);
   void                 DestroyNativeWindow();
   void                 AdjustWindowShadow();
-  void                 SetWindowBackgroundBlur();
+  void                 SetUpWindowFilter();
+  void                 CleanUpWindowFilter();
   void                 UpdateBounds();
 
   nsresult             DoResize(double aX, double aY, double aWidth, double aHeight,
@@ -383,6 +348,7 @@ protected:
   NSWindow*            mSheetWindowParent; // if this is a sheet, this is the NSWindow it's attached to
   nsChildView*         mPopupContentView; // if this is a popup, this is its content widget
   int32_t              mShadowStyle;
+  NSUInteger           mWindowFilter;
 
   CGFloat              mBackingScaleFactor;
 
@@ -401,7 +367,6 @@ protected:
   bool                 mIsAnimationSuppressed;
 
   bool                 mInReportMoveEvent; // true if in a call to ReportMoveEvent().
-  bool                 mInResize; // true if in a call to DoResize().
 
   int32_t              mNumModalDescendents;
   InputContext         mInputContext;

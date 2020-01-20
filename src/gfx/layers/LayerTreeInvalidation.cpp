@@ -4,27 +4,10 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "LayerTreeInvalidation.h"
-#include <stdint.h>                     // for uint32_t
-#include "ImageContainer.h"             // for ImageContainer
-#include "ImageLayers.h"                // for ImageLayer, etc
-#include "Layers.h"                     // for Layer, ContainerLayer, etc
-#include "gfx3DMatrix.h"                // for gfx3DMatrix
-#include "gfxColor.h"                   // for gfxRGBA
-#include "GraphicsFilter.h"             // for GraphicsFilter
-#include "gfxPoint3D.h"                 // for gfxPoint3D
-#include "gfxRect.h"                    // for gfxRect
-#include "gfxUtils.h"                   // for gfxUtils
-#include "mozilla/gfx/BaseSize.h"       // for BaseSize
-#include "mozilla/gfx/Point.h"          // for IntSize
-#include "mozilla/mozalloc.h"           // for operator new, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr, etc
-#include "nsDataHashtable.h"            // for nsDataHashtable
-#include "nsDebug.h"                    // for NS_ASSERTION
-#include "nsHashKeys.h"                 // for nsPtrHashKey
-#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
-#include "nsPoint.h"                    // for nsIntPoint
-#include "nsRect.h"                     // for nsIntRect
-#include "nsTArray.h"                   // for nsAutoTArray, nsTArray_Impl
+#include "Layers.h"
+#include "ImageLayers.h"
+#include "gfxUtils.h"
+#include "nsDataHashtable.h"
 
 namespace mozilla {
 namespace layers {
@@ -59,14 +42,14 @@ AddTransformedRegion(nsIntRegion& aDest, const nsIntRegion& aSource, const gfx3D
   while ((r = iter.Next())) {
     aDest.Or(aDest, TransformRect(*r, aTransform));
   }
-  aDest.SimplifyOutward(20);
+  aDest.SimplifyOutward(4);
 }
 
 static void
 AddRegion(nsIntRegion& aDest, const nsIntRegion& aSource)
 {
   aDest.Or(aDest, aSource);
-  aDest.SimplifyOutward(20);
+  aDest.SimplifyOutward(4);
 }
 
 static nsIntRegion
@@ -109,8 +92,8 @@ struct LayerPropertiesBase : public LayerProperties
     : mLayer(aLayer)
     , mMaskLayer(nullptr)
     , mVisibleRegion(aLayer->GetVisibleRegion())
-    , mInvalidRegion(aLayer->GetInvalidRegion())
-    , mOpacity(aLayer->GetLocalOpacity())
+    , mTransform(aLayer->GetTransform())
+    , mOpacity(aLayer->GetOpacity())
     , mUseClipRect(!!aLayer->GetClipRect())
   {
     MOZ_COUNT_CTOR(LayerPropertiesBase);
@@ -120,7 +103,6 @@ struct LayerPropertiesBase : public LayerProperties
     if (mUseClipRect) {
       mClipRect = *aLayer->GetClipRect();
     }
-    gfx::To3DMatrix(aLayer->GetTransform(), mTransform);
   }
   LayerPropertiesBase()
     : mLayer(nullptr)
@@ -134,26 +116,21 @@ struct LayerPropertiesBase : public LayerProperties
   }
   
   virtual nsIntRegion ComputeDifferences(Layer* aRoot, 
-                                         NotifySubDocInvalidationFunc aCallback,
-                                         bool* aGeometryChanged);
+                                         NotifySubDocInvalidationFunc aCallback);
 
   virtual void MoveBy(const nsIntPoint& aOffset);
 
-  nsIntRegion ComputeChange(NotifySubDocInvalidationFunc aCallback,
-                            bool& aGeometryChanged)
+  nsIntRegion ComputeChange(NotifySubDocInvalidationFunc aCallback)
   {
-    gfx3DMatrix transform;
-    gfx::To3DMatrix(mLayer->GetTransform(), transform);
-    bool transformChanged = !mTransform.FuzzyEqual(transform);
+    bool transformChanged = !mTransform.FuzzyEqual(mLayer->GetTransform());
     Layer* otherMask = mLayer->GetMaskLayer();
     const nsIntRect* otherClip = mLayer->GetClipRect();
     nsIntRegion result;
     if ((mMaskLayer ? mMaskLayer->mLayer : nullptr) != otherMask ||
         (mUseClipRect != !!otherClip) ||
-        mLayer->GetLocalOpacity() != mOpacity ||
+        mLayer->GetOpacity() != mOpacity ||
         transformChanged) 
     {
-      aGeometryChanged = true;
       result = OldTransformedBounds();
       if (transformChanged) {
         AddRegion(result, NewTransformedBounds());
@@ -170,17 +147,13 @@ struct LayerPropertiesBase : public LayerProperties
 
     nsIntRegion visible;
     visible.Xor(mVisibleRegion, mLayer->GetVisibleRegion());
-    if (!visible.IsEmpty()) {
-      aGeometryChanged = true;
-    }
     AddTransformedRegion(result, visible, mTransform);
 
-    AddRegion(result, ComputeChangeInternal(aCallback, aGeometryChanged));
-    AddTransformedRegion(result, mLayer->GetInvalidRegion(), mTransform);
+    AddRegion(result, ComputeChangeInternal(aCallback));
+    AddTransformedRegion(result, mLayer->GetInvalidRegion().GetBounds(), mTransform);
 
     if (mMaskLayer && otherMask) {
-      AddTransformedRegion(result, mMaskLayer->ComputeChange(aCallback, aGeometryChanged),
-                           mTransform);
+      AddTransformedRegion(result, mMaskLayer->ComputeChange(aCallback), mTransform);
     }
 
     if (mUseClipRect && otherClip) {
@@ -197,9 +170,7 @@ struct LayerPropertiesBase : public LayerProperties
 
   nsIntRect NewTransformedBounds()
   {
-    gfx3DMatrix transform;
-    gfx::To3DMatrix(mLayer->GetTransform(), transform);
-    return TransformRect(mLayer->GetVisibleRegion().GetBounds(), transform);
+    return TransformRect(mLayer->GetVisibleRegion().GetBounds(), mLayer->GetTransform());
   }
 
   nsIntRect OldTransformedBounds()
@@ -207,16 +178,11 @@ struct LayerPropertiesBase : public LayerProperties
     return TransformRect(mVisibleRegion.GetBounds(), mTransform);
   }
 
-  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
-                                            bool& aGeometryChanged)
-  {
-    return nsIntRect();
-  }
+  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback) { return nsIntRect(); }
 
   nsRefPtr<Layer> mLayer;
   nsAutoPtr<LayerPropertiesBase> mMaskLayer;
   nsIntRegion mVisibleRegion;
-  nsIntRegion mInvalidRegion;
   gfx3DMatrix mTransform;
   float mOpacity;
   nsIntRect mClipRect;
@@ -233,8 +199,7 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     }
   }
 
-  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
-                                            bool& aGeometryChanged)
+  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback)
   {
     ContainerLayer* container = mLayer->AsContainerLayer();
     nsIntRegion result;
@@ -248,7 +213,8 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     // TODO: Consider how we could avoid unnecessary invalidation when children
     // change order, and whether the overhead would be worth it.
 
-    nsDataHashtable<nsPtrHashKey<Layer>, uint32_t> oldIndexMap(mChildren.Length());
+    nsDataHashtable<nsPtrHashKey<Layer>, uint32_t> oldIndexMap;
+    oldIndexMap.Init(mChildren.Length());
     for (uint32_t i = 0; i < mChildren.Length(); ++i) {
       oldIndexMap.Put(mChildren[i]->mLayer, i);
     }
@@ -269,7 +235,7 @@ struct ContainerLayerProperties : public LayerPropertiesBase
               AddRegion(result, mChildren[j]->OldTransformedBounds());
             }
             // Invalidate any regions of the child that have changed: 
-            AddRegion(result, mChildren[childsOldIndex]->ComputeChange(aCallback, aGeometryChanged));
+            AddRegion(result, mChildren[childsOldIndex]->ComputeChange(aCallback));
             i = childsOldIndex + 1;
           } else {
             // We've already seen this child in mChildren (which means it must
@@ -286,9 +252,7 @@ struct ContainerLayerProperties : public LayerPropertiesBase
         invalidateChildsCurrentArea = true;
       }
       if (invalidateChildsCurrentArea) {
-        gfx3DMatrix transform;
-        gfx::To3DMatrix(child->GetTransform(), transform);
-        AddTransformedRegion(result, child->GetVisibleRegion(), transform);
+        AddTransformedRegion(result, child->GetVisibleRegion(), child->GetTransform());
         if (aCallback) {
           NotifySubdocumentInvalidationRecursive(child, aCallback);
         } else {
@@ -307,9 +271,7 @@ struct ContainerLayerProperties : public LayerPropertiesBase
       aCallback(container, result);
     }
 
-    gfx3DMatrix transform;
-    gfx::To3DMatrix(mLayer->GetTransform(), transform);
-    return TransformRegion(result, transform);
+    return TransformRegion(result, mLayer->GetTransform());
   }
 
   // The old list of children:
@@ -323,8 +285,7 @@ struct ColorLayerProperties : public LayerPropertiesBase
     , mColor(aLayer->GetColor())
   { }
 
-  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
-                                            bool& aGeometryChanged)
+  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback)
   {
     ColorLayer* color = static_cast<ColorLayer*>(mLayer.get());
 
@@ -342,6 +303,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
 {
   ImageLayerProperties(ImageLayer* aImage)
     : LayerPropertiesBase(aImage)
+    , mVisibleRegion(aImage->GetVisibleRegion())
     , mContainer(aImage->GetContainer())
     , mFilter(aImage->GetFilter())
     , mScaleToSize(aImage->GetScaleToSize())
@@ -349,8 +311,7 @@ struct ImageLayerProperties : public LayerPropertiesBase
   {
   }
 
-  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback,
-                                            bool& aGeometryChanged)
+  virtual nsIntRegion ComputeChangeInternal(NotifySubDocInvalidationFunc aCallback)
   {
     ImageLayer* imageLayer = static_cast<ImageLayer*>(mLayer.get());
     
@@ -370,10 +331,11 @@ struct ImageLayerProperties : public LayerPropertiesBase
     return nsIntRect();
   }
 
+  nsIntRegion mVisibleRegion;
   nsRefPtr<ImageContainer> mContainer;
-  GraphicsFilter mFilter;
-  gfx::IntSize mScaleToSize;
-  ScaleMode mScaleMode;
+  gfxPattern::GraphicsFilter mFilter;
+  gfxIntSize mScaleToSize;
+  ImageLayer::ScaleMode mScaleMode;
 };
 
 LayerPropertiesBase*
@@ -384,15 +346,10 @@ CloneLayerTreePropertiesInternal(Layer* aRoot)
   }
 
   switch (aRoot->GetType()) {
-    case Layer::TYPE_CONTAINER:
-    case Layer::TYPE_REF:
-      return new ContainerLayerProperties(aRoot->AsContainerLayer());
-    case Layer::TYPE_COLOR:
-      return new ColorLayerProperties(static_cast<ColorLayer*>(aRoot));
-    case Layer::TYPE_IMAGE:
-      return new ImageLayerProperties(static_cast<ImageLayer*>(aRoot));
-    default:
-      return new LayerPropertiesBase(aRoot);
+    case Layer::TYPE_CONTAINER:  return new ContainerLayerProperties(aRoot->AsContainerLayer());
+    case Layer::TYPE_COLOR:  return new ColorLayerProperties(static_cast<ColorLayer*>(aRoot));
+    case Layer::TYPE_IMAGE:  return new ImageLayerProperties(static_cast<ImageLayer*>(aRoot));
+    default: return new LayerPropertiesBase(aRoot);
   }
 
   return nullptr;
@@ -423,8 +380,7 @@ LayerProperties::ClearInvalidations(Layer *aLayer)
 }
 
 nsIntRegion
-LayerPropertiesBase::ComputeDifferences(Layer* aRoot, NotifySubDocInvalidationFunc aCallback,
-                                        bool* aGeometryChanged = nullptr)
+LayerPropertiesBase::ComputeDifferences(Layer* aRoot, NotifySubDocInvalidationFunc aCallback)
 {
   NS_ASSERTION(aRoot, "Must have a layer tree to compare against!");
   if (mLayer != aRoot) {
@@ -433,21 +389,11 @@ LayerPropertiesBase::ComputeDifferences(Layer* aRoot, NotifySubDocInvalidationFu
     } else {
       ClearInvalidations(aRoot);
     }
-    gfx3DMatrix transform;
-    gfx::To3DMatrix(aRoot->GetTransform(), transform);
-    nsIntRect result = TransformRect(aRoot->GetVisibleRegion().GetBounds(), transform);
+    nsIntRect result = TransformRect(aRoot->GetVisibleRegion().GetBounds(), aRoot->GetTransform());
     result = result.Union(OldTransformedBounds());
-    if (aGeometryChanged != nullptr) {
-      *aGeometryChanged = true;
-    }
     return result;
   } else {
-    bool geometryChanged = (aGeometryChanged != nullptr) ? *aGeometryChanged : false;
-    nsIntRegion invalid = ComputeChange(aCallback, geometryChanged);
-    if (aGeometryChanged != nullptr) {
-      *aGeometryChanged = geometryChanged;
-    }
-    return invalid;
+    return ComputeChange(aCallback);
   }
 }
   

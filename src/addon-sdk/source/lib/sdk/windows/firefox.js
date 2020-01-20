@@ -18,11 +18,10 @@ const { Cc, Ci, Cr } = require('chrome'),
       { WindowTrackerTrait } = windowUtils,
       { ns } = require('../core/namespace'),
       { observer: windowObserver } = require('./observer'),
-      { getOwnerWindow } = require('../private-browsing/window/utils');
-const { windowNS } = require('../window/namespace');
-const { isPrivateBrowsingSupported } = require('../self');
+      { getOwnerWindow } = require('../private-browsing/window/utils'),
+      viewNS = require('../core/namespace').ns(),
+      { isPrivateBrowsingSupported } = require('../self');
 const { ignoreWindow } = require('sdk/private-browsing/utils');
-const { viewFor } = require('../view/core');
 
 /**
  * Window trait composes safe wrappers for browser window that are E10S
@@ -75,9 +74,8 @@ const BrowserWindowTrait = Trait.compose(
 
       this._load();
 
-      windowNS(this._public).window = this._window;
+      viewNS(this._public).window = this._window;
       getOwnerWindow.implement(this._public, getChromeWindow);
-      viewFor.implement(this._public, getChromeWindow);
 
       return this;
     },
@@ -86,7 +84,6 @@ const BrowserWindowTrait = Trait.compose(
     _onLoad: function() {
       try {
         this._initWindowTabTracker();
-        this._loaded = true;
       }
       catch(e) {
         this._emit('error', e);
@@ -97,12 +94,9 @@ const BrowserWindowTrait = Trait.compose(
     _onUnload: function() {
       if (!this._window)
         return;
-      if (this._loaded)
-        this._destroyWindowTabTracker();
-
+      this._destroyWindowTabTracker();
       this._emitOnObject(browserWindows, 'close', this._public);
       this._window = null;
-      windowNS(this._public).window = null;
       // Removing reference from the windows array.
       windows.splice(windows.indexOf(this), 1);
       this._removeAllListeners();
@@ -262,7 +256,7 @@ const browserWindows = Trait.resolve({ toString: null }).compose(
 )();
 
 function getChromeWindow(window) {
-  return windowNS(window).window;
+  return viewNS(window).window;
 }
 
 exports.browserWindows = browserWindows;

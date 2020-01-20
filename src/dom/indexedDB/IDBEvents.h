@@ -9,9 +9,10 @@
 
 #include "mozilla/dom/indexedDB/IndexedDatabase.h"
 
+#include "nsIIDBVersionChangeEvent.h"
 #include "nsIRunnable.h"
 
-#include "mozilla/dom/Event.h"
+#include "nsDOMEvent.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/indexedDB/IDBObjectStore.h"
 #include "mozilla/dom/IDBVersionChangeEventBinding.h"
@@ -23,10 +24,6 @@
 #define VERSIONCHANGE_EVT_STR "versionchange"
 #define BLOCKED_EVT_STR "blocked"
 #define UPGRADENEEDED_EVT_STR "upgradeneeded"
-
-#define IDBVERSIONCHANGEEVENT_IID \
-  { 0x3b65d4c3, 0x73ad, 0x492e, \
-    { 0xb1, 0x2d, 0x15, 0xf9, 0xda, 0xc2, 0x08, 0x4b } }
 
 BEGIN_INDEXEDDB_NAMESPACE
 
@@ -46,30 +43,18 @@ CreateGenericEvent(mozilla::dom::EventTarget* aOwner,
                    Bubbles aBubbles,
                    Cancelable aCancelable);
 
-class IDBVersionChangeEvent : public Event
+class IDBVersionChangeEvent : public nsDOMEvent,
+                              public nsIIDBVersionChangeEvent
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_FORWARD_TO_EVENT
-  NS_DECLARE_STATIC_IID_ACCESSOR(IDBVERSIONCHANGEEVENT_IID)
+  NS_FORWARD_TO_NSDOMEVENT
+  NS_DECL_NSIIDBVERSIONCHANGEEVENT
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
   {
-    return mozilla::dom::IDBVersionChangeEventBinding::Wrap(aCx, this);
-  }
-
-  static already_AddRefed<IDBVersionChangeEvent>
-  Constructor(const GlobalObject& aGlobal,
-              const nsAString& aType,
-              const IDBVersionChangeEventInit& aOptions,
-              ErrorResult& aRv)
-  {
-    uint64_t newVersion = 0;
-    if (!aOptions.mNewVersion.IsNull()) {
-      newVersion = aOptions.mNewVersion.Value();
-    }
-    nsCOMPtr<EventTarget> target = do_QueryInterface(aGlobal.GetAsSupports());
-    return CreateInternal(target, aType, aOptions.mOldVersion, newVersion);
+    return mozilla::dom::IDBVersionChangeEventBinding::Wrap(aCx, aScope, this);
   }
 
   uint64_t OldVersion()
@@ -84,7 +69,7 @@ public:
       : mozilla::dom::Nullable<uint64_t>();
   }
 
-  inline static already_AddRefed<Event>
+  inline static already_AddRefed<nsDOMEvent>
   Create(mozilla::dom::EventTarget* aOwner,
          int64_t aOldVersion,
          int64_t aNewVersion)
@@ -94,7 +79,7 @@ public:
                           aOldVersion, aNewVersion);
   }
 
-  inline static already_AddRefed<Event>
+  inline static already_AddRefed<nsDOMEvent>
   CreateBlocked(mozilla::dom::EventTarget* aOwner,
                 uint64_t aOldVersion,
                 uint64_t aNewVersion)
@@ -103,7 +88,7 @@ public:
                           aOldVersion, aNewVersion);
   }
 
-  inline static already_AddRefed<Event>
+  inline static already_AddRefed<nsDOMEvent>
   CreateUpgradeNeeded(mozilla::dom::EventTarget* aOwner,
                       uint64_t aOldVersion,
                       uint64_t aNewVersion)
@@ -135,13 +120,13 @@ public:
 
 protected:
   IDBVersionChangeEvent(mozilla::dom::EventTarget* aOwner)
-    : Event(aOwner, nullptr, nullptr)
+  : nsDOMEvent(aOwner, nullptr, nullptr)
   {
     SetIsDOMBinding();
   }
   virtual ~IDBVersionChangeEvent() { }
 
-  static already_AddRefed<IDBVersionChangeEvent>
+  static already_AddRefed<nsDOMEvent>
   CreateInternal(mozilla::dom::EventTarget* aOwner,
                  const nsAString& aType,
                  uint64_t aOldVersion,
@@ -156,8 +141,6 @@ protected:
   uint64_t mOldVersion;
   uint64_t mNewVersion;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(IDBVersionChangeEvent, IDBVERSIONCHANGEEVENT_IID)
 
 END_INDEXEDDB_NAMESPACE
 

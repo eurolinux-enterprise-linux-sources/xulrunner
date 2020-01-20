@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-'use strict';
+// define(function(require, exports, module) {
+
 // <INJECTED SOURCE:START>
 
 // THIS FILE IS GENERATED FROM SOURCE IN THE GCLI PROJECT
@@ -22,28 +23,31 @@
 
 var exports = {};
 
-var TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testString.js</p>";
+const TEST_URI = "data:text/html;charset=utf-8,<p id='gcli-input'>gcli-testString.js</p>";
 
 function test() {
-  return Task.spawn(function() {
-    let options = yield helpers.openTab(TEST_URI);
-    yield helpers.openToolbar(options);
-    gcli.addItems(mockCommands.items);
-
-    yield helpers.runTests(options, exports);
-
-    gcli.removeItems(mockCommands.items);
-    yield helpers.closeToolbar(options);
-    yield helpers.closeTab(options);
-  }).then(finish, helpers.handleError);
+  helpers.addTabWithToolbar(TEST_URI, function(options) {
+    return helpers.runTests(options, exports);
+  }).then(finish);
 }
 
 // <INJECTED SOURCE:END>
 
-// var helpers = require('./helpers');
+'use strict';
+
+// var helpers = require('gclitest/helpers');
+// var mockCommands = require('gclitest/mockCommands');
+
+exports.setup = function(options) {
+  mockCommands.setup();
+};
+
+exports.shutdown = function(options) {
+  mockCommands.shutdown();
+};
 
 exports.testNewLine = function(options) {
-  return helpers.audit(options, [
+  helpers.audit(options, [
     {
       setup:    'echo a\\nb',
       check: {
@@ -68,7 +72,7 @@ exports.testNewLine = function(options) {
 };
 
 exports.testTab = function(options) {
-  return helpers.audit(options, [
+  helpers.audit(options, [
     {
       setup:    'echo a\\tb',
       check: {
@@ -93,7 +97,7 @@ exports.testTab = function(options) {
 };
 
 exports.testEscape = function(options) {
-  return helpers.audit(options, [
+  helpers.audit(options, [
     {
       // What's typed is actually:
       //         tsrsrsr a\\ b c
@@ -139,7 +143,7 @@ exports.testEscape = function(options) {
 };
 
 exports.testBlank = function(options) {
-  return helpers.audit(options, [
+  helpers.audit(options, [
     {
       setup:    'tsrsrsr a "" c',
       check: {
@@ -161,7 +165,8 @@ exports.testBlank = function(options) {
           p2: {
             value: undefined,
             arg: ' ""',
-            status: 'INCOMPLETE'
+            status: 'INCOMPLETE',
+            message: ''
           },
           p3: {
             value: 'c',
@@ -208,7 +213,7 @@ exports.testBlank = function(options) {
 };
 
 exports.testBlankWithParam = function(options) {
-  return helpers.audit(options, [
+  helpers.audit(options, [
     {
       setup:    'tsrsrsr  a --p3',
       check: {
@@ -222,7 +227,7 @@ exports.testBlankWithParam = function(options) {
         args: {
           command: { name: 'tsrsrsr' },
           p1: { value: 'a', arg: '  a', status: 'VALID', message: '' },
-          p2: { value: undefined, arg: '', status: 'INCOMPLETE' },
+          p2: { value: undefined, arg: '', status: 'INCOMPLETE', message: '' },
           p3: { value: '', arg: ' --p3', status: 'VALID', message: '' },
         }
       }
@@ -240,7 +245,7 @@ exports.testBlankWithParam = function(options) {
         args: {
           command: { name: 'tsrsrsr' },
           p1: { value: 'a', arg: '  a', status: 'VALID', message: '' },
-          p2: { value: undefined, arg: '', status: 'INCOMPLETE' },
+          p2: { value: undefined, arg: '', status: 'INCOMPLETE', message: '' },
           p3: { value: '', arg: ' --p3 ', status: 'VALID', message: '' },
         }
       }
@@ -258,7 +263,7 @@ exports.testBlankWithParam = function(options) {
         args: {
           command: { name: 'tsrsrsr' },
           p1: { value: 'a', arg: '  a', status: 'VALID', message: '' },
-          p2: { value: undefined, arg: '', status: 'INCOMPLETE' },
+          p2: { value: undefined, arg: '', status: 'INCOMPLETE', message: '' },
           p3: { value: '', arg: ' --p3 "', status: 'VALID', message: '' },
         }
       }
@@ -276,10 +281,13 @@ exports.testBlankWithParam = function(options) {
         args: {
           command: { name: 'tsrsrsr' },
           p1: { value: 'a', arg: '  a', status: 'VALID', message: '' },
-          p2: { value: undefined, arg: '', status: 'INCOMPLETE' },
+          p2: { value: undefined, arg: '', status: 'INCOMPLETE', message: '' },
           p3: { value: '', arg: ' --p3 ""', status: 'VALID', message: '' },
         }
       }
     }
   ]);
 };
+
+
+// });

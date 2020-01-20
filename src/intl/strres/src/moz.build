@@ -4,11 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-UNIFIED_SOURCES += [
+MODULE = 'intl'
+
+CPP_SOURCES += [
     'nsStringBundle.cpp',
     'nsStringBundleTextOverride.cpp',
 ]
 
-MSVC_ENABLE_PGO = True
+LIBRARY_NAME = 'strres_s'
 
-FINAL_LIBRARY = 'i18n'

@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/dom/Event.h"
 #include "nsMenuUtilsX.h"
 #include "nsMenuBarX.h"
 #include "nsMenuX.h"
@@ -12,6 +11,7 @@
 #include "nsObjCExceptions.h"
 #include "nsCocoaUtils.h"
 #include "nsCocoaWindow.h"
+#include "nsDOMEvent.h"
 #include "nsGkAtoms.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
@@ -27,7 +27,7 @@ void nsMenuUtilsX::DispatchCommandTo(nsIContent* aTargetContent)
   nsIDocument* doc = aTargetContent->OwnerDoc();
   if (doc) {
     ErrorResult rv;
-    nsRefPtr<dom::Event> event =
+    nsRefPtr<nsDOMEvent> event =
       doc->CreateEvent(NS_LITERAL_STRING("xulcommandevent"), rv);
     nsCOMPtr<nsIDOMXULCommandEvent> command = do_QueryObject(event);
 
@@ -54,8 +54,7 @@ NSString* nsMenuUtilsX::GetTruncatedCocoaLabel(const nsString& itemLabel)
   // good API for doing that which works for all OS versions and architectures. For now
   // we'll do nothing for consistency and depend on good user interface design to limit
   // string lengths.
-  return [NSString stringWithCharacters:reinterpret_cast<const unichar*>(itemLabel.get())
-                                 length:itemLabel.Length()];
+  return [NSString stringWithCharacters:itemLabel.get() length:itemLabel.Length()];
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }

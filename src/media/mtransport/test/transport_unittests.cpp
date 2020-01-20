@@ -78,10 +78,10 @@ class TransportLayerLossy : public TransportLayer {
   ~TransportLayerLossy () {}
 
   virtual TransportResult SendPacket(const unsigned char *data, size_t len) {
-    MOZ_MTLOG(ML_NOTICE, LAYER_INFO << "SendPacket(" << len << ")");
+    MOZ_MTLOG(PR_LOG_NOTICE, LAYER_INFO << "SendPacket(" << len << ")");
 
     if (loss_mask_ & (1 << (packet_ % 32))) {
-      MOZ_MTLOG(ML_NOTICE, "Dropping packet");
+      MOZ_MTLOG(PR_LOG_NOTICE, "Dropping packet");
       ++packet_;
       return len;
     }
@@ -96,7 +96,7 @@ class TransportLayerLossy : public TransportLayer {
   }
 
   void StateChange(TransportLayer *layer, State state) {
-    TL_SET_STATE(state);
+    SetState(state);
   }
 
   void PacketReceived(TransportLayer *layer, const unsigned char *data,
@@ -115,7 +115,7 @@ class TransportLayerLossy : public TransportLayer {
         connect(this,
                 &TransportLayerLossy::StateChange);
 
-    TL_SET_STATE(downward_->state());
+    SetState(downward_->state());
   }
 
  private:
@@ -237,8 +237,8 @@ class TransportTestPeer : public sigslot::has_slots<> {
     nsresult res;
 
     // Attach our slots
-    ice_ctx_->SignalGatheringStateChange.
-        connect(this, &TransportTestPeer::GatheringStateChange);
+    ice_ctx_->SignalGatheringCompleted.
+        connect(this, &TransportTestPeer::GatheringComplete);
 
     char name[100];
     snprintf(name, sizeof(name), "%s:stream%d", name_.c_str(),
@@ -285,7 +285,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
 
     // If gathering is already complete, push the candidates over
     if (gathering_complete_)
-      GatheringComplete();
+      GatheringComplete(ice_ctx_);
   }
 
   // New candidate
@@ -294,17 +294,9 @@ class TransportTestPeer : public sigslot::has_slots<> {
     candidates_[stream->name()].push_back(candidate);
   }
 
-  void GatheringStateChange(NrIceCtx* ctx,
-                            NrIceCtx::GatheringState state) {
-    (void)ctx;
-    if (state == NrIceCtx::ICE_CTX_GATHER_COMPLETE) {
-      GatheringComplete();
-    }
-  }
-
   // Gathering complete, so send our candidates and start
   // connecting on the other peer.
-  void GatheringComplete() {
+  void GatheringComplete(NrIceCtx *ctx) {
     nsresult res;
 
     // Don't send to the other side

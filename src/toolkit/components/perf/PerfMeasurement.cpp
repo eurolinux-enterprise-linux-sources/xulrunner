@@ -9,7 +9,6 @@
 #include "nsMemory.h"
 #include "mozilla/Preferences.h"
 #include "mozJSComponentLoader.h"
-#include "nsZipArchive.h"
 
 #define JSPERF_CONTRACTID \
   "@mozilla.org/jsperf;1"
@@ -23,7 +22,7 @@ namespace jsperf {
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(Module)
 
-NS_IMPL_ISUPPORTS(Module, nsIXPCScriptable)
+NS_IMPL_ISUPPORTS1(Module, nsIXPCScriptable)
 
 Module::Module()
 {
@@ -39,11 +38,11 @@ Module::~Module()
 #define XPC_MAP_FLAGS nsIXPCScriptable::WANT_CALL
 #include "xpc_map_end.h"
 
-static bool
-SealObjectAndPrototype(JSContext* cx, JS::Handle<JSObject *> parent, const char* name)
+static JSBool
+SealObjectAndPrototype(JSContext* cx, JSObject* parent, const char* name)
 {
   JS::Rooted<JS::Value> prop(cx);
-  if (!JS_GetProperty(cx, parent, name, &prop))
+  if (!JS_GetProperty(cx, parent, name, prop.address()))
     return false;
 
   if (prop.isUndefined()) {
@@ -52,14 +51,14 @@ SealObjectAndPrototype(JSContext* cx, JS::Handle<JSObject *> parent, const char*
   }
 
   JS::Rooted<JSObject*> obj(cx, prop.toObjectOrNull());
-  if (!JS_GetProperty(cx, obj, "prototype", &prop))
+  if (!JS_GetProperty(cx, obj, "prototype", prop.address()))
     return false;
 
   JS::Rooted<JSObject*> prototype(cx, prop.toObjectOrNull());
   return JS_FreezeObject(cx, obj) && JS_FreezeObject(cx, prototype);
 }
 
-static bool
+static JSBool
 InitAndSealPerfMeasurementClass(JSContext* cx, JS::Handle<JSObject*> global)
 {
   // Init the PerfMeasurement class
@@ -101,13 +100,13 @@ Module::Call(nsIXPConnectWrappedNative* wrapper,
 NS_DEFINE_NAMED_CID(JSPERF_CID);
 
 static const mozilla::Module::CIDEntry kPerfCIDs[] = {
-  { &kJSPERF_CID, false, nullptr, mozilla::jsperf::ModuleConstructor },
-  { nullptr }
+  { &kJSPERF_CID, false, NULL, mozilla::jsperf::ModuleConstructor },
+  { NULL }
 };
 
 static const mozilla::Module::ContractIDEntry kPerfContracts[] = {
   { JSPERF_CONTRACTID, &kJSPERF_CID },
-  { nullptr }
+  { NULL }
 };
 
 static const mozilla::Module kPerfModule = {

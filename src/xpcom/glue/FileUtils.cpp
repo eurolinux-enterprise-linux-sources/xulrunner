@@ -31,6 +31,9 @@
 #include <sys/stat.h>
 #elif defined(XP_WIN)
 #include <windows.h>
+#elif defined(XP_OS2)
+#define INCL_DOSFILEMGR
+#include <os2.h>
 #endif
 
 // Functions that are not to be used in standalone glue must be implemented
@@ -54,6 +57,9 @@ mozilla::fallocate(PRFileDesc *aFD, int64_t aLength)
 
   PR_Seek64(aFD, oldpos, PR_SEEK_SET);
   return retval;
+#elif defined(XP_OS2)
+  return aLength <= UINT32_MAX
+    && 0 == DosSetFileSize(PR_FileDesc2NativeHandle(aFD), (uint32_t)aLength);
 #elif defined(XP_MACOSX)
   int fd = PR_FileDesc2NativeHandle(aFD);
   fstore_t store = {F_ALLOCATECONTIG, F_PEOFPOSMODE, 0, aLength};
@@ -219,7 +225,7 @@ mozilla::ReadAheadFile(nsIFile* aFile, const size_t aOffset,
 
 static const unsigned int bufsize = 4096;
 
-#ifdef __LP64__
+#ifdef HAVE_64BIT_OS
 typedef Elf64_Ehdr Elf_Ehdr;
 typedef Elf64_Phdr Elf_Phdr;
 static const unsigned char ELFCLASS = ELFCLASS64;
@@ -245,7 +251,7 @@ static const uint32_t CPU_TYPE = CPU_TYPE_POWERPC64;
 #error Unsupported CPU type
 #endif
 
-#ifdef __LP64__
+#ifdef HAVE_64BIT_OS
 #undef LC_SEGMENT
 #define LC_SEGMENT LC_SEGMENT_64
 #undef MH_MAGIC
@@ -260,7 +266,7 @@ class ScopedMMap
 {
 public:
   ScopedMMap(const char *aFilePath)
-    : buf(nullptr)
+    : buf(NULL)
   {
     fd = open(aFilePath, O_RDONLY);
     if (fd < 0) {
@@ -271,7 +277,7 @@ public:
       return;
     }
     size = st.st_size;
-    buf = (char *)mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    buf = (char *)mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
   }
   ~ScopedMMap()
   {
@@ -444,7 +450,7 @@ mozilla::ReadAheadLib(mozilla::pathstr_t aFilePath)
   // information to find the biggest offset from the library that
   // will be mapped in memory.
   char *cmd = &base[sizeof(struct cpu_mach_header)];
-  uint32_t end = 0;
+  off_t end = 0;
   for (uint32_t ncmds = mh->ncmds; ncmds; ncmds--) {
     struct segment_command *sh = (struct segment_command *)cmd;
     if (sh->cmd != LC_SEGMENT) {
@@ -474,8 +480,8 @@ mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
     }
     return;
   }
-  HANDLE fd = CreateFileW(aFilePath, GENERIC_READ, FILE_SHARE_READ, nullptr,
-                          OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+  HANDLE fd = CreateFileW(aFilePath, GENERIC_READ, FILE_SHARE_READ,
+                          NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
   if (aOutFd) {
     *aOutFd = fd;
   }

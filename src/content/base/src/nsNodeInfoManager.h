@@ -12,7 +12,6 @@
 
 #include "mozilla/Attributes.h"           // for MOZ_FINAL
 #include "nsCOMPtr.h"                     // for member
-#include "nsAutoPtr.h"                    // for nsRefPtr
 #include "nsCycleCollectionParticipant.h" // for NS_DECL_CYCLE_*
 #include "plhash.h"                       // for typedef PLHashNumber
 
@@ -76,7 +75,7 @@ public:
   /**
    * Returns the nodeinfo for the document node. Can return null if OOM.
    */
-  already_AddRefed<nsINodeInfo> GetDocumentNodeInfo();
+  already_AddRefed<nsINodeInfo> GetDocumentNodeInfo();     
 
   /**
    * Retrieve a pointer to the document that owns this node info
@@ -126,12 +125,16 @@ private:
   PLHashTable *mNodeInfoHash;
   nsIDocument *mDocument; // WEAK
   uint32_t mNonDocumentNodeInfos;
-  nsCOMPtr<nsIPrincipal> mPrincipal; // Never null after Init() succeeds.
+  nsIPrincipal *mPrincipal; // STRONG, but not nsCOMPtr to avoid include hell
+                            // while inlining DocumentPrincipal().  Never null
+                            // after Init() succeeds.
   nsCOMPtr<nsIPrincipal> mDefaultPrincipal; // Never null after Init() succeeds
   nsINodeInfo *mTextNodeInfo; // WEAK to avoid circular ownership
   nsINodeInfo *mCommentNodeInfo; // WEAK to avoid circular ownership
   nsINodeInfo *mDocumentNodeInfo; // WEAK to avoid circular ownership
-  nsRefPtr<nsBindingManager> mBindingManager;
+  nsBindingManager* mBindingManager; // STRONG, but not nsCOMPtr to avoid
+                                     // include hell while inlining
+                                     // GetBindingManager().
 };
 
 #endif /* nsNodeInfoManager_h___ */

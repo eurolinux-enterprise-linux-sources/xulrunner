@@ -24,11 +24,6 @@ const prefs = new Preferences("datareporting.healthreport.");
 
 let healthReportWrapper = {
   init: function () {
-    if (!reporter) {
-      healthReportWrapper.handleInitFailure();
-      return;
-    }
-
     reporter.onInit().then(healthReportWrapper.refreshPayload,
                            healthReportWrapper.handleInitFailure);
 
@@ -144,6 +139,3 @@ let healthReportWrapper = {
     healthReportWrapper.reportFailure(healthReportWrapper.ERROR_PAYLOAD_FAILED);
   },
 }
-
-window.addEventListener("load", function () { healthReportWrapper.init(); });
-window.addEventListener("unload", function () { healthReportWrapper.uninit(); });

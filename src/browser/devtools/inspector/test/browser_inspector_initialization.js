@@ -1,4 +1,4 @@
-/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -35,46 +35,51 @@ function startInspectorTests(toolbox)
   ok(inspector, "Inspector instance is accessible");
   ok(inspector.isReady, "Inspector instance is ready");
   is(inspector.target.tab, gBrowser.selectedTab, "Valid target");
+  ok(inspector.highlighter, "Highlighter is up");
 
   let p = doc.querySelector("p");
 
   inspector.selection.setNode(p);
-  inspector.once("inspector-updated", () => {
-    testMarkupView(p);
-    testBreadcrumbs(p);
 
-    let span = doc.querySelector("span");
-    span.scrollIntoView();
+  testHighlighter(p);
+  testMarkupView(p);
+  testBreadcrumbs(p);
 
-    inspector.selection.setNode(span);
-    inspector.once("inspector-updated", () => {
-      testMarkupView(span);
-      testBreadcrumbs(span);
+  let span = doc.querySelector("span");
+  span.scrollIntoView();
 
-      toolbox.once("destroyed", function() {
-        ok("true", "'destroyed' notification received.");
-        let target = TargetFactory.forTab(gBrowser.selectedTab);
-        ok(!gDevTools.getToolbox(target), "Toolbox destroyed.");
-        executeSoon(runContextMenuTest);
-      });
-      toolbox.destroy();
-    });
+  inspector.selection.setNode(span);
+
+  testHighlighter(span);
+  testMarkupView(span);
+  testBreadcrumbs(span);
+
+  toolbox.once("destroyed", function() {
+    ok("true", "'destroyed' notification received.");
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    ok(!gDevTools.getToolbox(target), "Toolbox destroyed.");
+    executeSoon(runContextMenuTest);
   });
+  toolbox.destroy();
 }
 
-let callNo = 0;
+
+function testHighlighter(node)
+{
+  ok(isHighlighting(), "Highlighter is highlighting");
+  is(getHighlitNode(), node, "Right node is highlighted");
+}
+
 function testMarkupView(node)
 {
   let i = getActiveInspector();
-  try {
-    is(i.markup._selectedContainer.node.rawNode(), node, "Right node is selected in the markup view");
-  } catch(ex) { console.error(ex); }
+  is(i.markup._selectedContainer.node, node, "Right node is selected in the markup view");
 }
 
 function testBreadcrumbs(node)
 {
   let b = getActiveInspector().breadcrumbs;
-  let expectedText = b.prettyPrintNodeAsText(getNodeFront(node));
+  let expectedText = b.prettyPrintNodeAsText(node);
   let button = b.container.querySelector("button[checked=true]");
   ok(button, "A crumbs is checked=true");
   is(button.getAttribute("tooltiptext"), expectedText, "Crumb refers to the right node");
@@ -84,15 +89,7 @@ function _clickOnInspectMenuItem(node) {
   document.popupNode = node;
   var contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   var contextMenu = new nsContextMenu(contentAreaContextMenu);
-  var {Promise: promise} = Cu.import("resource://gre/modules/Promise.jsm", {});
-  var deferred = promise.defer();
-  contextMenu.inspectNode().then(() => {
-    let i = getActiveInspector();
-    i.once("inspector-updated", () => {
-      deferred.resolve(undefined);
-    });
-  });
-  return deferred.promise;
+  return contextMenu.inspectNode();
 }
 
 function runContextMenuTest()
@@ -102,6 +99,7 @@ function runContextMenuTest()
 }
 
 function testInitialNodeIsSelected() {
+  testHighlighter(salutation);
   testMarkupView(salutation);
   testBreadcrumbs(salutation);
   inspectNodesFromContextTestWhileOpen();
@@ -113,9 +111,10 @@ function inspectNodesFromContextTestWhileOpen()
   getActiveInspector().selection.once("new-node", function() {
     ok(true, "Get selection's 'new-node' selection");
     executeSoon(function() {
+      testHighlighter(closing);
       testMarkupView(closing);
       testBreadcrumbs(closing);
-      getActiveInspector().once("inspector-updated", finishInspectorTests)
+      finishInspectorTests();
     }
   )});
   _clickOnInspectMenuItem(closing);
@@ -137,5 +136,5 @@ function test()
     waitForFocus(createDocument, content);
   }, true);
 
-  content.location = "data:text/html;charset=utf-8,browser_inspector_initialization.js";
+  content.location = "data:text/html,basic tests for inspector";
 }

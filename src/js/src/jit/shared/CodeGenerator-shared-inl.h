@@ -7,8 +7,6 @@
 #ifndef jit_shared_CodeGenerator_shared_inl_h
 #define jit_shared_CodeGenerator_shared_inl_h
 
-#include "jit/shared/CodeGenerator-shared.h"
-
 namespace js {
 namespace jit {
 
@@ -19,7 +17,8 @@ ToInt32(const LAllocation *a)
         return a->toConstant()->toInt32();
     if (a->isConstantIndex())
         return a->toConstantIndex()->index();
-    MOZ_ASSUME_UNREACHABLE("this is not a constant!");
+    JS_NOT_REACHED("this is not a constant!");
+    return -1;
 }
 static inline double
 ToDouble(const LAllocation *a)
@@ -47,7 +46,7 @@ ToRegister(const LDefinition *def)
 }
 
 static inline Register
-ToTempRegisterOrInvalid(const LDefinition *def)
+ToTempUnboxRegister(const LDefinition *def)
 {
     if (def->isBogusTemp())
         return InvalidReg;
@@ -55,15 +54,9 @@ ToTempRegisterOrInvalid(const LDefinition *def)
 }
 
 static inline Register
-ToTempUnboxRegister(const LDefinition *def)
+ToRegisterOrInvalid(const LAllocation *a)
 {
-    return ToTempRegisterOrInvalid(def);
-}
-
-static inline Register
-ToRegisterOrInvalid(const LDefinition *a)
-{
-    return a ? ToRegister(a) : InvalidReg;
+    return a ? ToRegister(*a) : InvalidReg;
 }
 
 static inline FloatRegister
@@ -162,24 +155,6 @@ CodeGeneratorShared::restoreLiveIgnore(LInstruction *ins, RegisterSet ignore)
     JS_ASSERT(!ins->isCall());
     LSafepoint *safepoint = ins->safepoint();
     masm.PopRegsInMaskIgnore(safepoint->liveRegs(), ignore);
-}
-
-void
-CodeGeneratorShared::saveLiveVolatile(LInstruction *ins)
-{
-    JS_ASSERT(!ins->isCall());
-    LSafepoint *safepoint = ins->safepoint();
-    RegisterSet regs = RegisterSet::Intersect(safepoint->liveRegs(), RegisterSet::Volatile());
-    masm.PushRegsInMask(regs);
-}
-
-void
-CodeGeneratorShared::restoreLiveVolatile(LInstruction *ins)
-{
-    JS_ASSERT(!ins->isCall());
-    LSafepoint *safepoint = ins->safepoint();
-    RegisterSet regs = RegisterSet::Intersect(safepoint->liveRegs(), RegisterSet::Volatile());
-    masm.PopRegsInMask(regs);
 }
 
 } // ion

@@ -6,19 +6,15 @@
 
 TEST_DIRS += ['test']
 
+MODULE = 'jsurl'
+
 EXPORTS += [
     'nsJSProtocolHandler.h',
 ]
 
-UNIFIED_SOURCES += [
+CPP_SOURCES += [
     'nsJSProtocolHandler.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'jsurl_s'
 
-LOCAL_INCLUDES += [
-    "/dom/base",
-    "/netwerk/base/src",
-]
-
-FINAL_LIBRARY = 'gklayout'

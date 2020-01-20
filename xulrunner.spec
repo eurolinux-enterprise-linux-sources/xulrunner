@@ -1,11 +1,15 @@
 # Use system sqlite?
-%define system_sqlite     0
-%define system_ffi        1
+%define system_sqlite     1
 
 # Use system nss/nspr?
 %define system_nss        1
 
+# Enable webm
+%ifarch %{ix86} x86_64
 %define enable_webm       1
+%else
+%define enable_webm       0
+%endif
 
 # Build as a debug package?
 %define debug_build       0
@@ -15,34 +19,59 @@
 
 # Minimal required versions
 %if %{?system_nss}
-%global nspr_version 4.10.6
-%global nss_version 3.16.2.3
+%global nspr_version 4.10
+%global nss_version 3.15.4
 %endif
 
 %define cairo_version 1.6.0
 %define freetype_version 2.1.9
-%define ffi_version 3.0.9
-%define libvpx_version 1.3.0
-
 # gecko_dir_ver should be set to the version in our directory names
+# alpha_version should be set to the alpha number if using an alpha, 0 otherwise
+# beta_version  should be set to the beta number if using a beta, 0 otherwise
+# rc_version    should be set to the RC number if using an RC, 0 otherwise
 %global gecko_dir_ver %{version}
+%global alpha_version 0
+%global beta_version  0
+%global rc_version    0
 
 %global mozappdir         %{_libdir}/%{name}
 
 %if %{?system_sqlite}
-%define sqlite_version 3.8.4.2
+%define sqlite_version 3.6.22
 # The actual sqlite version (see #480989):
 %global sqlite_build_version %(pkg-config --silence-errors --modversion sqlite3 2>/dev/null || echo 65536)
 %endif
 
-%global tarballdir  mozilla-esr31
+%global tarballdir  mozilla-esr24
 %global ext_version esr
+
+%if %{alpha_version} > 0
+%global pre_version a%{alpha_version}
+%global pre_name    alpha%{alpha_version}
+%global tarballdir  mozilla-aurora
+%endif
+%if %{beta_version} > 0
+%global pre_version b%{beta_version}
+%global pre_name    beta%{beta_version}
+%global tarballdir  mozilla-beta
+%endif
+%if %{rc_version} > 0
+%global pre_version rc%{rc_version}
+%global pre_name    rc%{rc_version}
+%global tarballdir  mozilla-release
+%global ext_version esr
+%endif
+%if %{defined pre_version}
+%global gecko_verrel %{expand:%%{version}}-%{pre_name}
+%global pre_tag .%{pre_version}
+%else
 %global gecko_verrel %{expand:%%{version}}
+%endif
 
 Summary:        XUL Runtime for Gecko Applications
 Name:           xulrunner
-Version:        31.6.0
-Release:        2%{?pre_tag}%{?dist}
+Version:        24.8.0
+Release:        1%{?pre_tag}%{?dist}
 URL:            http://developer.mozilla.org/En/XULRunner
 License:        MPLv1.1 or GPLv2+ or LGPLv2+
 Group:          Applications/Internet
@@ -56,11 +85,10 @@ Source100:      find-external-requires
 # Xulrunner patches
 # Build patches
 Patch0:         xulrunner-nspr-version.patch
-Patch2:         firefox-install-dir.patch
-Patch6:         webrtc-arch-cpu.patch
+Patch2:         xulrunner-install-dir.patch
+Patch14:        rhbz-1032770.patch
+Patch15:        firefox-system-nss-3.16.2.patch
 Patch20:        xulrunner-24.0-jemalloc-ppc.patch
-Patch21:        disable-webm.patch
-Patch22:        remove-ogg.patch
 
 # RHEL specific patches
 Patch51:        mozilla-193-pkgconfig.patch
@@ -69,8 +97,10 @@ Patch54:        rhbz-872752.patch
 Patch55:        rhbz-966424.patch
 
 # RHEL specific patches
+Patch100:       xulrunner-24.0-gcc47.patch
 
 # Upstream patches
+Patch300:       mozilla-906754.patch
 
 # ---------------------------------------------------
 
@@ -99,7 +129,6 @@ BuildRequires:  alsa-lib-devel
 BuildRequires:  libnotify-devel
 BuildRequires:  autoconf213
 BuildRequires:  mesa-libGL-devel
-BuildRequires:  pulseaudio-libs-devel
 
 Requires:       liberation-fonts-common
 Requires:       liberation-sans-fonts
@@ -117,13 +146,10 @@ Requires:       mozilla-filesystem
 BuildRequires:  sqlite-devel >= %{sqlite_version}
 Requires:       sqlite >= %{sqlite_build_version}
 %endif
-%if %{?system_ffi}
-BuildRequires:  libffi-devel >= %{ffi_version}
-Requires:       libffi >= %{ffi_version}
-%endif
+
 %if %{?enable_webm}
-BuildRequires:  libvpx-devel >= %{libvpx_version}
-Requires:       libvpx >= %{libvpx_version}
+BuildRequires:  libvpx-devel >= 1.0.0
+Requires:       libvpx >= 1.0.0 
 %endif
 
 Provides:       gecko-libs = %{gecko_verrel}
@@ -170,6 +196,7 @@ Requires: libXrender-devel
 Requires: startup-notification-devel
 Requires: alsa-lib-devel
 Requires: libnotify-devel
+# RHEL6 specific Requires:
 Requires: cairo-devel >= %{cairo_version}
 Requires: hunspell-devel
 Requires: sqlite-devel
@@ -193,15 +220,18 @@ sed -e 's/__RH_NSPR_VERSION__/%{nspr_version}/' %{P:%%PATCH0} > version.patch
 %{__patch} -p2 -b --suffix .nspr --fuzz=0 < version.patch
 
 %patch2  -p1
-%patch6  -p1 -b .webrtc-arch-cpu
+
+%patch14 -p1 -b .1032770
+%patch15 -p2 -b .nss-3.16.2
 %patch20 -p2 -b .jemalloc-ppc
-%if !%{?enable_webm}
-%patch21 -p1 -b .disable-webm
-%endif
-%patch22 -p1 -b .ogg
+
 %patch51 -p2 -b .pk
 %patch54 -p2 -b .embedlink
 %patch55 -p1 -b .973720
+
+%patch100 -p2 -b .gcc-4.7
+
+%patch300 -p1 -b .906754
 
 %{__rm} -f .mozconfig
 %{__cp} %{SOURCE10} .mozconfig
@@ -230,7 +260,6 @@ echo "ac_add_options --without-system-libvpx" >> .mozconfig
 echo "ac_add_options --disable-webm" >> .mozconfig
 echo "ac_add_options --disable-webrtc" >> .mozconfig
 echo "ac_add_options --disable-ogg" >> .mozconfig
-echo "ac_add_options --disable-opus" >> .mozconfig
 %endif
 
 %ifnarch %{ix86} x86_64
@@ -240,10 +269,16 @@ echo "ac_add_options --disable-polyic" >> .mozconfig
 echo "ac_add_options --disable-tracejit" >> .mozconfig
 %endif
 
+# RHEL 6 mozconfig changes:
 echo "ac_add_options --enable-system-hunspell" >> .mozconfig
 echo "ac_add_options --enable-libnotify" >> .mozconfig
 echo "ac_add_options --enable-startup-notification" >> .mozconfig
 echo "ac_add_options --enable-jemalloc" >> .mozconfig
+
+# s390(x) fails to start with jemalloc enabled
+%ifarch s390 s390x
+echo "ac_add_options --disable-jemalloc" >> .mozconfig
+%endif
 
 # Debug build flags
 %if %{?debug_build}
@@ -252,10 +287,6 @@ echo "ac_add_options --disable-optimize" >> .mozconfig
 %else
 echo "ac_add_options --disable-debug" >> .mozconfig
 echo "ac_add_options --enable-optimize" >> .mozconfig
-%endif
-
-%if %{?system_ffi}
-echo "ac_add_options --enable-system-ffi" >> .mozconfig
 %endif
 
 #---------------------------------------------------------------------
@@ -290,7 +321,6 @@ MOZ_LINK_FLAGS="-Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
 export CFLAGS=$MOZ_OPT_FLAGS
 export CXXFLAGS=$MOZ_OPT_FLAGS
 export LDFLAGS=$MOZ_LINK_FLAGS
-export WCHAR_CFLAGS="-std=gnu++0x"
 
 export PREFIX='%{_prefix}'
 export LIBDIR='%{_libdir}'
@@ -334,12 +364,18 @@ DESTDIR=$RPM_BUILD_ROOT make -C objdir install STAGE_SDK=1
         $RPM_BUILD_ROOT/%{_libdir}/pkgconfig/libxul-embedding-unstable.pc
 
 # Fix multilib devel conflicts...
+%ifarch x86_64 ia64 s390x ppc64
+%define mozbits 64
+%else
+%define mozbits 32
+%endif
+
 function install_file() {
 genheader=$*
-mv ${genheader}.h ${genheader}%{__isa_bits}.h
+mv ${genheader}.h ${genheader}%{mozbits}.h
 cat > ${genheader}.h << EOF
 /* This file exists to fix multilib conflicts */
-#if defined(__x86_64__) || defined(__ia64__) || defined(__s390x__) || defined(__powerpc64__) || defined(__aarch64__)
+#if defined(__x86_64__) || defined(__ia64__) || defined(__s390x__) || defined(__powerpc64__)
 #include "${genheader}64.h"
 #else
 #include "${genheader}32.h"
@@ -366,16 +402,9 @@ for i in *.so; do
 done
 popd
 
-# Move sdk/bin to xulrunner libdir
-pushd $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
-mv ply *.py $RPM_BUILD_ROOT%{mozappdir}
-popd
-rm -rf $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
-ln -s %{mozappdir} $RPM_BUILD_ROOT%{_libdir}/%{name}-devel-%{gecko_dir_ver}/sdk/bin
-
 # Library path
 LD_SO_CONF_D=%{_sysconfdir}/ld.so.conf.d
-LD_CONF_FILE=xulrunner-%{__isa_bits}.conf
+LD_CONF_FILE=xulrunner-%{mozbits}.conf
 
 %{__mkdir_p} ${RPM_BUILD_ROOT}${LD_SO_CONF_D}
 %{__cat} > ${RPM_BUILD_ROOT}${LD_SO_CONF_D}/${LD_CONF_FILE} << EOF
@@ -442,9 +471,6 @@ fi
 %if !%{?system_nss}
 %{mozappdir}/*.chk
 %endif
-%{mozappdir}/install_app.py
-%ghost %{mozappdir}/install_app.pyc
-%ghost %{mozappdir}/install_app.pyo
 
 %files devel
 %defattr(-,root,root,-)
@@ -454,58 +480,18 @@ fi
 %{_libdir}/%{name}-devel-*/*
 %{_libdir}/pkgconfig/*.pc
 %{mozappdir}/xpcshell
-%{mozappdir}/*.py
-%ghost %{mozappdir}/*.pyc
-%ghost %{mozappdir}/*.pyo
-%dir %{mozappdir}/ply
-%{mozappdir}/ply/*.py
-%ghost %{mozappdir}/ply/*.pyc
-%ghost %{mozappdir}/ply/*.pyo
+%{mozappdir}/js-gdb.py
+%ghost %{mozappdir}/js-gdb.pyc
+%ghost %{mozappdir}/js-gdb.pyo
 
 #---------------------------------------------------------------------
 
 %changelog
-* Thu Mar 26 2015 Martin Stransky <stransky@redhat.com> - 31.6.0-2
-- Update to 31.6.0 ESR Build 2
+* Thu Aug 28 2014 Martin Stransky <stransky@redhat.com> - 24.8.0-1
+- Update to 24.8.0 ESR
 
-* Wed Mar 25 2015 Jan Horak <jhorak@redhat.com> - 31.6.0-1
-- Update to 31.6.0 ESR
-
-* Fri Feb 20 2015 Martin Stransky <stransky@redhat.com> - 31.5.0-1
-- Update to 31.5.0 ESR
-
-* Mon Jan 19 2015 Martin Stransky <stransky@redhat.com> - 31.4.0-2
-- Added -std=gnu++0x to libxul library build flags (rhbz#1170226)
-
-* Tue Jan  6 2015 Jan Horak <jhorak@redhat.com> - 31.4.0-1
-- Update to 31.4.0 ESR
-
-* Fri Dec 5 2014 Martin Stransky <stransky@redhat.com> - 31.3.0-1
-- Update to 31.3.0 ESR Build 2
-
-* Mon Nov 10 2014 Martin Stransky <stransky@redhat.com> - 31.2.0-3
-- Ship sdk/bin as a symlink for compability (rhbz#1162187)
-
-* Mon Oct 27 2014 Yaakov Selkowitz <yselkowi@redhat.com> - 31.2.0-2
-- Fix webRTC for aarch64, ppc64le (rhbz#1148622)
-
-* Tue Oct  7 2014 Jan Horak <jhorak@redhat.com> - 31.2.0-1
-- Update to 31.2.0
-
-* Tue Sep 9 2014 Martin Stransky <stransky@redhat.com> - 31.1.0-3
-- move /sdk/bin to xulrunner libdir
-
-* Mon Sep 8 2014 Martin Stransky <stransky@redhat.com> - 31.1.0-2
-- Sync preferences with Firefox package
-
-* Mon Sep 8 2014 Martin Stransky <stransky@redhat.com> - 31.1.0-1
-- Update to 31.1.0 ESR
-
-* Thu Aug 14 2014 Yaakov Selkowitz <yselkowi@redhat.com> - 31.0-2
-- Fix header wrapper for aarch64
-
-* Tue Aug 5 2014 Martin Stransky <stransky@redhat.com> - 31.0-1
-- Update to 31.0 ESR
+* Fri Jul 18 2014 Martin Stransky <stransky@redhat.com> - 24.7.0-1
+- Update to 24.7.0 ESR
 
 * Wed Jun  4 2014 Jan Horak <jhorak@redhat.com> - 24.6.0-1
 - Update to 24.6.0 ESR
@@ -692,3 +678,6 @@ fi
 * Mon Sep 19 2011 Jan Horak <jhorak@redhat.com> - 7.0-6.b6
 - Updated to 7.0 Beta 6
 - Added fix for mozbz#674522: s390x javascript freeze fix
+
+* Wed Sep 14 2011 Martin Stransky <stransky@redhat.com> 7.0-2.b5
+- Updated to 7.0 Beta 5

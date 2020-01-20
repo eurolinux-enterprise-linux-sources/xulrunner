@@ -15,7 +15,6 @@
 #include "FileRequest.h"
 #include "FileService.h"
 #include "nsIRequest.h"
-#include "nsThreadUtils.h"
 
 USING_FILE_NAMESPACE
 
@@ -42,7 +41,7 @@ FileHelper::~FileHelper()
                !mRequest, "Should have cleared this!");
 }
 
-NS_IMPL_ISUPPORTS(FileHelper, nsIRequestObserver)
+NS_IMPL_THREADSAFE_ISUPPORTS1(FileHelper, nsIRequestObserver)
 
 nsresult
 FileHelper::Enqueue()
@@ -110,12 +109,7 @@ FileHelper::OnStopRequest(nsIRequest* aRequest, nsISupports* aCtxt,
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   if (NS_FAILED(aStatus)) {
-    if (aStatus == NS_ERROR_FILE_NO_DEVICE_SPACE) {
-      mResultCode = NS_ERROR_DOM_FILEHANDLE_QUOTA_ERR;
-    }
-    else {
-      mResultCode = NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR;
-    }
+    mResultCode = NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR;
   }
 
   Finish();
@@ -155,11 +149,11 @@ FileHelper::GetCurrentLockedFile()
 
 nsresult
 FileHelper::GetSuccessResult(JSContext* aCx,
-                             JS::MutableHandle<JS::Value> aVal)
+                             JS::Value* aVal)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  aVal.setUndefined();
+  *aVal = JSVAL_VOID;
   return NS_OK;
 }
 
@@ -214,18 +208,4 @@ FileHelper::Finish()
   NS_ASSERTION(!(mFileStorage || mLockedFile || mFileRequest || mListener ||
                  mRequest), "Subclass didn't call FileHelper::ReleaseObjects!");
 
-}
-
-void
-FileHelper::OnStreamClose()
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  Finish();
-}
-
-void
-FileHelper::OnStreamDestroy()
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-  Finish();
 }

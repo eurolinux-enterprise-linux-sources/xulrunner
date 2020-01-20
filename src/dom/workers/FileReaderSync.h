@@ -8,44 +8,42 @@
 #define mozilla_dom_workers_filereadersync_h__
 
 #include "Workers.h"
+#include "mozilla/dom/workers/bindings/DOMBindingBase.h"
+
+#include "nsICharsetDetectionObserver.h"
+#include "nsStringGlue.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/dom/BindingUtils.h"
 
 class nsIInputStream;
 class nsIDOMBlob;
 
-namespace mozilla {
-class ErrorResult;
-
-namespace dom {
-class GlobalObject;
-template<typename> class Optional;
-}
-}
-
 BEGIN_WORKERS_NAMESPACE
 
-class FileReaderSync MOZ_FINAL
+class FileReaderSync MOZ_FINAL : public DOMBindingBase,
+                                 public nsICharsetDetectionObserver
 {
-  NS_INLINE_DECL_REFCOUNTING(FileReaderSync)
-
-private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~FileReaderSync()
-  {
-  }
-
+  nsCString mCharset;
   nsresult ConvertStream(nsIInputStream *aStream, const char *aCharset,
                          nsAString &aResult);
+  nsresult GuessCharset(nsIInputStream *aStream, nsACString &aCharset);
 
 public:
-  static already_AddRefed<FileReaderSync>
-  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  virtual void
+  _trace(JSTracer* aTrc) MOZ_OVERRIDE;
 
-  JSObject* WrapObject(JSContext* aCx);
+  virtual void
+  _finalize(JSFreeOp* aFop) MOZ_OVERRIDE;
 
-  void ReadAsArrayBuffer(JSContext* aCx, JS::Handle<JSObject*> aScopeObj,
-                         JS::Handle<JSObject*> aBlob,
-                         JS::MutableHandle<JSObject*> aRetval,
-                         ErrorResult& aRv);
+  static FileReaderSync*
+  Constructor(const WorkerGlobalObject& aGlobal, ErrorResult& aRv);
+
+  NS_DECL_ISUPPORTS_INHERITED
+
+  FileReaderSync(JSContext* aCx);
+
+  JSObject* ReadAsArrayBuffer(JSContext* aCx, JS::Handle<JSObject*> aBlob,
+                              ErrorResult& aRv);
   void ReadAsBinaryString(JS::Handle<JSObject*> aBlob, nsAString& aResult,
                           ErrorResult& aRv);
   void ReadAsText(JS::Handle<JSObject*> aBlob,
@@ -53,6 +51,9 @@ public:
                   nsAString& aResult, ErrorResult& aRv);
   void ReadAsDataURL(JS::Handle<JSObject*> aBlob, nsAString& aResult,
                      ErrorResult& aRv);
+
+  // From nsICharsetDetectionObserver
+  NS_IMETHOD Notify(const char *aCharset, nsDetectionConfident aConf) MOZ_OVERRIDE;
 };
 
 END_WORKERS_NAMESPACE

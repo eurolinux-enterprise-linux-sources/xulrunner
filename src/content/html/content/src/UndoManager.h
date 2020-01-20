@@ -46,6 +46,7 @@ public:
   uint32_t GetPosition(ErrorResult& aRv);
   void ClearUndo(ErrorResult& aRv);
   void ClearRedo(ErrorResult& aRv);
+  static bool PrefEnabled();
   void Disconnect();
 
   nsISupports* GetParentObject() const
@@ -53,9 +54,10 @@ public:
     return mHostNode;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE
+  virtual JSObject* WrapObject(JSContext* aCx,
+			       JS::Handle<JSObject*> aScope) MOZ_OVERRIDE
   {
-    return mozilla::dom::UndoManagerBinding::Wrap(aCx, this);
+    return mozilla::dom::UndoManagerBinding::Wrap(aCx, aScope, this);
   }
 
   nsITransactionManager* GetTransactionManager();

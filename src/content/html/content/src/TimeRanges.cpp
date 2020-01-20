@@ -7,12 +7,14 @@
 #include "mozilla/dom/TimeRanges.h"
 #include "mozilla/dom/TimeRangesBinding.h"
 #include "mozilla/dom/HTMLMediaElement.h"
+#include "nsContentUtils.h"
+#include "nsDOMClassInfoID.h"
 #include "nsError.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ISUPPORTS(TimeRanges, nsIDOMTimeRanges)
+NS_IMPL_ISUPPORTS1(TimeRanges, nsIDOMTimeRanges)
 
 TimeRanges::TimeRanges()
 {
@@ -80,21 +82,13 @@ TimeRanges::Add(double aStart, double aEnd)
 }
 
 double
-TimeRanges::GetStartTime()
+TimeRanges::GetFinalEndTime()
 {
   if (mRanges.IsEmpty()) {
     return -1.0;
   }
-  return mRanges[0].mStart;
-}
-
-double
-TimeRanges::GetEndTime()
-{
-  if (mRanges.IsEmpty()) {
-    return -1.0;
-  }
-  return mRanges[mRanges.Length() - 1].mEnd;
+  uint32_t finalIndex = mRanges.Length() - 1;
+  return mRanges[finalIndex].mEnd;
 }
 
 void
@@ -127,9 +121,9 @@ TimeRanges::Normalize()
 }
 
 JSObject*
-TimeRanges::WrapObject(JSContext* aCx)
+TimeRanges::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return TimeRangesBinding::Wrap(aCx, this);
+  return TimeRangesBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

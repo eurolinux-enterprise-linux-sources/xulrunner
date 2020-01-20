@@ -7,10 +7,10 @@
 #include "MediaStreamList.h"
 #ifdef MOZILLA_INTERNAL_API
 #include "mozilla/dom/MediaStreamListBinding.h"
+#include "nsContentUtils.h"
 #endif
 #include "nsIScriptGlobalObject.h"
 #include "PeerConnectionImpl.h"
-#include "PeerConnectionMedia.h"
 
 namespace mozilla {
 namespace dom {
@@ -30,7 +30,6 @@ MediaStreamList::~MediaStreamList()
 #ifdef MOZILLA_INTERNAL_API
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(MediaStreamList)
 #else
-NS_IMPL_CYCLE_COLLECTION_CLASS(MediaStreamList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(MediaStreamList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(MediaStreamList)
@@ -47,10 +46,10 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MediaStreamList)
 NS_INTERFACE_MAP_END
 
 JSObject*
-MediaStreamList::WrapObject(JSContext* cx)
+MediaStreamList::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
 {
 #ifdef MOZILLA_INTERNAL_API
-  return MediaStreamListBinding::Wrap(cx, this);
+  return MediaStreamListBinding::Wrap(cx, scope, this);
 #else
   return nullptr;
 #endif

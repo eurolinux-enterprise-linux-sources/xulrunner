@@ -1,4 +1,3 @@
- // -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,9 +7,9 @@ const Ci = Components.interfaces;
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 let modules = {
-  newtab: {
-    uri: "chrome://browser/content/Start.xul",
-    privileged: true
+  start: {
+    uri: "about:blank",
+    privileged: false
   },
   // about:blank has some bad loading behavior we can avoid, if we use an alias
   empty: {
@@ -37,20 +36,15 @@ let modules = {
     uri: "chrome://browser/content/aboutCertError.xhtml",
     privileged: true
   },
-  start: {
-    uri: "about:newtab",
-    privileged: true
-  },
+  // an alias for about:start
   home: {
-    uri: "about:newtab",
+    uri: "about:blank",
     privileged: true
   },
-#ifdef MOZ_CRASHREPORTER
-  crashprompt: {
-    uri: "chrome://browser/content/crashprompt.xhtml",
+  crash: {
+    uri: "chrome://browser/content/aboutCrash.xhtml",
     privileged: true
-  },
-#endif
+  }
 }
 
 function AboutGeneric() {}
@@ -75,7 +69,7 @@ AboutGeneric.prototype = {
               getService(Ci.nsIIOService);
 
     var channel = ios.newChannel(moduleInfo.uri, null, null);
-
+    
     if (!moduleInfo.privileged) {
       // Setting the owner to null means that we'll go through the normal
       // path in GetChannelPrincipal and create a codebase principal based

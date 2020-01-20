@@ -9,15 +9,13 @@
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEOffset)
 
-using namespace mozilla::gfx;
-
 namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEOffsetElement::WrapNode(JSContext* aCx)
+SVGFEOffsetElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return SVGFEOffsetElementBinding::Wrap(aCx, this);
+  return SVGFEOffsetElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::NumberInfo SVGFEOffsetElement::sNumberInfo[2] =
@@ -47,31 +45,44 @@ SVGFEOffsetElement::In1()
   return mStringAttributes[IN1].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGFEOffsetElement::Dx()
 {
   return mNumberAttributes[DX].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber>
+already_AddRefed<nsIDOMSVGAnimatedNumber>
 SVGFEOffsetElement::Dy()
 {
   return mNumberAttributes[DY].ToDOMAnimatedNumber(this);
 }
 
-FilterPrimitiveDescription
-SVGFEOffsetElement::GetPrimitiveDescription(nsSVGFilterInstance* aInstance,
-                                            const IntRect& aFilterSubregion,
-                                            const nsTArray<bool>& aInputsAreTainted,
-                                            nsTArray<RefPtr<SourceSurface>>& aInputImages)
+nsIntPoint
+SVGFEOffsetElement::GetOffset(const nsSVGFilterInstance& aInstance)
 {
-  FilterPrimitiveDescription descr(PrimitiveType::Offset);
-  IntPoint offset(int32_t(aInstance->GetPrimitiveNumber(
-                            SVGContentUtils::X, &mNumberAttributes[DX])),
-                  int32_t(aInstance->GetPrimitiveNumber(
-                            SVGContentUtils::Y, &mNumberAttributes[DY])));
-  descr.Attributes().Set(eOffsetOffset, offset);
-  return descr;
+  return nsIntPoint(int32_t(aInstance.GetPrimitiveNumber(
+                              SVGContentUtils::X, &mNumberAttributes[DX])),
+                    int32_t(aInstance.GetPrimitiveNumber(
+                              SVGContentUtils::Y, &mNumberAttributes[DY])));
+}
+
+nsresult
+SVGFEOffsetElement::Filter(nsSVGFilterInstance* instance,
+                           const nsTArray<const Image*>& aSources,
+                           const Image* aTarget,
+                           const nsIntRect& rect)
+{
+  nsIntPoint offset = GetOffset(*instance);
+
+  gfxContext ctx(aTarget->mImage);
+  ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
+  // Ensure rendering is limited to the filter primitive subregion
+  ctx.Clip(aTarget->mFilterPrimitiveSubregion);
+  ctx.Translate(gfxPoint(offset.x, offset.y));
+  ctx.SetSource(aSources[0]->mImage);
+  ctx.Paint();
+
+  return NS_OK;
 }
 
 bool
@@ -89,6 +100,27 @@ void
 SVGFEOffsetElement::GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources)
 {
   aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
+}
+
+nsIntRect
+SVGFEOffsetElement::ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
+        const nsSVGFilterInstance& aInstance)
+{
+  return aSourceBBoxes[0] + GetOffset(aInstance);
+}
+
+nsIntRect
+SVGFEOffsetElement::ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
+                                      const nsSVGFilterInstance& aInstance)
+{
+  return aSourceChangeBoxes[0] + GetOffset(aInstance);
+}
+
+void
+SVGFEOffsetElement::ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
+          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance)
+{
+  aSourceBBoxes[0] = aTargetBBox - GetOffset(aInstance);
 }
 
 //----------------------------------------------------------------------

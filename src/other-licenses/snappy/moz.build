@@ -5,23 +5,17 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXPORTS.snappy += [
+    'snappy-c.h',
     'snappy-stubs-public.h',
-    'src/snappy-c.h',
-    'src/snappy.h',
+    'snappy.h',
 ]
 
-UNIFIED_SOURCES += [
-    'src/snappy-c.cc',
-    'src/snappy-sinksource.cc',
-    'src/snappy-stubs-internal.cc',
-    'src/snappy.cc',
+CPP_SOURCES += [
+    'snappy-c.cc',
+    'snappy-sinksource.cc',
+    'snappy-stubs-internal.cc',
+    'snappy.cc',
 ]
 
-FINAL_LIBRARY = 'xul'
+LIBRARY_NAME = 'snappy_s'
 
-# Suppress warnings in third-party code.
-if CONFIG['GNU_CXX']:
-    CXXFLAGS += [
-        '-Wno-sign-compare',
-        '-Wno-unused-function'
-    ]

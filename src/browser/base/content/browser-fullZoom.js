@@ -6,6 +6,10 @@
 #endif
  */
 
+// One of the possible values for the mousewheel.* preferences.
+// From nsEventStateManager.cpp.
+const MOUSE_SCROLL_ZOOM = 3;
+
 /**
  * Controls the "full zoom" setting and its site-specific preferences.
  */
@@ -19,14 +23,11 @@ var FullZoom = {
   // browser.zoom.updateBackgroundTabs preference cache
   updateBackgroundTabs: undefined,
 
-  // One of the possible values for the mousewheel.* preferences.
-  // From EventStateManager.h.
-  ACTION_ZOOM: 3,
-
-  // This maps the browser to monotonically increasing integer
-  // tokens. _browserTokenMap[browser] is increased each time the zoom is
-  // changed in the browser. See _getBrowserToken and _ignorePendingZoomAccesses.
-  _browserTokenMap: new WeakMap(),
+  // This maps browser outer window IDs to monotonically increasing integer
+  // tokens.  _browserTokenMap[outerID] is increased each time the zoom is
+  // changed in the browser whose outer window ID is outerID.  See
+  // _getBrowserToken and _ignorePendingZoomAccesses.
+  _browserTokenMap: new Map(),
 
   get siteSpecific() {
     return this._siteSpecificPref;
@@ -45,6 +46,10 @@ var FullZoom = {
   // Initialization & Destruction
 
   init: function FullZoom_init() {
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     // Listen for scrollwheel events so we can save scrollwheel-based changes.
     window.addEventListener("DOMMouseScroll", this, false);
 
@@ -60,12 +65,19 @@ var FullZoom = {
     // Listen for changes to the browser.zoom branch so we can enable/disable
     // updating background tabs and per-site saving and restoring of zoom levels.
     gPrefService.addObserver("browser.zoom.", this, true);
+
+    Services.obs.addObserver(this, "outer-window-destroyed", false);
   },
 
   destroy: function FullZoom_destroy() {
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     gPrefService.removeObserver("browser.zoom.", this);
     this._cps2.removeObserverForName(this.name, this);
     window.removeEventListener("DOMMouseScroll", this, false);
+    Services.obs.removeObserver(this, "outer-window-destroyed");
   },
 
 
@@ -84,7 +96,7 @@ var FullZoom = {
 
   _handleMouseScrolled: function FullZoom__handleMouseScrolled(event) {
     // Construct the "mousewheel action" pref key corresponding to this event.
-    // Based on EventStateManager::WheelPrefs::GetBasePrefName().
+    // Based on nsEventStateManager::WheelPrefs::GetBasePrefName().
     var pref = "mousewheel.";
 
     var pressedModifierCount = event.shiftKey + event.ctrlKey + event.altKey +
@@ -108,7 +120,7 @@ var FullZoom = {
     // Don't do anything if this isn't a "zoom" scroll event.
     var isZoomEvent = false;
     try {
-      isZoomEvent = (gPrefService.getIntPref(pref) == this.ACTION_ZOOM);
+      isZoomEvent = (gPrefService.getIntPref(pref) == MOUSE_SCROLL_ZOOM);
     } catch (e) {}
     if (!isZoomEvent)
       return;
@@ -119,7 +131,7 @@ var FullZoom = {
 
     // We have to call _applyZoomToPref in a timeout because we handle the
     // event before the event state manager has a chance to apply the zoom
-    // during EventStateManager::PostHandleEvent.
+    // during nsEventStateManager::PostHandleEvent.
     let browser = gBrowser.selectedBrowser;
     let token = this._getBrowserToken(browser);
     window.setTimeout(function () {
@@ -143,6 +155,10 @@ var FullZoom = {
               gPrefService.getBoolPref("browser.zoom.updateBackgroundTabs");
             break;
         }
+        break;
+      case "outer-window-destroyed":
+        let outerID = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
+        this._browserTokenMap.delete(outerID);
         break;
     }
   },
@@ -192,7 +208,7 @@ var FullZoom = {
     // zoom should be set to the new global preference now that the global
     // preference has changed.
     let hasPref = false;
-    let ctxt = this._loadContextFromBrowser(browser);
+    let ctxt = this._loadContextFromWindow(browser.contentWindow);
     let token = this._getBrowserToken(browser);
     this._cps2.getByDomainAndName(browser.currentURI.spec, this.name, ctxt, {
       handleResult: function () hasPref = true,
@@ -236,7 +252,7 @@ var FullZoom = {
     }
 
     // Media documents should always start at 1, and are not affected by prefs.
-    if (!aIsTabSwitch && browser.isSyntheticDocument) {
+    if (!aIsTabSwitch && browser.contentDocument.mozSyntheticDocument) {
       ZoomManager.setZoomForBrowser(browser, 1);
       // _ignorePendingZoomAccesses already called above, so no need here.
       this._notifyOnLocationChange();
@@ -244,7 +260,7 @@ var FullZoom = {
     }
 
     // See if the zoom pref is cached.
-    let ctxt = this._loadContextFromBrowser(browser);
+    let ctxt = this._loadContextFromWindow(browser.contentWindow);
     let pref = this._cps2.getCachedByDomainAndName(aURI.spec, this.name, ctxt);
     if (pref) {
       this._applyPrefToZoom(pref.value, browser,
@@ -306,15 +322,10 @@ var FullZoom = {
   reset: function FullZoom_reset() {
     let browser = gBrowser.selectedBrowser;
     let token = this._getBrowserToken(browser);
-    this._getGlobalValue(browser, function (value) {
+    this._getGlobalValue(browser.contentWindow, function (value) {
       if (token.isCurrent) {
         ZoomManager.setZoomForBrowser(browser, value === undefined ? 1 : value);
         this._ignorePendingZoomAccesses(browser);
-        this._executeSoon(function () {
-          // _getGlobalValue may be either sync or async, so notify asyncly so
-          // observers are guaranteed consistent behavior.
-          Services.obs.notifyObservers(null, "browser-fullZoom:zoomReset", "");
-        });
       }
     });
     this._removePref(browser);
@@ -349,10 +360,11 @@ var FullZoom = {
       return;
     }
 
-    // The browser is sometimes half-destroyed because this method is called
+    // aBrowser.contentDocument is sometimes gone because this method is called
     // by content pref service callbacks, which themselves can be called at any
     // time, even after browsers are closed.
-    if (!aBrowser.parentNode || aBrowser.isSyntheticDocument) {
+    if (!aBrowser.contentDocument ||
+        aBrowser.contentDocument.mozSyntheticDocument) {
       this._executeSoon(aCallback);
       return;
     }
@@ -365,7 +377,7 @@ var FullZoom = {
     }
 
     let token = this._getBrowserToken(aBrowser);
-    this._getGlobalValue(aBrowser, function (value) {
+    this._getGlobalValue(aBrowser.contentWindow, function (value) {
       if (token.isCurrent) {
         ZoomManager.setZoomForBrowser(aBrowser, value === undefined ? 1 : value);
         this._ignorePendingZoomAccesses(aBrowser);
@@ -381,15 +393,14 @@ var FullZoom = {
    * @param browser  The zoom of this browser will be saved.  Required.
    */
   _applyZoomToPref: function FullZoom__applyZoomToPref(browser) {
-    Services.obs.notifyObservers(null, "browser-fullZoom:zoomChange", "");
     if (!this.siteSpecific ||
         gInPrintPreviewMode ||
-        browser.isSyntheticDocument)
+        browser.contentDocument.mozSyntheticDocument)
       return;
 
     this._cps2.set(browser.currentURI.spec, this.name,
                    ZoomManager.getZoomForBrowser(browser),
-                   this._loadContextFromBrowser(browser), {
+                   this._loadContextFromWindow(browser.contentWindow), {
       handleCompletion: function () {
         this._isNextContentPrefChangeInternal = true;
       }.bind(this),
@@ -402,10 +413,9 @@ var FullZoom = {
    * @param browser  The zoom of this browser will be removed.  Required.
    */
   _removePref: function FullZoom__removePref(browser) {
-    Services.obs.notifyObservers(null, "browser-fullZoom:zoomReset", "");
-    if (browser.isSyntheticDocument)
+    if (browser.contentDocument.mozSyntheticDocument)
       return;
-    let ctxt = this._loadContextFromBrowser(browser);
+    let ctxt = this._loadContextFromWindow(browser.contentWindow);
     this._cps2.removeByDomainAndName(browser.currentURI.spec, this.name, ctxt, {
       handleCompletion: function () {
         this._isNextContentPrefChangeInternal = true;
@@ -429,18 +439,19 @@ var FullZoom = {
    * @return  An object with an "isCurrent" getter.
    */
   _getBrowserToken: function FullZoom__getBrowserToken(browser) {
+    let outerID = this._browserOuterID(browser);
     let map = this._browserTokenMap;
-    if (!map.has(browser))
-      map.set(browser, 0);
+    if (!map.has(outerID))
+      map.set(outerID, 0);
     return {
-      token: map.get(browser),
+      token: map.get(outerID),
       get isCurrent() {
         // At this point, the browser may have been destructed and unbound but
         // its outer ID not removed from the map because outer-window-destroyed
         // hasn't been received yet.  In that case, the browser is unusable, it
         // has no properties, so return false.  Check for this case by getting a
         // property, say, docShell.
-        return map.get(browser) === this.token && browser.parentNode;
+        return map.get(outerID) === this.token && browser.docShell;
       },
     };
   },
@@ -453,8 +464,17 @@ var FullZoom = {
    * @param browser  Pending accesses in this browser will be ignored.
    */
   _ignorePendingZoomAccesses: function FullZoom__ignorePendingZoomAccesses(browser) {
+    let outerID = this._browserOuterID(browser);
     let map = this._browserTokenMap;
-    map.set(browser, (map.get(browser) || 0) + 1);
+    map.set(outerID, (map.get(outerID) || 0) + 1);
+  },
+
+  _browserOuterID: function FullZoom__browserOuterID(browser) {
+    return browser.
+           contentWindow.
+           QueryInterface(Ci.nsIInterfaceRequestor).
+           getInterface(Ci.nsIDOMWindowUtils).
+           outerWindowID;
   },
 
   _ensureValid: function FullZoom__ensureValid(aValue) {
@@ -481,12 +501,12 @@ var FullZoom = {
    * level.  It's not always possible to avoid them, though.  As a convenience,
    * then, this method takes a callback and returns nothing.
    *
-   * @param browser   The browser pertaining to the zoom.
+   * @param window    The content window pertaining to the zoom.
    * @param callback  Synchronously or asynchronously called when done.  It's
    *                  bound to this object (FullZoom) and called as:
    *                    callback(prefValue)
    */
-  _getGlobalValue: function FullZoom__getGlobalValue(browser, callback) {
+  _getGlobalValue: function FullZoom__getGlobalValue(window, callback) {
     // * !("_globalValue" in this) => global value not yet cached.
     // * this._globalValue === undefined => global value known not to exist.
     // * Otherwise, this._globalValue is a number, the global value.
@@ -495,7 +515,7 @@ var FullZoom = {
       return;
     }
     let value = undefined;
-    this._cps2.getGlobal(this.name, this._loadContextFromBrowser(browser), {
+    this._cps2.getGlobal(this.name, this._loadContextFromWindow(window), {
       handleResult: function (pref) value = pref.value,
       handleCompletion: function (reason) {
         this._globalValue = this._ensureValid(value);
@@ -505,24 +525,27 @@ var FullZoom = {
   },
 
   /**
-   * Gets the load context from the given Browser.
+   * Gets the load context from the given window.
    *
-   * @param Browser  The Browser whose load context will be returned.
-   * @return        The nsILoadContext of the given Browser.
+   * @param window  The window whose load context will be returned.
+   * @return        The nsILoadContext of the given window.
    */
-  _loadContextFromBrowser: function FullZoom__loadContextFromBrowser(browser) {
-    return browser.loadContext;
+  _loadContextFromWindow: function FullZoom__loadContextFromWindow(window) {
+    return window.
+           QueryInterface(Ci.nsIInterfaceRequestor).
+           getInterface(Ci.nsIWebNavigation).
+           QueryInterface(Ci.nsILoadContext);
   },
 
   /**
-   * Asynchronously broadcasts "browser-fullZoom:location-change" so that
-   * listeners can be notified when the zoom levels on those pages change.
-   * The notification is always asynchronous so that observers are guaranteed a
-   * consistent behavior.
+   * Asynchronously broadcasts a "browser-fullZoom:locationChange" notification
+   * so that tests can select tabs, load pages, etc. and be notified when the
+   * zoom levels on those pages change.  The notification is always asynchronous
+   * so that observers are guaranteed a consistent behavior.
    */
   _notifyOnLocationChange: function FullZoom__notifyOnLocationChange() {
     this._executeSoon(function () {
-      Services.obs.notifyObservers(null, "browser-fullZoom:location-change", "");
+      Services.obs.notifyObservers(null, "browser-fullZoom:locationChange", "");
     });
   },
 

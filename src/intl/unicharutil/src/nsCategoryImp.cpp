@@ -8,22 +8,23 @@
 #include "nsCategoryImp.h"
 #include "nsUnicodeProperties.h"
 
-NS_IMPL_QUERY_INTERFACE(nsCategoryImp, nsIUGenCategory)
+static nsCategoryImp gCategoryImp;
 
-NS_IMETHODIMP_(MozExternalRefCountType) nsCategoryImp::AddRef(void)
+NS_IMPL_THREADSAFE_QUERY_INTERFACE1(nsCategoryImp, nsIUGenCategory)
+
+NS_IMETHODIMP_(nsrefcnt) nsCategoryImp::AddRef(void)
 {
-  return MozExternalRefCountType(1);
+  return nsrefcnt(1);
 }
 
-NS_IMETHODIMP_(MozExternalRefCountType) nsCategoryImp::Release(void)
+NS_IMETHODIMP_(nsrefcnt) nsCategoryImp::Release(void)
 {
-  return MozExternalRefCountType(1);
+  return nsrefcnt(1);
 }
 
 nsCategoryImp* nsCategoryImp::GetInstance()
 {
-  static nsCategoryImp categoryImp;
-  return &categoryImp;
+  return &gCategoryImp;
 }
 
 nsIUGenCategory::nsUGenCategory nsCategoryImp::Get(uint32_t aChar)

@@ -10,7 +10,6 @@
 #include "nsCOMPtr.h"
 #include "DOMMediaStream.h"
 #include "nsComponentManagerUtils.h"
-#include "mozilla/Monitor.h"
 
 #include "VideoUtils.h"
 #include "MediaEngine.h"
@@ -41,27 +40,22 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const VideoTrackConstraintsN &aConstraints,
-                            const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise,
-                          int32_t aPlayoutDelay) { return NS_OK; };
+                          bool aNoiseOn, uint32_t aNoise) { return NS_OK; };
+  virtual void NotifyPull(MediaStreamGraph* aGraph, StreamTime aDesiredTime);
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
                           TrackID aId,
                           StreamTime aDesiredTime,
-                          TrackTicks &aLastEndTime);
+                          TrackTicks &aLastEndTime) {}
 
-  virtual bool IsFake() {
-    return true;
-  }
-
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
 protected:
@@ -69,21 +63,14 @@ protected:
 
   TrackID mTrackID;
   nsCOMPtr<nsITimer> mTimer;
-  // mMonitor protects mImage access/changes, and transitions of mState
-  // from kStarted to kStopped (which are combined with EndTrack() and
-  // image changes).  Note that mSources is not accessed from other threads
-  // for video and is not protected.
-  Monitor mMonitor;
-  nsRefPtr<layers::Image> mImage;
-
   nsRefPtr<layers::ImageContainer> mImageContainer;
 
+  SourceMediaStream* mSource;
+  layers::PlanarYCbCrImage* mImage;
   MediaEnginePrefs mOpts;
   int mCb;
   int mCr;
 };
-
-class SineWaveGenerator;
 
 class MediaEngineDefaultAudioSource : public nsITimerCallback,
                                       public MediaEngineAudioSource
@@ -95,27 +82,22 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate(const AudioTrackConstraintsN &aConstraints,
-                            const MediaEnginePrefs &aPrefs);
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
-                          bool aNoiseOn, uint32_t aNoise,
-                          int32_t aPlayoutDelay) { return NS_OK; };
+                          bool aNoiseOn, uint32_t aNoise) { return NS_OK; };
+  virtual void NotifyPull(MediaStreamGraph* aGraph, StreamTime aDesiredTime);
   virtual void NotifyPull(MediaStreamGraph* aGraph,
                           SourceMediaStream *aSource,
                           TrackID aId,
                           StreamTime aDesiredTime,
                           TrackTicks &aLastEndTime) {}
 
-  virtual bool IsFake() {
-    return true;
-  }
-
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
 protected:
@@ -123,9 +105,7 @@ protected:
   nsCOMPtr<nsITimer> mTimer;
 
   SourceMediaStream* mSource;
-  nsAutoPtr<SineWaveGenerator> mSineGenerator;
 };
-
 
 class MediaEngineDefault : public MediaEngine
 {
@@ -133,13 +113,12 @@ public:
   MediaEngineDefault()
   : mMutex("mozilla::MediaEngineDefault")
   {}
+  ~MediaEngineDefault() {}
 
   virtual void EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSource> >*);
   virtual void EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSource> >*);
 
 private:
-  ~MediaEngineDefault() {}
-
   Mutex mMutex;
   // protected with mMutex:
 

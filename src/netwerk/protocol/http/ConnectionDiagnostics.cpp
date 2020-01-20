@@ -9,17 +9,14 @@
 
 #include "nsHttpConnectionMgr.h"
 #include "nsHttpConnection.h"
+#include "SpdySession2.h"
 #include "SpdySession3.h"
-#include "SpdySession31.h"
-#include "Http2Session.h"
 #include "nsHttpHandler.h"
 #include "nsIConsoleService.h"
-#include "nsHttpRequestHead.h"
 
+using namespace mozilla;
+using namespace mozilla::net;
 extern PRThread *gSocketThread;
-
-namespace mozilla {
-namespace net {
 
 void
 nsHttpConnectionMgr::PrintDiagnostics()
@@ -130,8 +127,8 @@ nsHttpConnection::PrintDiagnostics(nsCString &log)
 {
   log.AppendPrintf("    CanDirectlyActivate = %d\n", CanDirectlyActivate());
 
-  log.AppendPrintf("    npncomplete = %d  setupSSLCalled = %d\n",
-                   mNPNComplete, mSetupSSLCalled);
+  log.AppendPrintf("    npncomplete = %d  setupNPNCalled = %d\n",
+                   mNPNComplete, mSetupNPNCalled);
 
   log.AppendPrintf("    spdyVersion = %d  reportedSpdy = %d everspdy = %d\n",
                    mUsingSpdyVersion, mReportedSpdy, mEverUsedSpdy);
@@ -160,7 +157,6 @@ nsHttpConnection::PrintDiagnostics(nsCString &log)
   if (mSpdySession)
     mSpdySession->PrintDiagnostics(log);
 }
-
 
 void
 SpdySession3::PrintDiagnostics(nsCString &log)
@@ -200,9 +196,9 @@ SpdySession3::PrintDiagnostics(nsCString &log)
 }
 
 void
-SpdySession31::PrintDiagnostics(nsCString &log)
+SpdySession2::PrintDiagnostics(nsCString &log)
 {
-  log.AppendPrintf("     ::: SPDY VERSION 3.1\n");
+  log.AppendPrintf("     ::: SPDY VERSION 2\n");
   log.AppendPrintf("     shouldgoaway = %d mClosed = %d CanReuse = %d nextID=0x%X\n",
                    mShouldGoAway, mClosed, CanReuse(), mNextStreamID);
 
@@ -237,42 +233,6 @@ SpdySession31::PrintDiagnostics(nsCString &log)
 }
 
 void
-Http2Session::PrintDiagnostics(nsCString &log)
-{
-  log.AppendPrintf("     ::: HTTP2\n");
-  log.AppendPrintf("     shouldgoaway = %d mClosed = %d CanReuse = %d nextID=0x%X\n",
-                   mShouldGoAway, mClosed, CanReuse(), mNextStreamID);
-
-  log.AppendPrintf("     concurrent = %d maxconcurrent = %d\n",
-                   mConcurrent, mMaxConcurrent);
-
-  log.AppendPrintf("     roomformorestreams = %d roomformoreconcurrent = %d\n",
-                   RoomForMoreStreams(), RoomForMoreConcurrent());
-
-  log.AppendPrintf("     transactionHashCount = %d streamIDHashCount = %d\n",
-                   mStreamTransactionHash.Count(),
-                   mStreamIDHash.Count());
-
-  log.AppendPrintf("     Queued Stream Size = %d\n", mQueuedStreams.GetSize());
-
-  PRIntervalTime now = PR_IntervalNow();
-  log.AppendPrintf("     Ping Threshold = %ums\n",
-                   PR_IntervalToMilliseconds(mPingThreshold));
-  log.AppendPrintf("     Ping Timeout = %ums\n",
-                   PR_IntervalToMilliseconds(gHttpHandler->SpdyPingTimeout()));
-  log.AppendPrintf("     Idle for Any Activity (ping) = %ums\n",
-                   PR_IntervalToMilliseconds(now - mLastReadEpoch));
-  log.AppendPrintf("     Idle for Data Activity = %ums\n",
-                   PR_IntervalToMilliseconds(now - mLastDataReadEpoch));
-  if (mPingSentEpoch)
-    log.AppendPrintf("     Ping Outstanding (ping) = %ums, expired = %d\n",
-                     PR_IntervalToMilliseconds(now - mPingSentEpoch),
-                     now - mPingSentEpoch >= gHttpHandler->SpdyPingTimeout());
-  else
-    log.AppendPrintf("     No Ping Outstanding\n");
-}
-
-void
 nsHttpTransaction::PrintDiagnostics(nsCString &log)
 {
   if (!mRequestHead)
@@ -285,6 +245,3 @@ nsHttpTransaction::PrintDiagnostics(nsCString &log)
   log.AppendPrintf("     restart count = %u\n", mRestartCount);
   log.AppendPrintf("     classification = 0x%x\n", mClassification);
 }
-
-} // namespace mozilla::net
-} // namespace mozilla

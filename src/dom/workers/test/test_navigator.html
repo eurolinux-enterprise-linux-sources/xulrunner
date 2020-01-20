@@ -35,13 +35,7 @@ Tests of DOM Worker Navigator
       return;
     }
 
-    if (args.name === "taintEnabled") {
-      is(navigator[args.name](), args.value, args.name + "() returns false.");
-      return;
-    }
-
-    is(navigator[args.name], args.value,
-       "Mismatched navigator string for " + args.name + "!");
+    is(navigator[args.name], args.value, "Mismatched navigator string!");
   };
 
   worker.onerror = function(event) {

@@ -14,7 +14,6 @@ var manager = new MediaTestManager;
 
 function startTest(test, token) {
   var v = document.createElement('video');
-  v.preload = "metadata";
   v.token = token;
   manager.started(token);
 
@@ -39,7 +38,7 @@ function startTest(test, token) {
     if (v.ended && v.seenSuspend && !v.finished) {
       v.finished = true;
       v.removeEventListener("timeupdate", timeUpdate, false);
-      removeNodeAndSource(v);
+      v.parentNode.removeChild(v);
       manager.finished(v.token);
     }
   }}(test, v);
@@ -53,7 +52,7 @@ function startTest(test, token) {
     if (v.ended && !v.finished) {
       v.finished = true;
       v.removeEventListener("timeupdate", timeUpdate, false);
-      removeNodeAndSource(v);
+      v.parentNode.removeChild(v);
       manager.finished(v.token);
     }
   }}(test, v);

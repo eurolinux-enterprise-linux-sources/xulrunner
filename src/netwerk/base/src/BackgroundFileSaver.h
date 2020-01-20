@@ -13,7 +13,6 @@
 #define BackgroundFileSaver_h__
 
 #include "mozilla/Mutex.h"
-#include "nsCOMArray.h"
 #include "nsCOMPtr.h"
 #include "nsNSSShutDown.h"
 #include "nsIAsyncOutputStream.h"
@@ -24,8 +23,6 @@
 
 class nsIAsyncInputStream;
 class nsIThread;
-class nsIX509CertList;
-class PRLogModuleInfo;
 
 namespace mozilla {
 namespace net {
@@ -73,8 +70,6 @@ public:
 
 protected:
   virtual ~BackgroundFileSaver();
-
-  static PRLogModuleInfo *prlog;
 
   /**
    * Helper function for managing NSS objects (mDigestContext).
@@ -160,43 +155,17 @@ private:
   nsresult mStatus;
 
   /**
-   * True if we should append data to the initial target file, instead of
-   * overwriting it.
+   * Set by the control thread to the target file name that will be used by the
+   * worker thread, as soon as it is possible to update mActualTarget and open
+   * the file.  This is null if no target was ever assigned to this object.
    */
-  bool mAppend;
+  nsCOMPtr<nsIFile> mAssignedTarget;
 
   /**
-   * This is set by the first SetTarget call on the control thread, and contains
-   * the target file name that will be used by the worker thread, as soon as it
-   * is possible to update mActualTarget and open the file.  This is null if no
-   * target was ever assigned to this object.
-   */
-  nsCOMPtr<nsIFile> mInitialTarget;
-
-  /**
-   * This is set by the first SetTarget call on the control thread, and
-   * indicates whether mInitialTarget should be kept as partially completed,
+   * Indicates whether mAssignedTarget should be kept as partially completed,
    * rather than deleted, if the operation fails or is canceled.
    */
-  bool mInitialTargetKeepPartial;
-
-  /**
-   * This is set by subsequent SetTarget calls on the control thread, and
-   * contains the new target file name to which the worker thread will move the
-   * target file, as soon as it can be done.  This is null if SetTarget was
-   * called only once, or no target was ever assigned to this object.
-   *
-   * The target file can be renamed multiple times, though only the most recent
-   * rename is guaranteed to be processed by the worker thread.
-   */
-  nsCOMPtr<nsIFile> mRenamedTarget;
-
-  /**
-   * This is set by subsequent SetTarget calls on the control thread, and
-   * indicates whether mRenamedTarget should be kept as partially completed,
-   * rather than deleted, if the operation fails or is canceled.
-   */
-  bool mRenamedTargetKeepPartial;
+  bool mAssignedTargetKeepPartial;
 
   /**
    * While NS_AsyncCopy is in progress, allows canceling it.  Null otherwise.
@@ -215,17 +184,6 @@ private:
    * setTarget is called.
    */
   bool mSha256Enabled;
-
-  /**
-   * Store the signature info.
-   */
-  nsCOMArray<nsIX509CertList> mSignatureInfo;
-
-  /**
-   * Whether or not to extract the signature. Must be set on the main thread
-   * before setTarget is called.
-   */
-  bool mSignatureInfoEnabled;
 
   //////////////////////////////////////////////////////////////////////////////
   //// State handled exclusively by the worker thread
@@ -297,13 +255,6 @@ private:
    * Event called on the control thread to send the final notification.
    */
   nsresult NotifySaveComplete();
-
-  /**
-   * Verifies the signature of the binary at the specified file path and stores
-   * the signature data in mSignatureInfo. We extract only X.509 certificates,
-   * since that is what Google's Safebrowsing protocol specifies.
-   */
-  nsresult ExtractSignatureInfo(const nsAString& filePath);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -314,7 +265,7 @@ class BackgroundFileSaverOutputStream : public BackgroundFileSaver
                                       , public nsIOutputStreamCallback
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIOUTPUTSTREAM
   NS_DECL_NSIASYNCOUTPUTSTREAM
   NS_DECL_NSIOUTPUTSTREAMCALLBACK
@@ -342,7 +293,7 @@ class BackgroundFileSaverStreamListener : public BackgroundFileSaver
                                         , public nsIStreamListener
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
 
@@ -394,7 +345,7 @@ class DigestOutputStream : public nsNSSShutDownObject,
                            public nsIOutputStream
 {
 public:
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIOUTPUTSTREAM
   // Constructor. Neither parameter may be null. The caller owns both.
   DigestOutputStream(nsIOutputStream* outputStream, PK11Context* aContext);

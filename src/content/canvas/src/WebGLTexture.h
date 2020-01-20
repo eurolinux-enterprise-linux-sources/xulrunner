@@ -7,7 +7,6 @@
 #define WEBGLTEXTURE_H_
 
 #include "WebGLObjectModel.h"
-#include "WebGLFramebufferAttachable.h"
 
 #include "nsWrapperCache.h"
 
@@ -17,7 +16,7 @@
 namespace mozilla {
 
 // Zero is not an integer power of two.
-inline bool is_pot_assuming_nonnegative(GLsizei x)
+inline bool is_pot_assuming_nonnegative(WebGLsizei x)
 {
     return x && (x & (x-1)) == 0;
 }
@@ -25,11 +24,11 @@ inline bool is_pot_assuming_nonnegative(GLsizei x)
 // NOTE: When this class is switched to new DOM bindings, update the (then-slow)
 // WrapObject calls in GetParameter and GetFramebufferAttachmentParameter.
 class WebGLTexture MOZ_FINAL
-    : public nsWrapperCache
+    : public nsISupports
     , public WebGLRefCountedObject<WebGLTexture>
     , public LinkedListElement<WebGLTexture>
     , public WebGLContextBoundObject
-    , public WebGLFramebufferAttachable
+    , public nsWrapperCache
 {
 public:
     WebGLTexture(WebGLContext *context);
@@ -40,19 +39,20 @@ public:
 
     void Delete();
 
-    bool HasEverBeenBound() const { return mHasEverBeenBound; }
+    bool HasEverBeenBound() { return mHasEverBeenBound; }
     void SetHasEverBeenBound(bool x) { mHasEverBeenBound = x; }
-    GLuint GLName() const { return mGLName; }
+    WebGLuint GLName() { return mGLName; }
     GLenum Target() const { return mTarget; }
 
     WebGLContext *GetParentObject() const {
         return Context();
     }
 
-    virtual JSObject* WrapObject(JSContext *cx) MOZ_OVERRIDE;
+    virtual JSObject* WrapObject(JSContext *cx,
+                                 JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
-    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLTexture)
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLTexture)
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WebGLTexture)
 
 protected:
 
@@ -60,43 +60,35 @@ protected:
     friend class WebGLFramebuffer;
 
     bool mHasEverBeenBound;
-    GLuint mGLName;
+    WebGLuint mGLName;
 
     // we store information about the various images that are part of
     // this texture (cubemap faces, mipmap levels)
 
 public:
 
-    class ImageInfo
-        : public WebGLRectangleObject
-    {
+    class ImageInfo : public WebGLRectangleObject {
     public:
         ImageInfo()
-            : mWebGLFormat(LOCAL_GL_NONE)
-            , mWebGLType(LOCAL_GL_NONE)
-            , mImageDataStatus(WebGLImageDataStatus::NoImageData)
+            : mFormat(0)
+            , mType(0)
+            , mIsDefined(false)
         {}
 
-        ImageInfo(GLsizei width,
-                  GLsizei height,
-                  GLenum webGLFormat,
-                  GLenum webGLType,
-                  WebGLImageDataStatus status)
+        ImageInfo(WebGLsizei width, WebGLsizei height,
+                  WebGLenum format, WebGLenum type)
             : WebGLRectangleObject(width, height)
-            , mWebGLFormat(webGLFormat)
-            , mWebGLType(webGLType)
-            , mImageDataStatus(status)
-        {
-            // shouldn't use this constructor to construct a null ImageInfo
-            MOZ_ASSERT(status != WebGLImageDataStatus::NoImageData);
-        }
+            , mFormat(format)
+            , mType(type)
+            , mIsDefined(true)
+        {}
 
         bool operator==(const ImageInfo& a) const {
-            return mImageDataStatus == a.mImageDataStatus &&
-                   mWidth == a.mWidth &&
-                   mHeight == a.mHeight &&
-                   mWebGLFormat == a.mWebGLFormat &&
-                   mWebGLType == a.mWebGLType;
+            return mIsDefined == a.mIsDefined &&
+                   mWidth     == a.mWidth &&
+                   mHeight    == a.mHeight &&
+                   mFormat    == a.mFormat &&
+                   mType      == a.mType;
         }
         bool operator!=(const ImageInfo& a) const {
             return !(*this == a);
@@ -111,108 +103,52 @@ public:
             return is_pot_assuming_nonnegative(mWidth) &&
                    is_pot_assuming_nonnegative(mHeight); // negative sizes should never happen (caught in texImage2D...)
         }
-        bool HasUninitializedImageData() const {
-            return mImageDataStatus == WebGLImageDataStatus::UninitializedImageData;
-        }
         int64_t MemoryUsage() const;
-        /*! This is the format passed from JS to WebGL.
-         * It can be converted to a value to be passed to driver with
-         * DriverFormatsFromFormatAndType().
-         */
-        GLenum WebGLFormat() const { return mWebGLFormat; }
-        /*! This is the type passed from JS to WebGL.
-         * It can be converted to a value to be passed to driver with
-         * DriverTypeFromType().
-         */
-        GLenum WebGLType() const { return mWebGLType; }
-
+        WebGLenum Format() const { return mFormat; }
+        WebGLenum Type() const { return mType; }
     protected:
-        GLenum mWebGLFormat; //!< This is the WebGL/GLES format
-        GLenum mWebGLType;   //!< This is the WebGL/GLES type
-        WebGLImageDataStatus mImageDataStatus;
+        WebGLenum mFormat, mType;
+        bool mIsDefined;
 
         friend class WebGLTexture;
     };
 
-private:
-    static size_t FaceForTarget(GLenum target) {
-        // Call this out explicitly:
-        MOZ_ASSERT(target != LOCAL_GL_TEXTURE_CUBE_MAP);
-        MOZ_ASSERT(target == LOCAL_GL_TEXTURE_2D ||
-                   (target >= LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X &&
-                    target <= LOCAL_GL_TEXTURE_CUBE_MAP_NEGATIVE_Z));
-        return target == LOCAL_GL_TEXTURE_2D ? 0 : target - LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X;
-    }
-
-    ImageInfo& ImageInfoAtFace(size_t face, GLint level) {
-        MOZ_ASSERT(face < mFacesCount, "wrong face index, must be 0 for TEXTURE_2D and at most 5 for cube maps");
-
+    ImageInfo& ImageInfoAt(size_t level, size_t face = 0) {
+#ifdef DEBUG
+        if (face >= mFacesCount)
+            NS_ERROR("wrong face index, must be 0 for TEXTURE_2D and at most 5 for cube maps");
+#endif
         // no need to check level as a wrong value would be caught by ElementAt().
         return mImageInfos.ElementAt(level * mFacesCount + face);
     }
 
-    const ImageInfo& ImageInfoAtFace(size_t face, GLint level) const {
-        return const_cast<const ImageInfo&>(
-            const_cast<WebGLTexture*>(this)->ImageInfoAtFace(face, level)
-        );
+    const ImageInfo& ImageInfoAt(size_t level, size_t face) const {
+        return const_cast<WebGLTexture*>(this)->ImageInfoAt(level, face);
     }
 
-public:
-    ImageInfo& ImageInfoAt(GLenum imageTarget, GLint level) {
-        MOZ_ASSERT(imageTarget);
-
-        size_t face = FaceForTarget(imageTarget);
-        return ImageInfoAtFace(face, level);
-    }
-
-    const ImageInfo& ImageInfoAt(GLenum imageTarget, GLint level) const {
-        return const_cast<WebGLTexture*>(this)->ImageInfoAt(imageTarget, level);
-    }
-
-    bool HasImageInfoAt(GLenum imageTarget, GLint level) const {
-        MOZ_ASSERT(imageTarget);
-
-        size_t face = FaceForTarget(imageTarget);
+    bool HasImageInfoAt(size_t level, size_t face) const {
         CheckedUint32 checked_index = CheckedUint32(level) * mFacesCount + face;
         return checked_index.isValid() &&
                checked_index.value() < mImageInfos.Length() &&
-               ImageInfoAt(imageTarget, level).mImageDataStatus != WebGLImageDataStatus::NoImageData;
+               ImageInfoAt(level, face).mIsDefined;
     }
 
-    ImageInfo& ImageInfoBase() {
-        return ImageInfoAtFace(0, 0);
-    }
-
-    const ImageInfo& ImageInfoBase() const {
-        return ImageInfoAtFace(0, 0);
+    static size_t FaceForTarget(WebGLenum target) {
+        return target == LOCAL_GL_TEXTURE_2D ? 0 : target - LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X;
     }
 
     int64_t MemoryUsage() const;
 
-    void SetImageDataStatus(GLenum imageTarget, GLint level, WebGLImageDataStatus newStatus) {
-        MOZ_ASSERT(HasImageInfoAt(imageTarget, level));
-        ImageInfo& imageInfo = ImageInfoAt(imageTarget, level);
-        // there is no way to go from having image data to not having any
-        MOZ_ASSERT(newStatus != WebGLImageDataStatus::NoImageData ||
-                   imageInfo.mImageDataStatus == WebGLImageDataStatus::NoImageData);
-        if (imageInfo.mImageDataStatus != newStatus) {
-            SetFakeBlackStatus(WebGLTextureFakeBlackStatus::Unknown);
-        }
-        imageInfo.mImageDataStatus = newStatus;
-    }
-
-    void DoDeferredImageInitialization(GLenum imageTarget, GLint level);
-
 protected:
 
-    GLenum mTarget;
-    GLenum mMinFilter, mMagFilter, mWrapS, mWrapT;
+    WebGLenum mTarget;
+    WebGLenum mMinFilter, mMagFilter, mWrapS, mWrapT;
 
     size_t mFacesCount, mMaxLevelWithCustomImages;
     nsTArray<ImageInfo> mImageInfos;
 
     bool mHaveGeneratedMipmap;
-    WebGLTextureFakeBlackStatus mFakeBlackStatus;
+    FakeBlackStatus mFakeBlackStatus;
 
     void EnsureMaxLevelWithCustomImagesAtLeast(size_t aMaxLevelWithCustomImages) {
         mMaxLevelWithCustomImages = std::max(mMaxLevelWithCustomImages, aMaxLevelWithCustomImages);
@@ -229,33 +165,35 @@ protected:
         return mWrapS == LOCAL_GL_CLAMP_TO_EDGE && mWrapT == LOCAL_GL_CLAMP_TO_EDGE;
     }
 
-    bool DoesTexture2DMipmapHaveAllLevelsConsistentlyDefined(GLenum texImageTarget) const;
+    bool DoesTexture2DMipmapHaveAllLevelsConsistentlyDefined(size_t face) const;
 
 public:
 
-    void Bind(GLenum aTarget);
+    void SetDontKnowIfNeedFakeBlack();
 
-    void SetImageInfo(GLenum aTarget, GLint aLevel,
-                      GLsizei aWidth, GLsizei aHeight,
-                      GLenum aFormat, GLenum aType, WebGLImageDataStatus aStatus);
+    void Bind(WebGLenum aTarget);
 
-    void SetMinFilter(GLenum aMinFilter) {
+    void SetImageInfo(WebGLenum aTarget, WebGLint aLevel,
+                      WebGLsizei aWidth, WebGLsizei aHeight,
+                      WebGLenum aFormat, WebGLenum aType);
+
+    void SetMinFilter(WebGLenum aMinFilter) {
         mMinFilter = aMinFilter;
-        SetFakeBlackStatus(WebGLTextureFakeBlackStatus::Unknown);
+        SetDontKnowIfNeedFakeBlack();
     }
-    void SetMagFilter(GLenum aMagFilter) {
+    void SetMagFilter(WebGLenum aMagFilter) {
         mMagFilter = aMagFilter;
-        SetFakeBlackStatus(WebGLTextureFakeBlackStatus::Unknown);
+        SetDontKnowIfNeedFakeBlack();
     }
-    void SetWrapS(GLenum aWrapS) {
+    void SetWrapS(WebGLenum aWrapS) {
         mWrapS = aWrapS;
-        SetFakeBlackStatus(WebGLTextureFakeBlackStatus::Unknown);
+        SetDontKnowIfNeedFakeBlack();
     }
-    void SetWrapT(GLenum aWrapT) {
+    void SetWrapT(WebGLenum aWrapT) {
         mWrapT = aWrapT;
-        SetFakeBlackStatus(WebGLTextureFakeBlackStatus::Unknown);
+        SetDontKnowIfNeedFakeBlack();
     }
-    GLenum MinFilter() const { return mMinFilter; }
+    WebGLenum MinFilter() const { return mMinFilter; }
 
     bool DoesMinFilterRequireMipmap() const {
         return !(mMinFilter == LOCAL_GL_NEAREST || mMinFilter == LOCAL_GL_LINEAR);
@@ -266,7 +204,7 @@ public:
     void SetCustomMipmap();
 
     bool IsFirstImagePowerOfTwo() const {
-        return ImageInfoBase().IsPowerOfTwo();
+        return ImageInfoAt(0, 0).IsPowerOfTwo();
     }
 
     bool AreAllLevel0ImageInfosEqual() const;
@@ -277,13 +215,7 @@ public:
 
     bool IsMipmapCubeComplete() const;
 
-    void SetFakeBlackStatus(WebGLTextureFakeBlackStatus x) {
-        mFakeBlackStatus = x;
-        mContext->SetFakeBlackStatus(WebGLContextFakeBlackStatus::Unknown);
-    }
-    // Returns the current fake-black-status, except if it was Unknown,
-    // in which case this function resolves it first, so it never returns Unknown.
-    WebGLTextureFakeBlackStatus ResolvedFakeBlackStatus();
+    bool NeedFakeBlack();
 };
 
 } // namespace mozilla

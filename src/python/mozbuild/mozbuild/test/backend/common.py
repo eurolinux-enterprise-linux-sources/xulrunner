@@ -15,27 +15,17 @@ from mach.logging import LoggingManager
 from mozbuild.backend.configenvironment import ConfigEnvironment
 from mozbuild.frontend.emitter import TreeMetadataEmitter
 from mozbuild.frontend.reader import BuildReader
-from mozbuild.util import DefaultOnReadDict
-
-import mozpack.path as mozpath
 
 
 log_manager = LoggingManager()
 log_manager.add_terminal_logging()
 
 
-test_data_path = mozpath.abspath(mozpath.dirname(__file__))
-test_data_path = mozpath.join(test_data_path, 'data')
+test_data_path = os.path.abspath(os.path.dirname(__file__))
+test_data_path = os.path.join(test_data_path, 'data')
 
 
-CONFIGS = DefaultOnReadDict({
-    'android_eclipse': {
-        'defines': [],
-        'non_global_defines': [],
-        'substs': [
-            ('ANDROID_TARGET_SDK', '16'),
-        ],
-    },
+CONFIGS = {
     'stub0': {
         'defines': [
             ('MOZ_TRUE_1', '1'),
@@ -50,6 +40,11 @@ CONFIGS = DefaultOnReadDict({
             ('MOZ_BAR', 'bar'),
         ],
     },
+    'external_make_dirs': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
     'substitute_config_files': {
         'defines': [],
         'non_global_defines': [],
@@ -58,39 +53,27 @@ CONFIGS = DefaultOnReadDict({
             ('MOZ_BAR', 'bar'),
         ],
     },
-    'test_config': {
-        'defines': [
-            ('foo', 'baz qux'),
-            ('baz', 1)
-        ],
+    'variable_passthru': {
+        'defines': [],
         'non_global_defines': [],
-        'substs': [
-            ('foo', 'bar baz'),
-        ],
+        'substs': [],
     },
-    'visual-studio': {
+    'exports': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
+    'xpcshell_manifests': {
         'defines': [],
         'non_global_defines': [],
         'substs': [
-            ('MOZ_APP_NAME', 'my_app'),
-        ],
+            ('XPCSHELL_TESTS_MANIFESTS', 'XPCSHELL_TESTS'),
+            ],
     },
-}, global_default={
-    'defines': [],
-    'non_global_defines': [],
-    'substs': [],
-})
+}
 
 
 class BackendTester(unittest.TestCase):
-    def setUp(self):
-        self._old_env = dict(os.environ)
-        os.environ.pop('MOZ_OBJDIR', None)
-
-    def tearDown(self):
-        os.environ.clear()
-        os.environ.update(self._old_env)
-
     def _get_environment(self, name):
         """Obtain a new instance of a ConfigEnvironment for a known profile.
 
@@ -102,19 +85,19 @@ class BackendTester(unittest.TestCase):
         objdir = mkdtemp()
         self.addCleanup(rmtree, objdir)
 
-        srcdir = mozpath.join(test_data_path, name)
+        srcdir = os.path.join(test_data_path, name)
         config['substs'].append(('top_srcdir', srcdir))
         return ConfigEnvironment(srcdir, objdir, **config)
 
-    def _emit(self, name, env=None):
-        env = env or self._get_environment(name)
+    def _emit(self, name):
+        env = self._get_environment(name)
         reader = BuildReader(env)
         emitter = TreeMetadataEmitter(env)
 
         return env, emitter.emit(reader.read_topsrcdir())
 
-    def _consume(self, name, cls, env=None):
-        env, objs = self._emit(name, env=env)
+    def _consume(self, name, cls):
+        env, objs = self._emit(name)
         backend = cls(env)
         backend.consume(objs)
 
@@ -124,7 +107,7 @@ class BackendTester(unittest.TestCase):
         for dirpath, dirnames, filenames in os.walk(topdir):
             for f in filenames:
                 if f == filename:
-                    yield mozpath.relpath(mozpath.join(dirpath, f), topdir)
+                    yield os.path.relpath(os.path.join(dirpath, f), topdir)
 
     def _mozbuild_paths(self, env):
         return self._tree_paths(env.topsrcdir, 'moz.build')

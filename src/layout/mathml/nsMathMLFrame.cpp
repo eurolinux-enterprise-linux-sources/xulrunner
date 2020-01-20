@@ -3,17 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsINameSpaceManager.h"
 #include "nsMathMLFrame.h"
-#include "nsNameSpaceManager.h"
 #include "nsMathMLChar.h"
 #include "nsCSSPseudoElements.h"
-#include "nsMathMLElement.h"
 
 // used to map attributes into CSS rules
 #include "nsStyleSet.h"
 #include "nsAutoPtr.h"
 #include "nsDisplayList.h"
 #include "nsRenderingContext.h"
+#include "nsContentUtils.h"
+#include "nsIScriptError.h"
 
 eMathMLFrameType
 nsMathMLFrame::GetMathMLFrameType()
@@ -30,6 +31,32 @@ nsMathMLFrame::GetMathMLFrameType()
   return eMathMLFrameType_Ordinary;  
 }
 
+// snippet of code used by <mstyle>, <mtable> and <math> which are the only
+// three tags where the displaystyle attribute is allowed by the spec.
+/* static */ void
+nsMathMLFrame::FindAttrDisplaystyle(nsIContent*         aContent,
+                                    nsPresentationData& aPresentationData)
+{
+  NS_ASSERTION(aContent->Tag() == nsGkAtoms::mstyle_ ||
+               aContent->Tag() == nsGkAtoms::mtable_ ||
+               aContent->Tag() == nsGkAtoms::math, "bad caller");
+  static nsIContent::AttrValuesArray strings[] =
+    {&nsGkAtoms::_false, &nsGkAtoms::_true, nullptr};
+  // see if the explicit displaystyle attribute is there
+  switch (aContent->FindAttrValueIn(kNameSpaceID_None,
+    nsGkAtoms::displaystyle_, strings, eCaseMatters)) {
+  case 0:
+    aPresentationData.flags &= ~NS_MATHML_DISPLAYSTYLE;
+    aPresentationData.flags |= NS_MATHML_EXPLICIT_DISPLAYSTYLE;
+    break;
+  case 1:
+    aPresentationData.flags |= NS_MATHML_DISPLAYSTYLE;
+    aPresentationData.flags |= NS_MATHML_EXPLICIT_DISPLAYSTYLE;
+    break;
+  }
+  // no reset if the attr isn't found. so be sure to call it on inherited flags
+}
+
 NS_IMETHODIMP
 nsMathMLFrame::InheritAutomaticData(nsIFrame* aParent) 
 {
@@ -41,10 +68,15 @@ nsMathMLFrame::InheritAutomaticData(nsIFrame* aParent)
 
   mPresentationData.flags = 0;
   mPresentationData.baseFrame = nullptr;
+  mPresentationData.mstyle = nullptr;
 
   // by default, just inherit the display of our parent
   nsPresentationData parentData;
   GetPresentationDataFrom(aParent, parentData);
+  mPresentationData.mstyle = parentData.mstyle;
+  if (NS_MATHML_IS_DISPLAYSTYLE(parentData.flags)) {
+    mPresentationData.flags |= NS_MATHML_DISPLAYSTYLE;
+  }
 
 #if defined(DEBUG) && defined(SHOW_BOUNDING_BOX)
   mPresentationData.flags |= NS_MATHML_SHOW_BOUNDING_METRICS;
@@ -57,9 +89,20 @@ NS_IMETHODIMP
 nsMathMLFrame::UpdatePresentationData(uint32_t        aFlagsValues,
                                       uint32_t        aWhichFlags)
 {
-  NS_ASSERTION(NS_MATHML_IS_COMPRESSED(aWhichFlags),
-               "aWhichFlags should only be compression flag"); 
+  NS_ASSERTION(NS_MATHML_IS_DISPLAYSTYLE(aWhichFlags) ||
+               NS_MATHML_IS_COMPRESSED(aWhichFlags),
+               "aWhichFlags should only be displaystyle or compression flag"); 
 
+  // update flags that are relevant to this call
+  if (NS_MATHML_IS_DISPLAYSTYLE(aWhichFlags)) {
+    // updating the displaystyle flag is allowed
+    if (NS_MATHML_IS_DISPLAYSTYLE(aFlagsValues)) {
+      mPresentationData.flags |= NS_MATHML_DISPLAYSTYLE;
+    }
+    else {
+      mPresentationData.flags &= ~NS_MATHML_DISPLAYSTYLE;
+    }
+  }
   if (NS_MATHML_IS_COMPRESSED(aWhichFlags)) {
     // updating the compression flag is allowed
     if (NS_MATHML_IS_COMPRESSED(aFlagsValues)) {
@@ -79,16 +122,19 @@ nsMathMLFrame::UpdatePresentationData(uint32_t        aFlagsValues,
 nsMathMLFrame::ResolveMathMLCharStyle(nsPresContext*  aPresContext,
                                       nsIContent*      aContent,
                                       nsStyleContext*  aParentStyleContext,
-                                      nsMathMLChar*    aMathMLChar)
+                                      nsMathMLChar*    aMathMLChar,
+                                      bool             aIsMutableChar)
 {
-  nsCSSPseudoElements::Type pseudoType =
+  nsCSSPseudoElements::Type pseudoType = (aIsMutableChar) ?
+    nsCSSPseudoElements::ePseudo_mozMathStretchy :
     nsCSSPseudoElements::ePseudo_mozMathAnonymous; // savings
   nsRefPtr<nsStyleContext> newStyleContext;
   newStyleContext = aPresContext->StyleSet()->
     ResolvePseudoElementStyle(aContent->AsElement(), pseudoType,
-                              aParentStyleContext, nullptr);
+                              aParentStyleContext);
 
-  aMathMLChar->SetStyleContext(newStyleContext);
+  if (newStyleContext)
+    aMathMLChar->SetStyleContext(newStyleContext);
 }
 
 /* static */ void
@@ -120,6 +166,7 @@ nsMathMLFrame::GetPresentationDataFrom(nsIFrame*           aFrame,
   // initialize OUT params
   aPresentationData.flags = 0;
   aPresentationData.baseFrame = nullptr;
+  aPresentationData.mstyle = nullptr;
 
   nsIFrame* frame = aFrame;
   while (frame) {
@@ -142,12 +189,53 @@ nsMathMLFrame::GetPresentationDataFrom(nsIFrame*           aFrame,
       break;
 
     if (content->Tag() == nsGkAtoms::math) {
+      const nsStyleDisplay* display = frame->StyleDisplay();
+      if (display->mDisplay == NS_STYLE_DISPLAY_BLOCK) {
+        aPresentationData.flags |= NS_MATHML_DISPLAYSTYLE;
+      }
+      FindAttrDisplaystyle(content, aPresentationData);
+      aPresentationData.mstyle = frame->GetFirstContinuation();
       break;
     }
     frame = frame->GetParent();
   }
   NS_WARN_IF_FALSE(frame && frame->GetContent(),
                    "bad MathML markup - could not find the top <math> element");
+}
+
+// helper to get an attribute from the content or the surrounding <mstyle> hierarchy
+/* static */ bool
+nsMathMLFrame::GetAttribute(nsIContent* aContent,
+                            nsIFrame*   aMathMLmstyleFrame,
+                            nsIAtom*    aAttributeAtom,
+                            nsString&   aValue)
+{
+  // see if we can get the attribute from the content
+  if (aContent && aContent->GetAttr(kNameSpaceID_None, aAttributeAtom,
+                                    aValue)) {
+    return true;
+  }
+
+  // see if we can get the attribute from the mstyle frame
+  if (!aMathMLmstyleFrame) {
+    return false;
+  }
+
+  nsIFrame* mstyleParent = aMathMLmstyleFrame->GetParent();
+
+  nsPresentationData mstyleParentData;
+  mstyleParentData.mstyle = nullptr;
+
+  if (mstyleParent) {
+    nsIMathMLFrame* mathMLFrame = do_QueryFrame(mstyleParent);
+    if (mathMLFrame) {
+      mathMLFrame->GetPresentationData(mstyleParentData);
+    }
+  }
+
+  // recurse all the way up into the <mstyle> hierarchy
+  return GetAttribute(aMathMLmstyleFrame->GetContent(),
+                      mstyleParentData.mstyle, aAttributeAtom, aValue);
 }
 
 /* static */ void
@@ -162,7 +250,7 @@ nsMathMLFrame::GetRuleThickness(nsRenderingContext& aRenderingContext,
                "unexpected state");
 
   nscoord xHeight = aFontMetrics->XHeight();
-  char16_t overBar = 0x00AF;
+  PRUnichar overBar = 0x00AF;
   nsBoundingMetrics bm = aRenderingContext.GetBoundingMetrics(&overBar, 1);
   aRuleThickness = bm.ascent + bm.descent;
   if (aRuleThickness <= 0 || aRuleThickness >= xHeight) {
@@ -183,7 +271,7 @@ nsMathMLFrame::GetAxisHeight(nsRenderingContext& aRenderingContext,
                "unexpected state");
 
   nscoord xHeight = aFontMetrics->XHeight();
-  char16_t minus = 0x2212; // not '-', but official Unicode minus sign
+  PRUnichar minus = 0x2212; // not '-', but official Unicode minus sign
   nsBoundingMetrics bm = aRenderingContext.GetBoundingMetrics(&minus, 1);
   aAxisHeight = bm.ascent - (bm.ascent + bm.descent)/2;
   if (aAxisHeight <= 0 || aAxisHeight >= xHeight) {
@@ -260,6 +348,9 @@ nsMathMLFrame::ParseNumericValue(const nsString&   aString,
 // is not scheduled to be fixed anytime soon)
 //
 
+static const int32_t kMathMLversion1 = 1;
+static const int32_t kMathMLversion2 = 2;
+
 struct
 nsCSSMapping {
   int32_t        compatibility;
@@ -282,7 +373,7 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+                     nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("MathMLBoundingMetrics", TYPE_MATHML_BOUNDING_METRICS)
 private:
   nsRect    mRect;
@@ -327,7 +418,7 @@ public:
 #endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+                     nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("MathMLBar", TYPE_MATHML_BAR)
 private:
   nsRect    mRect;

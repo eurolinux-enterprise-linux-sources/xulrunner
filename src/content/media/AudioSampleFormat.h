@@ -24,8 +24,6 @@ enum AudioSampleFormat
   AUDIO_FORMAT_S16,
   // Signed 32-bit float samples
   AUDIO_FORMAT_FLOAT32,
-  // Silence: format will be chosen later
-  AUDIO_FORMAT_SILENCE,
   // The format used for output by AudioStream.
 #ifdef MOZ_SAMPLE_TYPE_S16
   AUDIO_OUTPUT_FORMAT = AUDIO_FORMAT_S16
@@ -51,19 +49,8 @@ public:
 
 typedef AudioSampleTraits<AUDIO_OUTPUT_FORMAT>::Type AudioDataValue;
 
-template<typename T> class AudioSampleTypeToFormat;
-
-template <> class AudioSampleTypeToFormat<float> {
-public:
-  static const AudioSampleFormat Format = AUDIO_FORMAT_FLOAT32;
-};
-
-template <> class AudioSampleTypeToFormat<short> {
-public:
-  static const AudioSampleFormat Format = AUDIO_FORMAT_S16;
-};
-
 // Single-sample conversion
+
 /*
  * Use "2^N" conversion since it's simple, fast, "bit transparent", used by
  * many other libraries and apparently behaves reasonably.
@@ -170,8 +157,8 @@ inline const void*
 AddAudioSampleOffset(const void* aBase, AudioSampleFormat aFormat,
                      int32_t aOffset)
 {
-  static_assert(AUDIO_FORMAT_S16 == 0, "Bad constant");
-  static_assert(AUDIO_FORMAT_FLOAT32 == 1, "Bad constant");
+  MOZ_STATIC_ASSERT(AUDIO_FORMAT_S16 == 0, "Bad constant");
+  MOZ_STATIC_ASSERT(AUDIO_FORMAT_FLOAT32 == 1, "Bad constant");
   NS_ASSERTION(aFormat == AUDIO_FORMAT_S16 || aFormat == AUDIO_FORMAT_FLOAT32,
                "Unknown format");
 

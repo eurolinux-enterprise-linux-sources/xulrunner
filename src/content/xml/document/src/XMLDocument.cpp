@@ -20,6 +20,7 @@
 #include "nsIBaseWindow.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMDocumentType.h"
+#include "nsINameSpaceManager.h"
 #include "nsCOMPtr.h"
 #include "nsXPIDLString.h"
 #include "nsIHttpChannel.h"
@@ -31,24 +32,25 @@
 #include "nsIPrincipal.h"
 #include "nsLayoutCID.h"
 #include "mozilla/dom/Attr.h"
+#include "nsGUIEvent.h"
 #include "nsCExternalHandlerService.h"
 #include "nsMimeTypes.h"
-#include "mozilla/EventListenerManager.h"
+#include "nsEventListenerManager.h"
 #include "nsContentUtils.h"
 #include "nsThreadUtils.h"
 #include "nsJSUtils.h"
 #include "nsCRT.h"
 #include "nsIAuthPrompt.h"
+#include "nsIScriptGlobalObjectOwner.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIDOMUserDataHandler.h"
+#include "nsEventDispatcher.h"
 #include "nsNodeUtils.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "nsIHTMLDocument.h"
-#include "mozilla/BasicEvents.h"
-#include "mozilla/EventDispatcher.h"
-#include "mozilla/dom/Element.h"
+#include "mozilla/dom/Element.h" // DOMCI_NODE_DATA
 #include "mozilla/dom/XMLDocumentBinding.h"
 
 using namespace mozilla;
@@ -219,6 +221,8 @@ XMLDocument::XMLDocument(const char* aContentType)
 {
   // NOTE! nsDocument::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
+
+  SetIsDOMBinding();
 }
 
 XMLDocument::~XMLDocument()
@@ -228,7 +232,7 @@ XMLDocument::~XMLDocument()
 }
 
 // QueryInterface implementation for XMLDocument
-NS_IMPL_ISUPPORTS_INHERITED(XMLDocument, nsDocument, nsIDOMXMLDocument)
+NS_IMPL_ISUPPORTS_INHERITED1(XMLDocument, nsDocument, nsIDOMXMLDocument)
 
 nsresult
 XMLDocument::Init()
@@ -273,6 +277,15 @@ XMLDocument::SetAsync(bool aAsync)
   return NS_OK;
 }
 
+static void
+ReportUseOfDeprecatedMethod(nsIDocument *aDoc, const char* aWarning)
+{
+  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                  "DOM3 Load", aDoc,
+                                  nsContentUtils::eDOM_PROPERTIES,
+                                  aWarning);
+}
+
 NS_IMETHODIMP
 XMLDocument::Load(const nsAString& aUrl, bool *aReturn)
 {
@@ -292,7 +305,7 @@ XMLDocument::Load(const nsAString& aUrl, ErrorResult& aRv)
     return false;
   }
 
-  WarnOnceAbout(nsIDocument::eUseOfDOM3LoadMethod);
+  ReportUseOfDeprecatedMethod(this, "UseOfDOM3LoadMethodWarning");
 
   nsCOMPtr<nsIDocument> callingDoc = nsContentUtils::GetDocumentFromContext();
 
@@ -399,7 +412,7 @@ XMLDocument::Load(const nsAString& aUrl, ErrorResult& aRv)
   // be loaded.  Note that we need to hold a strong ref to |principal|
   // here, because ResetToURI will null out our node principal before
   // setting the new one.
-  nsRefPtr<EventListenerManager> elm(mListenerManager);
+  nsRefPtr<nsEventListenerManager> elm(mListenerManager);
   mListenerManager = nullptr;
 
   // When we are called from JS we can find the load group for the page,
@@ -570,15 +583,16 @@ XMLDocument::EndLoad()
     // Generate a document load event for the case when an XML
     // document was loaded as pure data without any presentation
     // attached to it.
-    WidgetEvent event(true, NS_LOAD);
-    EventDispatcher::Dispatch(static_cast<nsIDocument*>(this), nullptr, &event);
-  }
+    nsEvent event(true, NS_LOAD);
+    nsEventDispatcher::Dispatch(static_cast<nsIDocument*>(this), nullptr,
+                                &event);
+  }    
 }
-
+ 
 /* virtual */ void
-XMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
+XMLDocument::DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 {
-  nsDocument::DocAddSizeOfExcludingThis(aWindowSizes);
+  nsDocument::DocSizeOfExcludingThis(aWindowSizes);
 }
 
 // nsIDOMDocument interface
@@ -590,6 +604,7 @@ XMLDocument::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
                "Can't import this document into another document!");
 
   nsRefPtr<XMLDocument> clone = new XMLDocument();
+  NS_ENSURE_TRUE(clone, NS_ERROR_OUT_OF_MEMORY);
   nsresult rv = CloneDocHelper(clone);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -600,9 +615,9 @@ XMLDocument::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
 }
 
 JSObject*
-XMLDocument::WrapNode(JSContext *aCx)
+XMLDocument::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return XMLDocumentBinding::Wrap(aCx, this);
+  return XMLDocumentBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

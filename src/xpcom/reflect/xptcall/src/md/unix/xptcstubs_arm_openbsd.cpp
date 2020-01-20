@@ -24,13 +24,13 @@
 static nsresult PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args) asm("_PrepareAndDispatch")
 DONT_DROP_OR_WARN;
 
-static nsresult ATTRIBUTE_USED
+static nsresult
 PrepareAndDispatch(nsXPTCStubBase* self, uint32_t methodIndex, uint32_t* args)
 {
 #define PARAM_BUFFER_COUNT     16
 
     nsXPTCMiniVariant paramBuffer[PARAM_BUFFER_COUNT];
-    nsXPTCMiniVariant* dispatchParams = nullptr;
+    nsXPTCMiniVariant* dispatchParams = NULL;
     const nsXPTMethodInfo* info;
     uint8_t paramCount;
     uint8_t i;

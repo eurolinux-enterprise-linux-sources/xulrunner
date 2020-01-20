@@ -7,6 +7,7 @@
 
 let protocol = devtools.require("devtools/server/protocol");
 let {method, Arg, Option, RetVal} = protocol;
+let {defer, resolve} = devtools.require("sdk/core/promise");
 let events = devtools.require("sdk/event/core");
 
 function simpleHello() {
@@ -35,7 +36,7 @@ let RootActor = protocol.ActorClass({
   }),
 
   promiseReturn: method(function() {
-    return promise.resolve(1);
+    return resolve(1);
   }, {
     response: { value: RetVal("number") },
   }),
@@ -80,7 +81,7 @@ let RootActor = protocol.ActorClass({
   }, {
     request: {
       a: Arg(0),
-      b: Arg(1, "nullable:number")
+      b: Arg(1, "number", { optional: true })
     },
     response: {
       value: RetVal("number")
@@ -187,11 +188,6 @@ function run_test()
       trace.expectReceive({"value":1,"from":"<actorid>"});
       do_check_eq(ret, 1);
     }).then(() => {
-      // Missing argument should throw an exception
-      check_except(() => {
-        rootClient.simpleArgs(5);
-      });
-
       return rootClient.simpleArgs(5, 10)
     }).then(ret => {
       trace.expectSend({"type":"simpleArgs","firstArg":5,"secondArg":10,"to":"<actorid>"});
@@ -258,7 +254,7 @@ function run_test()
 
       do_check_eq(str, "hello");
 
-      let deferred = promise.defer();
+      let deferred = defer();
       rootClient.on("oneway", (response) => {
         trace.expectSend({"type":"testOneWay","a":"hello","to":"<actorid>"});
         trace.expectReceive({"type":"oneway","a":"hello","from":"<actorid>"});

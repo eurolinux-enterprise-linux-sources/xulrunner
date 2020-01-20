@@ -8,24 +8,38 @@
 
 #include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
+#include "nsIDOMHTMLOutputElement.h"
 #include "nsStubMutationObserver.h"
 #include "nsIConstraintValidation.h"
 
 namespace mozilla {
 namespace dom {
 
-class HTMLOutputElement MOZ_FINAL : public nsGenericHTMLFormElement,
-                                    public nsStubMutationObserver,
-                                    public nsIConstraintValidation
+class HTMLOutputElement : public nsGenericHTMLFormElement,
+                          public nsIDOMHTMLOutputElement,
+                          public nsStubMutationObserver,
+                          public nsIConstraintValidation
 {
 public:
   using nsIConstraintValidation::GetValidationMessage;
 
-  HTMLOutputElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  HTMLOutputElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~HTMLOutputElement();
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLOutputElement
+  NS_DECL_NSIDOMHTMLOUTPUTELEMENT
 
   // nsIFormControl
   NS_IMETHOD_(uint32_t) GetType() const { return NS_FORM_OUTPUT; }
@@ -39,7 +53,7 @@ public:
   bool ParseAttribute(int32_t aNamespaceID, nsIAtom* aAttribute,
                         const nsAString& aValue, nsAttrValue& aResult) MOZ_OVERRIDE;
 
-  EventStates IntrinsicState() const MOZ_OVERRIDE;
+  nsEventStates IntrinsicState() const MOZ_OVERRIDE;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                nsIContent* aBindingParent,
@@ -58,41 +72,38 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLOutputElement,
                                            nsGenericHTMLFormElement)
 
-  virtual JSObject* WrapNode(JSContext* aCx) MOZ_OVERRIDE;
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
+  virtual JSObject* WrapNode(JSContext* aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   // WebIDL
   nsDOMSettableTokenList* HtmlFor();
   // nsGenericHTMLFormElement::GetForm is fine.
-  void GetName(nsAString& aName)
-  {
-    GetHTMLAttr(nsGkAtoms::name, aName);
-  }
-
+  using nsGenericHTMLFormElement::GetForm;
+  // XPCOM GetName is fine.
   void SetName(const nsAString& aName, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::name, aName, aRv);
   }
 
-  void GetType(nsAString& aType)
+  // XPCOM GetType is fine.
+  // XPCOM GetDefaultValue is fine.
+  void SetDefaultValue(const nsAString& aDefaultValue, ErrorResult& aRv)
   {
-    aType.AssignLiteral("output");
+    aRv = SetDefaultValue(aDefaultValue);
   }
-
-  void GetDefaultValue(nsAString& aDefaultValue)
+  // XPCOM GetValue is fine.
+  void SetValue(const nsAString& aValue, ErrorResult& aRv)
   {
-    aDefaultValue = mDefaultValue;
+    aRv = SetValue(aValue);
   }
-
-  void SetDefaultValue(const nsAString& aDefaultValue, ErrorResult& aRv);
-
-  void GetValue(nsAString& aValue);
-  void SetValue(const nsAString& aValue, ErrorResult& aRv);
 
   // nsIConstraintValidation::WillValidate is fine.
   // nsIConstraintValidation::Validity() is fine.
   // nsIConstraintValidation::GetValidationMessage() is fine.
   // nsIConstraintValidation::CheckValidity() is fine.
-  void SetCustomValidity(const nsAString& aError);
+  using nsIConstraintValidation::CheckValidity;
+  // nsIConstraintValidation::SetCustomValidity() is fine.
 
 protected:
   enum ValueModeFlag {

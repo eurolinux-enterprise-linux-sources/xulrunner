@@ -10,19 +10,23 @@
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Attributes.h"
+#include "EnableWebAudioCheck.h"
 #include "nsAutoPtr.h"
 #include "ThreeDPoint.h"
 #include "AudioContext.h"
 #include "PannerNode.h"
 #include "WebAudioUtils.h"
-#include "js/TypeDecls.h"
-#include "mozilla/MemoryReporting.h"
+
+struct JSContext;
 
 namespace mozilla {
 
 namespace dom {
 
-class AudioListener MOZ_FINAL : public nsWrapperCache
+class AudioContext;
+
+class AudioListener MOZ_FINAL : public nsWrapperCache,
+                                public EnableWebAudioCheck
 {
 public:
   explicit AudioListener(AudioContext* aContext);
@@ -30,14 +34,13 @@ public:
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(AudioListener)
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(AudioListener)
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-
   AudioContext* GetParentObject() const
   {
     return mContext;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   double DopplerFactor() const
   {
@@ -84,7 +87,25 @@ public:
   }
 
   void SetOrientation(double aX, double aY, double aZ,
-                      double aXUp, double aYUp, double aZUp);
+                      double aXUp, double aYUp, double aZUp)
+  {
+    if (WebAudioUtils::FuzzyEqual(mOrientation.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.z, aZ) &&
+        WebAudioUtils::FuzzyEqual(mUpVector.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mUpVector.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mUpVector.z, aZ)) {
+      return;
+    }
+    mOrientation.x = aX;
+    mOrientation.y = aY;
+    mOrientation.z = aZ;
+    mUpVector.x = aXUp;
+    mUpVector.y = aYUp;
+    mUpVector.z = aZUp;
+    SendThreeDPointParameterToStream(PannerNode::LISTENER_ORIENTATION, mOrientation);
+    SendThreeDPointParameterToStream(PannerNode::LISTENER_UPVECTOR, mUpVector);
+  }
 
   const ThreeDPoint& Velocity() const
   {
@@ -106,7 +127,6 @@ public:
   }
 
   void RegisterPannerNode(PannerNode* aPannerNode);
-  void UnregisterPannerNode(PannerNode* aPannerNode);
 
 private:
   void SendDoubleParameterToStream(uint32_t aIndex, double aValue);
@@ -117,8 +137,8 @@ private:
   friend class PannerNode;
   nsRefPtr<AudioContext> mContext;
   ThreeDPoint mPosition;
-  ThreeDPoint mFrontVector;
-  ThreeDPoint mRightVector;
+  ThreeDPoint mOrientation;
+  ThreeDPoint mUpVector;
   ThreeDPoint mVelocity;
   double mDopplerFactor;
   double mSpeedOfSound;

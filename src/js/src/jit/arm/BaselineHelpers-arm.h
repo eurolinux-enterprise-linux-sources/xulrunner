@@ -8,10 +8,11 @@
 #define jit_arm_BaselineHelpers_arm_h
 
 #ifdef JS_ION
-#include "jit/BaselineFrame.h"
-#include "jit/BaselineIC.h"
-#include "jit/BaselineRegisters.h"
+
 #include "jit/IonMacroAssembler.h"
+#include "jit/BaselineFrame.h"
+#include "jit/BaselineRegisters.h"
+#include "jit/BaselineIC.h"
 
 namespace js {
 namespace jit {
@@ -21,12 +22,6 @@ static const size_t ICStackValueOffset = 0;
 
 inline void
 EmitRestoreTailCallReg(MacroAssembler &masm)
-{
-    // No-op on ARM because link register is always holding the return address.
-}
-
-inline void
-EmitRepushTailCallReg(MacroAssembler &masm)
 {
     // No-op on ARM because link register is always holding the return address.
 }
@@ -80,7 +75,7 @@ EmitChangeICReturnAddress(MacroAssembler &masm, Register reg)
 }
 
 inline void
-EmitTailCallVM(JitCode *target, MacroAssembler &masm, uint32_t argSize)
+EmitTailCallVM(IonCode *target, MacroAssembler &masm, uint32_t argSize)
 {
     // We assume during this that R0 and R1 have been pushed, and that R2 is
     // unused.
@@ -100,7 +95,7 @@ EmitTailCallVM(JitCode *target, MacroAssembler &masm, uint32_t argSize)
     // the stub calls), but the VMWrapper code being called expects the return address to also
     // be pushed on the stack.
     JS_ASSERT(BaselineTailCallReg == lr);
-    masm.makeFrameDescriptor(r0, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(r0, IonFrame_BaselineJS);
     masm.push(r0);
     masm.push(lr);
     masm.branch(target);
@@ -115,11 +110,11 @@ EmitCreateStubFrameDescriptor(MacroAssembler &masm, Register reg)
     masm.ma_add(Imm32(sizeof(void *) * 2), reg);
     masm.ma_sub(BaselineStackReg, reg);
 
-    masm.makeFrameDescriptor(reg, JitFrame_BaselineStub);
+    masm.makeFrameDescriptor(reg, IonFrame_BaselineStub);
 }
 
 inline void
-EmitCallVM(JitCode *target, MacroAssembler &masm)
+EmitCallVM(IonCode *target, MacroAssembler &masm)
 {
     EmitCreateStubFrameDescriptor(masm, r0);
     masm.push(r0);
@@ -146,7 +141,7 @@ EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
     // if needed.
 
     // Push frame descriptor and return address.
-    masm.makeFrameDescriptor(scratch, JitFrame_BaselineJS);
+    masm.makeFrameDescriptor(scratch, IonFrame_BaselineJS);
     masm.push(scratch);
     masm.push(BaselineTailCallReg);
 
@@ -160,7 +155,7 @@ EmitEnterStubFrame(MacroAssembler &masm, Register scratch)
 }
 
 inline void
-EmitLeaveStubFrameHead(MacroAssembler &masm, bool calledIntoIon = false)
+EmitLeaveStubFrame(MacroAssembler &masm, bool calledIntoIon = false)
 {
     // Ion frames do not save and restore the frame pointer. If we called
     // into Ion, we have to restore the stack pointer from the frame descriptor.
@@ -173,11 +168,7 @@ EmitLeaveStubFrameHead(MacroAssembler &masm, bool calledIntoIon = false)
     } else {
         masm.mov(BaselineFrameReg, BaselineStackReg);
     }
-}
 
-inline void
-EmitLeaveStubFrameCommonTail(MacroAssembler &masm)
-{
     masm.pop(BaselineFrameReg);
     masm.pop(BaselineStubReg);
 
@@ -186,13 +177,6 @@ EmitLeaveStubFrameCommonTail(MacroAssembler &masm)
 
     // Discard the frame descriptor.
     masm.pop(ScratchRegister);
-}
-
-inline void
-EmitLeaveStubFrame(MacroAssembler &masm, bool calledIntoIon = false)
-{
-    EmitLeaveStubFrameHead(masm, calledIntoIon);
-    EmitLeaveStubFrameCommonTail(masm);
 }
 
 inline void
@@ -213,31 +197,24 @@ EmitStowICValues(MacroAssembler &masm, int values)
 }
 
 inline void
-EmitUnstowICValues(MacroAssembler &masm, int values, bool discard = false)
+EmitUnstowICValues(MacroAssembler &masm, int values)
 {
     JS_ASSERT(values >= 0 && values <= 2);
     switch(values) {
       case 1:
         // Unstow R0
-        if (discard)
-            masm.addPtr(Imm32(sizeof(Value)), BaselineStackReg);
-        else
-            masm.popValue(R0);
+        masm.popValue(R0);
         break;
       case 2:
-        // Unstow R0 and R1
-        if (discard) {
-            masm.addPtr(Imm32(sizeof(Value) * 2), BaselineStackReg);
-        } else {
-            masm.popValue(R1);
-            masm.popValue(R0);
-        }
+        // Untow R0 and R1
+        masm.popValue(R1);
+        masm.popValue(R0);
         break;
     }
 }
 
 inline void
-EmitCallTypeUpdateIC(MacroAssembler &masm, JitCode *code, uint32_t objectOffset)
+EmitCallTypeUpdateIC(MacroAssembler &masm, IonCode *code, uint32_t objectOffset)
 {
     JS_ASSERT(R2 == ValueOperand(r1, r0));
 

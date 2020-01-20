@@ -30,7 +30,7 @@ class nsUrlClassifierStreamUpdater MOZ_FINAL : public nsIUrlClassifierStreamUpda
 public:
   nsUrlClassifierStreamUpdater();
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
   NS_DECL_NSIURLCLASSIFIERSTREAMUPDATER
   NS_DECL_NSIURLCLASSIFIERUPDATEOBSERVER
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -52,16 +52,15 @@ private:
 
   nsresult AddRequestBody(const nsACString &aRequestBody);
 
-  // Fetches an update for a single table.
   nsresult FetchUpdate(nsIURI *aURI,
                        const nsACString &aRequestBody,
-                       const nsACString &aTable);
-  // Dumb wrapper so we don't have to create URIs.
+                       const nsACString &aTable,
+                       const nsACString &aServerMAC);
   nsresult FetchUpdate(const nsACString &aURI,
                        const nsACString &aRequestBody,
-                       const nsACString &aTable);
+                       const nsACString &aTable,
+                       const nsACString &aServerMAC);
 
-  // Fetches the next table, from mPendingUpdates.
   nsresult FetchNext();
 
   bool mIsUpdating;
@@ -70,6 +69,7 @@ private:
   bool mBeganStream;
   nsCOMPtr<nsIURI> mUpdateUrl;
   nsCString mStreamTable;
+  nsCString mServerMAC;
   nsCOMPtr<nsIChannel> mChannel;
   nsCOMPtr<nsIUrlClassifierDBService> mDBService;
   nsCOMPtr<nsITimer> mTimer;
@@ -77,6 +77,7 @@ private:
   struct PendingUpdate {
     nsCString mUrl;
     nsCString mTable;
+    nsCString mServerMAC;
   };
   nsTArray<PendingUpdate> mPendingUpdates;
 

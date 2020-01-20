@@ -20,6 +20,7 @@
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 
+using namespace mozilla::ipc;
 using mozilla::dom::BlobChild;
 using mozilla::dom::BlobParent;
 
@@ -39,8 +40,7 @@ namespace ipc {
 
 void
 SerializeInputStream(nsIInputStream* aInputStream,
-                     InputStreamParams& aParams,
-                     nsTArray<FileDescriptor>& aFileDescriptors)
+                     InputStreamParams& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aInputStream);
@@ -48,26 +48,25 @@ SerializeInputStream(nsIInputStream* aInputStream,
   nsCOMPtr<nsIIPCSerializableInputStream> serializable =
     do_QueryInterface(aInputStream);
   if (!serializable) {
-    MOZ_CRASH("Input stream is not serializable!");
+    MOZ_NOT_REACHED("Input stream is not serializable!");
   }
 
-  serializable->Serialize(aParams, aFileDescriptors);
+  serializable->Serialize(aParams);
 
   if (aParams.type() == InputStreamParams::T__None) {
-    MOZ_CRASH("Serialize failed!");
+    MOZ_NOT_REACHED("Serialize failed!");
   }
 }
 
 void
 SerializeInputStream(nsIInputStream* aInputStream,
-                     OptionalInputStreamParams& aParams,
-                     nsTArray<FileDescriptor>& aFileDescriptors)
+                     OptionalInputStreamParams& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (aInputStream) {
     InputStreamParams params;
-    SerializeInputStream(aInputStream, params, aFileDescriptors);
+    SerializeInputStream(aInputStream, params);
     aParams = params;
   }
   else {
@@ -76,8 +75,7 @@ SerializeInputStream(nsIInputStream* aInputStream,
 }
 
 already_AddRefed<nsIInputStream>
-DeserializeInputStream(const InputStreamParams& aParams,
-                       const nsTArray<FileDescriptor>& aFileDescriptors)
+DeserializeInputStream(const InputStreamParams& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -138,7 +136,7 @@ DeserializeInputStream(const InputStreamParams& aParams,
 
   MOZ_ASSERT(serializable);
 
-  if (!serializable->Deserialize(aParams, aFileDescriptors)) {
+  if (!serializable->Deserialize(aParams)) {
     MOZ_ASSERT(false, "Deserialize failed!");
     return nullptr;
   }
@@ -150,8 +148,7 @@ DeserializeInputStream(const InputStreamParams& aParams,
 }
 
 already_AddRefed<nsIInputStream>
-DeserializeInputStream(const OptionalInputStreamParams& aParams,
-                       const nsTArray<FileDescriptor>& aFileDescriptors)
+DeserializeInputStream(const OptionalInputStreamParams& aParams)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -163,8 +160,7 @@ DeserializeInputStream(const OptionalInputStreamParams& aParams,
       break;
 
     case OptionalInputStreamParams::TInputStreamParams:
-      stream = DeserializeInputStream(aParams.get_InputStreamParams(),
-                                      aFileDescriptors);
+      stream = DeserializeInputStream(aParams.get_InputStreamParams());
       break;
 
     default:

@@ -16,11 +16,6 @@
 extern "C" {
 #endif
 
-// 1 MB should be enough for everyone.
-static const uint32_t MAX_PREF_LENGTH = 1 * 1024 * 1024;
-// Actually, 4kb should be enough for everyone.
-static const uint32_t MAX_ADVISABLE_PREF_LENGTH = 4 * 1024;
-
 typedef union
 {
     char*       stringVal;
@@ -159,7 +154,7 @@ nsresult PREF_ClearAllUserPrefs();
 ** compilers were having problems with multiple definitions.
 */
 #ifndef have_PrefChangedFunc_typedef
-typedef void (*PrefChangedFunc) (const char *, void *);
+typedef nsresult (*PrefChangedFunc) (const char *, void *); 
 #define have_PrefChangedFunc_typedef
 #endif
 

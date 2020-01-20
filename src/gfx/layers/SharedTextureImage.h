@@ -6,11 +6,9 @@
 #ifndef GFX_SHAREDTEXTUREIMAGE_H
 #define GFX_SHAREDTEXTUREIMAGE_H
 
-#include "GLContextProvider.h"          // for GLContextProvider
-#include "ImageContainer.h"             // for Image
-#include "ImageTypes.h"                 // for ImageFormat::SHARED_TEXTURE
-#include "nsCOMPtr.h"                   // for already_AddRefed
-#include "mozilla/gfx/Point.h"          // for IntSize
+#include "ImageContainer.h"
+#include "GLContext.h"
+#include "GLContextProvider.h"
 
 // Split into a separate header from ImageLayers.h due to GLContext.h dependence
 // Implementation remains in ImageLayers.cpp
@@ -23,22 +21,21 @@ class SharedTextureImage : public Image {
 public:
   struct Data {
     gl::SharedTextureHandle mHandle;
-    gl::SharedTextureShareType mShareType;
-    gfx::IntSize mSize;
+    gl::GLContext::SharedTextureShareType mShareType;
+    gfxIntSize mSize;
     bool mInverted;
   };
 
   void SetData(const Data& aData) { mData = aData; }
   const Data* GetData() { return &mData; }
 
-  gfx::IntSize GetSize() { return mData.mSize; }
+  gfxIntSize GetSize() { return mData.mSize; }
 
-  virtual TemporaryRef<gfx::SourceSurface> GetAsSourceSurface() MOZ_OVERRIDE
-  {
-    return nullptr;
+  virtual already_AddRefed<gfxASurface> GetAsSurface() { 
+    return gl::GLContextProvider::GetSharedHandleAsSurface(mData.mShareType, mData.mHandle);
   }
 
-  SharedTextureImage() : Image(nullptr, ImageFormat::SHARED_TEXTURE) {}
+  SharedTextureImage() : Image(NULL, SHARED_TEXTURE) {}
 
 private:
   Data mData;

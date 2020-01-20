@@ -41,6 +41,22 @@ const DOWNLOAD_VIEW_SUPPORTED_COMMANDS =
 const NOT_AVAILABLE = Number.MAX_VALUE;
 
 /**
+ * Download a URL.
+ *
+ * @param aURL
+ *        the url to download (nsIURI object)
+ * @param [optional] aFileName
+ *        the destination file name
+ */
+function DownloadURL(aURL, aFileName) {
+  // For private browsing, try to get document out of the most recent browser
+  // window, or provide our own if there's no browser window.
+  let browserWin = RecentWindow.getMostRecentBrowserWindow();
+  let initiatingDoc = browserWin ? browserWin.document : document;
+  saveURL(aURL, aFileName, null, true, true, undefined, initiatingDoc);
+}
+
+/**
  * A download element shell is responsible for handling the commands and the
  * displayed data for a single download view element. The download element
  * could represent either a past download (for which we get data from places)  or
@@ -243,7 +259,7 @@ DownloadElementShell.prototype = {
       }.bind(this),
 
       function onFailure(aReason) {
-        if (aReason instanceof OS.File.Error && aReason.becauseNoSuchFile) {
+        if (reason instanceof OS.File.Error && reason.becauseNoSuchFile) {
           this._targetFileInfoFetched = true;
           this._targetFileExists = false;
         }
@@ -629,10 +645,7 @@ DownloadElementShell.prototype = {
     // In future we may try to download into the same original target uri, when
     // we have it.  Though that requires verifying the path is still valid and
     // may surprise the user if he wants to be requested every time.
-    let browserWin = RecentWindow.getMostRecentBrowserWindow();
-    let initiatingDoc = browserWin ? browserWin.document : document;
-    DownloadURL(this.downloadURI, this.getDownloadMetaData().fileName,
-                initiatingDoc);
+    DownloadURL(this.downloadURI, this.getDownloadMetaData().fileName);
   },
 
   /* nsIController */
@@ -775,8 +788,8 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
   // Register as a downloads view. The places data will be initialized by
   // the places setter.
   this._initiallySelectedElement = null;
-  this._downloadsData = DownloadsCommon.getData(window.opener || window);
-  this._downloadsData.addView(this);
+  let downloadsData = DownloadsCommon.getData(window.opener || window);
+  downloadsData.addView(this);
 
   // Get the Download button out of the attention state since we're about to
   // view all downloads.
@@ -785,7 +798,7 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
   // Make sure to unregister the view if the window is closed.
   window.addEventListener("unload", function() {
     window.controllers.removeController(this);
-    this._downloadsData.removeView(this);
+    downloadsData.removeView(this);
     this.result = null;
   }.bind(this), true);
   // Resizing the window may change items visibility.
@@ -1420,9 +1433,7 @@ DownloadsPlacesView.prototype = {
 
   _downloadURLFromClipboard: function DPV__downloadURLFromClipboard() {
     let [url, name] = this._getURLFromClipboardData();
-    let browserWin = RecentWindow.getMostRecentBrowserWindow();
-    let initiatingDoc = browserWin ? browserWin.document : document;
-    DownloadURL(url, name, initiatingDoc);
+    DownloadURL(url, name);
   },
 
   doCommand: function DPV_doCommand(aCommand) {
@@ -1437,7 +1448,11 @@ DownloadsPlacesView.prototype = {
         this._downloadURLFromClipboard();
         break;
       case "downloadsCmd_clearDownloads":
-        this._downloadsData.removeFinished();
+        if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+          Services.downloads.cleanUpPrivate();
+        } else {
+          Services.downloads.cleanUp();
+        }
         if (this.result) {
           Cc["@mozilla.org/browser/download-history;1"]
             .getService(Ci.nsIDownloadHistory)
@@ -1476,11 +1491,6 @@ DownloadsPlacesView.prototype = {
     else
       contextMenu.removeAttribute("state");
 
-    if (state == nsIDM.DOWNLOAD_DOWNLOADING) {
-      // The resumable property of a download may change at any time, so
-      // ensure we update the related command now.
-      goUpdateCommand("downloadsCmd_pauseResume");
-    }
     return true;
   },
 
@@ -1573,11 +1583,8 @@ DownloadsPlacesView.prototype = {
 
     let name = { };
     let url = Services.droppedLinkHandler.dropLink(aEvent, name);
-    if (url) {
-      let browserWin = RecentWindow.getMostRecentBrowserWindow();
-      let initiatingDoc = browserWin ? browserWin.document : document;
-      DownloadURL(url, name.value, initiatingDoc);
-    }
+    if (url)
+      DownloadURL(url, name.value);
   }
 };
 

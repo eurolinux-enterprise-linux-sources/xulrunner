@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Util.h"
+
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLImageElementBinding.h"
 #include "nsGkAtoms.h"
@@ -11,7 +13,6 @@
 #include "nsMappedAttributes.h"
 #include "nsSize.h"
 #include "nsIDocument.h"
-#include "nsIDOMMutationEvent.h"
 #include "nsIScriptContext.h"
 #include "nsIURL.h"
 #include "nsIIOService.h"
@@ -20,7 +21,7 @@
 #include "nsContentUtils.h"
 #include "nsIFrame.h"
 #include "nsNodeInfoManager.h"
-#include "mozilla/MouseEvents.h"
+#include "nsGUIEvent.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIDOMWindow.h"
 #include "nsFocusManager.h"
@@ -36,8 +37,7 @@
 #include "nsRuleData.h"
 
 #include "nsIDOMHTMLMapElement.h"
-#include "mozilla/EventDispatcher.h"
-#include "mozilla/EventStates.h"
+#include "nsEventDispatcher.h"
 
 #include "nsLayoutUtils.h"
 
@@ -46,12 +46,13 @@ NS_IMPL_NS_NEW_HTML_ELEMENT(Image)
 namespace mozilla {
 namespace dom {
 
-HTMLImageElement::HTMLImageElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
+HTMLImageElement::HTMLImageElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
   , mForm(nullptr)
 {
   // We start out broken
   AddStatesSilently(NS_EVENT_STATE_BROKEN);
+  SetIsDOMBinding();
 }
 
 HTMLImageElement::~HTMLImageElement()
@@ -66,12 +67,14 @@ NS_IMPL_RELEASE_INHERITED(HTMLImageElement, Element)
 
 // QueryInterface implementation for HTMLImageElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLImageElement)
-  NS_INTERFACE_TABLE_INHERITED(HTMLImageElement,
-                               nsIDOMHTMLImageElement,
-                               nsIImageLoadingContent,
-                               imgIOnloadBlocker,
-                               imgINotificationObserver)
-NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED4(HTMLImageElement,
+                                nsIDOMHTMLImageElement,
+                                nsIImageLoadingContent,
+                                imgIOnloadBlocker,
+                                imgINotificationObserver)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLImageElement)
@@ -231,9 +234,9 @@ HTMLImageElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-void
-HTMLImageElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                        nsRuleData* aData)
+static void
+MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                      nsRuleData* aData)
 {
   nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aData);
@@ -251,11 +254,6 @@ HTMLImageElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   if (aAttribute == nsGkAtoms::usemap ||
       aAttribute == nsGkAtoms::ismap) {
     NS_UpdateHint(retval, NS_STYLE_HINT_FRAMECHANGE);
-  } else if (aAttribute == nsGkAtoms::alt) {
-    if (aModType == nsIDOMMutationEvent::ADDITION ||
-        aModType == nsIDOMMutationEvent::REMOVAL) {
-      NS_UpdateHint(retval, NS_STYLE_HINT_FRAMECHANGE);
-    }
   }
   return retval;
 }
@@ -317,39 +315,22 @@ HTMLImageElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       nsDependentAtomString(aValue->GetAtomValue()));
   }
 
-  if (aNameSpaceID == kNameSpaceID_None &&
-      aName == nsGkAtoms::src &&
-      !aValue) {
-    CancelImageRequests(aNotify);
-  }
-
-  // If aNotify is false, we are coming from the parser or some such place;
-  // we'll get bound after all the attributes have been set, so we'll do the
-  // image load from BindToTree. Skip the LoadImage call in that case.
-  if (aNotify &&
-      aNameSpaceID == kNameSpaceID_None &&
-      aName == nsGkAtoms::crossorigin) {
-    // We want aForce == true in this LoadImage call, because we want to force
-    // a new load of the image with the new cross origin policy.
-    nsAutoString uri;
-    GetAttr(kNameSpaceID_None, nsGkAtoms::src, uri);
-    LoadImage(uri, true, aNotify);
-  }
-
   return nsGenericHTMLElement::AfterSetAttr(aNameSpaceID, aName,
                                             aValue, aNotify);
 }
 
 
 nsresult
-HTMLImageElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
+HTMLImageElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 {
   // If we are a map and get a mouse click, don't let it be handled by
   // the Generic Element as this could cause a click event to fire
   // twice, once by the image frame for the map and once by the Anchor
   // element. (bug 39723)
-  WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
-  if (mouseEvent && mouseEvent->IsLeftClickEvent()) {
+  if (aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
+      aVisitor.mEvent->message == NS_MOUSE_CLICK &&
+      static_cast<nsMouseEvent*>(aVisitor.mEvent)->button ==
+        nsMouseEvent::eLeftButton) {
     bool isMap = false;
     GetIsMap(&isMap);
     if (isMap) {
@@ -403,17 +384,13 @@ HTMLImageElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                           nsIAtom* aPrefix, const nsAString& aValue,
                           bool aNotify)
 {
-  // We need to force our image to reload.  This must be done here, not in
-  // AfterSetAttr or BeforeSetAttr, because we want to do it even if the attr is
-  // being set to its existing value, which is normally optimized away as a
-  // no-op.
-  //
-  // If aNotify is false, we are coming from the parser or some such place;
-  // we'll get bound after all the attributes have been set, so we'll do the
-  // image load from BindToTree. Skip the LoadImage call in that case.
+  // If we plan to call LoadImage, we want to do it first so that the
+  // image load kicks off _before_ the reflow triggered by the SetAttr.  But if
+  // aNotify is false, we are coming from the parser or some such place; we'll
+  // get bound after all the attributes have been set, so we'll do the
+  // image load from BindToTree.  Skip the LoadImage call in that case.
   if (aNotify &&
-      aNameSpaceID == kNameSpaceID_None &&
-      aName == nsGkAtoms::src) {
+      aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src) {
 
     // Prevent setting image.src by exiting early
     if (nsContentUtils::IsImageSrcSetDisabled()) {
@@ -432,9 +409,20 @@ HTMLImageElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 
     mNewRequestsWillNeedAnimationReset = false;
   }
-
+    
   return nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix, aValue,
                                        aNotify);
+}
+
+nsresult
+HTMLImageElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+                            bool aNotify)
+{
+  if (aNameSpaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::src) {
+    CancelImageRequests(aNotify);
+  }
+
+  return nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aAttribute, aNotify);
 }
 
 nsresult
@@ -527,7 +515,7 @@ HTMLImageElement::MaybeLoadImage()
   }
 }
 
-EventStates
+nsEventStates
 HTMLImageElement::IntrinsicState() const
 {
   return nsGenericHTMLElement::IntrinsicState() |
@@ -538,22 +526,21 @@ HTMLImageElement::IntrinsicState() const
 already_AddRefed<HTMLImageElement>
 HTMLImageElement::Image(const GlobalObject& aGlobal,
                         const Optional<uint32_t>& aWidth,
-                        const Optional<uint32_t>& aHeight,
-                        ErrorResult& aError)
+                        const Optional<uint32_t>& aHeight, ErrorResult& aError)
 {
-  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
+  nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.Get());
   nsIDocument* doc;
   if (!win || !(doc = win->GetExtantDoc())) {
     aError.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  already_AddRefed<nsINodeInfo> nodeInfo =
+  nsCOMPtr<nsINodeInfo> nodeInfo =
     doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::img, nullptr,
                                         kNameSpaceID_XHTML,
                                         nsIDOMNode::ELEMENT_NODE);
 
-  nsRefPtr<HTMLImageElement> img = new HTMLImageElement(nodeInfo);
+  nsRefPtr<HTMLImageElement> img = new HTMLImageElement(nodeInfo.forget());
 
   if (aWidth.WasPassed()) {
     img->SetWidth(aWidth.Value(), aError);
@@ -648,9 +635,9 @@ HTMLImageElement::GetCORSMode()
 }
 
 JSObject*
-HTMLImageElement::WrapNode(JSContext* aCx)
+HTMLImageElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLImageElementBinding::Wrap(aCx, this);
+  return HTMLImageElementBinding::Wrap(aCx, aScope, this);
 }
 
 #ifdef DEBUG

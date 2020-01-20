@@ -14,6 +14,7 @@
 #include "mozIPersonalDictionary.h"
 #include "mozISpellCheckingEngine.h"
 #include "nsClassHashtable.h"
+#include "nsVoidArray.h"
 #include "nsTArray.h"
 #include "mozISpellI18NUtil.h"
 #include "nsCycleCollectionParticipant.h"

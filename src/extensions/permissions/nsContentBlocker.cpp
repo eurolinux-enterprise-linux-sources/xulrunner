@@ -13,7 +13,6 @@
 #include "nsString.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIObjectLoadingContent.h"
-#include "mozilla/ArrayUtils.h"
 
 // Possible behavior pref values
 // Those map to the nsIPermissionManager values where possible
@@ -37,17 +36,16 @@ static const char *kTypeString[] = {"other",
                                     "dtd",
                                     "font",
                                     "media",
-                                    "websocket",
-                                    "csp_report",
-                                    "xslt"};
+                                    "websocket"
+                                    "csp_report"};
 
-#define NUMBER_OF_TYPES MOZ_ARRAY_LENGTH(kTypeString)
+#define NUMBER_OF_TYPES NS_ARRAY_LENGTH(kTypeString)
 uint8_t nsContentBlocker::mBehaviorPref[NUMBER_OF_TYPES];
 
-NS_IMPL_ISUPPORTS(nsContentBlocker, 
-                  nsIContentPolicy,
-                  nsIObserver,
-                  nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS3(nsContentBlocker, 
+                   nsIContentPolicy,
+                   nsIObserver,
+                   nsSupportsWeakReference)
 
 nsContentBlocker::nsContentBlocker()
 {
@@ -190,9 +188,13 @@ nsContentBlocker::ShouldProcess(uint32_t          aContentType,
   nsCOMPtr<nsIDocShellTreeItem> item =
     do_QueryInterface(NS_CP_GetDocShellFromContext(aRequestingContext));
 
-  if (item && item->ItemType() == nsIDocShellTreeItem::typeChrome) {
-    *aDecision = nsIContentPolicy::ACCEPT;
-    return NS_OK;
+  if (item) {
+    int32_t type;
+    item->GetItemType(&type);
+    if (type == nsIDocShellTreeItem::typeChrome) {
+      *aDecision = nsIContentPolicy::ACCEPT;
+      return NS_OK;
+    }
   }
 
   // For objects, we only check policy in shouldProcess, as the final type isn't
@@ -332,7 +334,7 @@ nsContentBlocker::TestPermission(nsIURI *aCurrentURI,
 NS_IMETHODIMP
 nsContentBlocker::Observe(nsISupports     *aSubject,
                           const char      *aTopic,
-                          const char16_t *aData)
+                          const PRUnichar *aData)
 {
   NS_ASSERTION(!strcmp(NS_PREFBRANCH_PREFCHANGE_TOPIC_ID, aTopic),
                "unexpected topic - we only deal with pref changes!");

@@ -5,24 +5,35 @@
 
 /* rendering object for HTML <frameset> elements */
 
-#include "nsFrameSetFrame.h"
-
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 
+#include "nsCOMPtr.h"
+#include "nsFrameSetFrame.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsLeafFrame.h"
 #include "nsContainerFrame.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
+#include "nsIComponentManager.h"
+#include "nsIStreamListener.h"
+#include "nsIURL.h"
+#include "nsIDocument.h"
+#include "nsINodeInfo.h"
+#include "nsView.h"
+#include "nsViewManager.h"
+#include "nsWidgetsCID.h"
 #include "nsGkAtoms.h"
+#include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
 #include "nsStyleContext.h"
 #include "nsHTMLParts.h"
+#include "nsGUIEvent.h"
 #include "nsRenderingContext.h"
+#include "nsIServiceManager.h"
 #include "nsIDOMMutationEvent.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsAutoPtr.h"
 #include "nsStyleSet.h"
@@ -33,7 +44,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/HTMLFrameSetElement.h"
 #include "mozilla/LookAndFeel.h"
-#include "mozilla/MouseEvents.h"
 #include "nsSubDocumentFrame.h"
 
 using namespace mozilla;
@@ -82,25 +92,25 @@ class nsHTMLFramesetBorderFrame : public nsLeafFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-#ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
+#ifdef DEBUG
+  NS_IMETHOD GetFrameName(nsAString& aResult) const;
 #endif
 
-  virtual nsresult HandleEvent(nsPresContext* aPresContext,
-                               WidgetGUIEvent* aEvent,
-                               nsEventStatus* aEventStatus) MOZ_OVERRIDE;
+  NS_IMETHOD HandleEvent(nsPresContext* aPresContext,
+                         nsGUIEvent* aEvent,
+                         nsEventStatus* aEventStatus);
 
-  virtual nsresult GetCursor(const nsPoint&    aPoint,
-                             nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
+  NS_IMETHOD GetCursor(const nsPoint&    aPoint,
+                       nsIFrame::Cursor& aCursor);
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual nsresult Reflow(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
+                    nsHTMLReflowMetrics&     aDesiredSize,
+                    const nsHTMLReflowState& aReflowState,
+                    nsReflowStatus&          aStatus);
 
   bool GetVisibility() { return mVisibility || mVisibilityOverride; }
   void SetVisibility(bool aVisibility);
@@ -111,8 +121,8 @@ public:
 protected:
   nsHTMLFramesetBorderFrame(nsStyleContext* aContext, int32_t aWidth, bool aVertical, bool aVisible);
   virtual ~nsHTMLFramesetBorderFrame();
-  virtual nscoord GetIntrinsicWidth() MOZ_OVERRIDE;
-  virtual nscoord GetIntrinsicHeight() MOZ_OVERRIDE;
+  virtual nscoord GetIntrinsicWidth();
+  virtual nscoord GetIntrinsicHeight();
 
   // the prev and next neighbors are indexes into the row (for a horizontal border) or col (for
   // a vertical border) of nsHTMLFramesetFrames or nsHTMLFrames
@@ -136,8 +146,8 @@ public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
-#ifdef DEBUG_FRAME_DUMP
-  virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
+#ifdef DEBUG
+  NS_IMETHOD GetFrameName(nsAString& aResult) const
   {
     return MakeFrameName(NS_LITERAL_STRING("FramesetBlank"), aResult);
   }
@@ -147,16 +157,16 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual nsresult Reflow(nsPresContext*           aPresContext,
-                          nsHTMLReflowMetrics&     aDesiredSize,
-                          const nsHTMLReflowState& aReflowState,
-                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  NS_IMETHOD Reflow(nsPresContext*           aPresContext,
+                    nsHTMLReflowMetrics&     aDesiredSize,
+                    const nsHTMLReflowState& aReflowState,
+                    nsReflowStatus&          aStatus);
 
 protected:
   nsHTMLFramesetBlankFrame(nsStyleContext* aContext) : nsLeafFrame(aContext) {}
   virtual ~nsHTMLFramesetBlankFrame();
-  virtual nscoord GetIntrinsicWidth() MOZ_OVERRIDE;
-  virtual nscoord GetIntrinsicHeight() MOZ_OVERRIDE;
+  virtual nscoord GetIntrinsicWidth();
+  virtual nscoord GetIntrinsicHeight();
 
   friend class nsHTMLFramesetFrame;
   friend class nsHTMLFrameset;
@@ -213,7 +223,7 @@ NS_QUERYFRAME_HEAD(nsHTMLFramesetFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 // static
-void
+int
 nsHTMLFramesetFrame::FrameResizePrefCallback(const char* aPref, void* aClosure)
 {
   nsHTMLFramesetFrame *frame =
@@ -238,6 +248,8 @@ nsHTMLFramesetFrame::FrameResizePrefCallback(const char* aPref, void* aClosure)
                                   nsGkAtoms::frameborder,
                                   nsIDOMMutationEvent::MODIFICATION);
   }
+
+  return 0;
 }
 
 void
@@ -392,7 +404,7 @@ nsHTMLFramesetFrame::Init(nsIContent*      aContent,
   mNonBorderChildCount = mChildCount;
 }
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetFrame::SetInitialChildList(ChildListID  aListID,
                                          nsFrameList& aChildList)
 {
@@ -559,7 +571,7 @@ void nsHTMLFramesetFrame::GenerateRowCol(nsPresContext*        aPresContext,
 
   for (i = 0; i < aNumSpecs; i++) {
     if (!aNewAttr.IsEmpty())
-      aNewAttr.Append(char16_t(','));
+      aNewAttr.Append(PRUnichar(','));
 
     switch (aSpecs[i].mUnit) {
       case eFramesetUnit_Fixed:
@@ -569,7 +581,7 @@ void nsHTMLFramesetFrame::GenerateRowCol(nsPresContext*        aPresContext,
       case eFramesetUnit_Relative:
         // Add 0.5 to the percentage to make rounding work right.
         aNewAttr.AppendInt(uint32_t((100.0*aValues[i])/aSize + 0.5));
-        aNewAttr.Append(char16_t('%'));
+        aNewAttr.Append(PRUnichar('%'));
         break;
     }
   }
@@ -623,19 +635,19 @@ nsHTMLFramesetFrame::GetDesiredSize(nsPresContext*           aPresContext,
   if (nullptr == framesetParent) {
     if (aPresContext->IsPaginated()) {
       // XXX This needs to be changed when framesets paginate properly
-      aDesiredSize.Width() = aReflowState.AvailableWidth();
-      aDesiredSize.Height() = aReflowState.AvailableHeight();
+      aDesiredSize.width = aReflowState.availableWidth;
+      aDesiredSize.height = aReflowState.availableHeight;
     } else {
       nsRect area = aPresContext->GetVisibleArea();
 
-      aDesiredSize.Width() = area.width;
-      aDesiredSize.Height() = area.height;
+      aDesiredSize.width = area.width;
+      aDesiredSize.height= area.height;
     }
   } else {
     nsSize size;
     framesetParent->GetSizeOfChild(this, size);
-    aDesiredSize.Width() = size.width;
-    aDesiredSize.Height() = size.height;
+    aDesiredSize.width  = size.width;
+    aDesiredSize.height = size.height;
   }
 }
 
@@ -678,8 +690,8 @@ void nsHTMLFramesetFrame::GetSizeOfChild(nsIFrame* aChild,
 }
 
 
-nsresult nsHTMLFramesetFrame::HandleEvent(nsPresContext* aPresContext,
-                                           WidgetGUIEvent* aEvent,
+NS_METHOD nsHTMLFramesetFrame::HandleEvent(nsPresContext* aPresContext,
+                                           nsGUIEvent*    aEvent,
                                            nsEventStatus* aEventStatus)
 {
   NS_ENSURE_ARG_POINTER(aEventStatus);
@@ -690,7 +702,9 @@ nsresult nsHTMLFramesetFrame::HandleEvent(nsPresContext* aPresContext,
         MouseDrag(aPresContext, aEvent);
 	      break;
       case NS_MOUSE_BUTTON_UP:
-        if (aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
+        if (aEvent->eventStructType == NS_MOUSE_EVENT &&
+            static_cast<nsMouseEvent*>(aEvent)->button ==
+              nsMouseEvent::eLeftButton) {
           EndMouseDrag(aPresContext);
         }
 	      break;
@@ -702,7 +716,7 @@ nsresult nsHTMLFramesetFrame::HandleEvent(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetFrame::GetCursor(const nsPoint&    aPoint,
                                nsIFrame::Cursor& aCursor)
 {
@@ -737,11 +751,11 @@ nsHTMLFramesetFrame::ReflowPlaceChild(nsIFrame*                aChild,
 {
   // reflow the child
   nsHTMLReflowState reflowState(aPresContext, aReflowState, aChild, aSize);
-  reflowState.SetComputedWidth(std::max(0, aSize.width - reflowState.ComputedPhysicalBorderPadding().LeftRight()));
-  reflowState.SetComputedHeight(std::max(0, aSize.height - reflowState.ComputedPhysicalBorderPadding().TopBottom()));
-  nsHTMLReflowMetrics metrics(aReflowState);
-  metrics.Width() = aSize.width;
-  metrics.Height() = aSize.height;
+  reflowState.SetComputedWidth(std::max(0, aSize.width - reflowState.mComputedBorderPadding.LeftRight()));
+  reflowState.SetComputedHeight(std::max(0, aSize.height - reflowState.mComputedBorderPadding.TopBottom()));
+  nsHTMLReflowMetrics metrics;
+  metrics.width = aSize.width;
+  metrics.height= aSize.height;
   nsReflowStatus status;
 
   ReflowChild(aChild, aPresContext, metrics, reflowState, aOffset.x,
@@ -749,9 +763,9 @@ nsHTMLFramesetFrame::ReflowPlaceChild(nsIFrame*                aChild,
   NS_ASSERTION(NS_FRAME_IS_COMPLETE(status), "bad status");
 
   // Place and size the child
-  metrics.Width() = aSize.width;
-  metrics.Height() = aSize.height;
-  FinishReflowChild(aChild, aPresContext, metrics, nullptr, aOffset.x, aOffset.y, 0);
+  metrics.width = aSize.width;
+  metrics.height = aSize.height;
+  FinishReflowChild(aChild, aPresContext, nullptr, metrics, aOffset.x, aOffset.y, 0);
 }
 
 static
@@ -839,7 +853,7 @@ nscolor nsHTMLFramesetFrame::GetBorderColor(nsIContent* aContent)
   return GetBorderColor();
 }
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
                             nsHTMLReflowMetrics&     aDesiredSize,
                             const nsHTMLReflowState& aReflowState,
@@ -852,14 +866,14 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
 
   mParent->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_HEIGHT);
 
-  //printf("FramesetFrame2::Reflow %X (%d,%d) \n", this, aReflowState.AvailableWidth(), aReflowState.AvailableHeight());
+  //printf("FramesetFrame2::Reflow %X (%d,%d) \n", this, aReflowState.availableWidth, aReflowState.availableHeight);
   // Always get the size so that the caller knows how big we are
   GetDesiredSize(aPresContext, aReflowState, aDesiredSize);
 
-  nscoord width  = (aDesiredSize.Width() <= aReflowState.AvailableWidth())
-    ? aDesiredSize.Width() : aReflowState.AvailableWidth();
-  nscoord height = (aDesiredSize.Height() <= aReflowState.AvailableHeight())
-    ? aDesiredSize.Height() : aReflowState.AvailableHeight();
+  nscoord width  = (aDesiredSize.width <= aReflowState.availableWidth)
+    ? aDesiredSize.width : aReflowState.availableWidth;
+  nscoord height = (aDesiredSize.height <= aReflowState.availableHeight)
+    ? aDesiredSize.height : aReflowState.availableHeight;
 
   bool firstTime = (GetStateBits() & NS_FRAME_FIRST_REFLOW) != 0;
   if (firstTime) {
@@ -958,21 +972,27 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
                                                             borderWidth,
                                                             false,
                                                             false);
-        borderFrame->Init(mContent, this, nullptr);
-        mChildCount++;
-        mFrames.AppendFrame(nullptr, borderFrame);
-        mHorBorders[cellIndex.y-1] = borderFrame;
-        // set the neighbors for determining drag boundaries
-        borderFrame->mPrevNeighbor = lastRow;
-        borderFrame->mNextNeighbor = cellIndex.y;
+        if (MOZ_LIKELY(borderFrame != nullptr)) {
+          borderFrame->Init(mContent, this, nullptr);
+          mChildCount++;
+          mFrames.AppendFrame(nullptr, borderFrame);
+          mHorBorders[cellIndex.y-1] = borderFrame;
+          // set the neighbors for determining drag boundaries
+          borderFrame->mPrevNeighbor = lastRow;
+          borderFrame->mNextNeighbor = cellIndex.y;
+        }
       } else {
         borderFrame = (nsHTMLFramesetBorderFrame*)mFrames.FrameAt(borderChildX);
-        borderFrame->mWidth = borderWidth;
-        borderChildX++;
+        if (MOZ_LIKELY(borderFrame != nullptr)) {
+          borderFrame->mWidth = borderWidth;
+          borderChildX++;
+        }
       }
-      nsSize borderSize(aDesiredSize.Width(), borderWidth);
-      ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
-      borderFrame = nullptr;
+      if (MOZ_LIKELY(borderFrame != nullptr)) {
+        nsSize borderSize(aDesiredSize.width, borderWidth);
+        ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
+        borderFrame = nullptr;
+      }
       offset.y += borderWidth;
     } else {
       if (cellIndex.x > 0) {  // moved to next col in same row
@@ -988,21 +1008,27 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
                                                                 borderWidth,
                                                                 true,
                                                                 false);
-            borderFrame->Init(mContent, this, nullptr);
-            mChildCount++;
-            mFrames.AppendFrame(nullptr, borderFrame);
-            mVerBorders[cellIndex.x-1] = borderFrame;
-            // set the neighbors for determining drag boundaries
-            borderFrame->mPrevNeighbor = lastCol;
-            borderFrame->mNextNeighbor = cellIndex.x;
+            if (MOZ_LIKELY(borderFrame != nullptr)) {
+              borderFrame->Init(mContent, this, nullptr);
+              mChildCount++;
+              mFrames.AppendFrame(nullptr, borderFrame);
+              mVerBorders[cellIndex.x-1] = borderFrame;
+              // set the neighbors for determining drag boundaries
+              borderFrame->mPrevNeighbor = lastCol;
+              borderFrame->mNextNeighbor = cellIndex.x;
+            }
           } else {
             borderFrame = (nsHTMLFramesetBorderFrame*)mFrames.FrameAt(borderChildX);
-            borderFrame->mWidth = borderWidth;
-            borderChildX++;
+            if (MOZ_LIKELY(borderFrame != nullptr)) {
+              borderFrame->mWidth = borderWidth;
+              borderChildX++;
+            }
           }
-          nsSize borderSize(borderWidth, aDesiredSize.Height());
-          ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
-          borderFrame = nullptr;
+          if (MOZ_LIKELY(borderFrame != nullptr)) {
+            nsSize borderSize(borderWidth, aDesiredSize.height);
+            ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
+            borderFrame = nullptr;
+          }
         }
         offset.x += borderWidth;
       }
@@ -1137,7 +1163,6 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
   mDrag.UnSet();
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
-  FinishAndStoreOverflow(&aDesiredSize);
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
   return NS_OK;
@@ -1149,8 +1174,8 @@ nsHTMLFramesetFrame::GetType() const
   return nsGkAtoms::frameSetFrame;
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsHTMLFramesetFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Frameset"), aResult);
@@ -1275,7 +1300,7 @@ nsHTMLFramesetFrame::SetBorderResize(nsHTMLFramesetBorderFrame* aBorderFrame)
 void
 nsHTMLFramesetFrame::StartMouseDrag(nsPresContext*             aPresContext,
                                     nsHTMLFramesetBorderFrame* aBorder,
-                                    WidgetGUIEvent*            aEvent)
+                                    nsGUIEvent*                aEvent)
 {
 #if 0
   int32_t index;
@@ -1287,7 +1312,7 @@ nsHTMLFramesetFrame::StartMouseDrag(nsPresContext*             aPresContext,
 
   mDragger = aBorder;
 
-  mFirstDragPoint = LayoutDeviceIntPoint::ToUntyped(aEvent->refPoint);
+  mFirstDragPoint = aEvent->refPoint;
 
   // Store the original frame sizes
   if (mDragger->mVertical) {
@@ -1304,7 +1329,7 @@ nsHTMLFramesetFrame::StartMouseDrag(nsPresContext*             aPresContext,
 
 void
 nsHTMLFramesetFrame::MouseDrag(nsPresContext* aPresContext,
-                               WidgetGUIEvent* aEvent)
+                               nsGUIEvent*    aEvent)
 {
   // if the capture ended, reset the drag state
   if (nsIPresShell::GetCapturingContent() != GetContent()) {
@@ -1437,7 +1462,7 @@ void nsHTMLFramesetBorderFrame::SetColor(nscolor aColor)
 }
 
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetBorderFrame::Reflow(nsPresContext*           aPresContext,
                                   nsHTMLReflowMetrics&     aDesiredSize,
                                   const nsHTMLReflowState& aReflowState,
@@ -1471,12 +1496,11 @@ public:
   // REVIEW: see old GetFrameForPoint
   // Receives events in its bounds
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-                       HitTestState* aState,
-                       nsTArray<nsIFrame*> *aOutFrames) MOZ_OVERRIDE {
+                       HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) {
     aOutFrames->AppendElement(mFrame);
   }
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+                     nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("FramesetBorder", TYPE_FRAMESET_BORDER)
 };
 
@@ -1575,9 +1599,9 @@ void nsHTMLFramesetBorderFrame::PaintBorder(nsRenderingContext& aRenderingContex
 }
 
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetBorderFrame::HandleEvent(nsPresContext* aPresContext,
-                                       WidgetGUIEvent* aEvent,
+                                       nsGUIEvent*    aEvent,
                                        nsEventStatus* aEventStatus)
 {
   NS_ENSURE_ARG_POINTER(aEventStatus);
@@ -1588,8 +1612,9 @@ nsHTMLFramesetBorderFrame::HandleEvent(nsPresContext* aPresContext,
     return NS_OK;
   }
 
-  if (aEvent->message == NS_MOUSE_BUTTON_DOWN &&
-      aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
+  if (aEvent->eventStructType == NS_MOUSE_EVENT &&
+      aEvent->message == NS_MOUSE_BUTTON_DOWN &&
+      static_cast<nsMouseEvent*>(aEvent)->button == nsMouseEvent::eLeftButton) {
     nsHTMLFramesetFrame* parentFrame = do_QueryFrame(GetParent());
     if (parentFrame) {
       parentFrame->StartMouseDrag(aPresContext, this, aEvent);
@@ -1599,7 +1624,7 @@ nsHTMLFramesetBorderFrame::HandleEvent(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetBorderFrame::GetCursor(const nsPoint&    aPoint,
                                      nsIFrame::Cursor& aCursor)
 {
@@ -1611,8 +1636,8 @@ nsHTMLFramesetBorderFrame::GetCursor(const nsPoint&    aPoint,
   return NS_OK;
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult nsHTMLFramesetBorderFrame::GetFrameName(nsAString& aResult) const
+#ifdef DEBUG
+NS_IMETHODIMP nsHTMLFramesetBorderFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("FramesetBorder"), aResult);
 }
@@ -1645,7 +1670,7 @@ nscoord nsHTMLFramesetBlankFrame::GetIntrinsicHeight()
   return 0;
 }
 
-nsresult
+NS_IMETHODIMP
 nsHTMLFramesetBlankFrame::Reflow(nsPresContext*           aPresContext,
                                  nsHTMLReflowMetrics&     aDesiredSize,
                                  const nsHTMLReflowState& aReflowState,
@@ -1675,8 +1700,7 @@ public:
   }
 #endif
 
-  virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("FramesetBlank", TYPE_FRAMESET_BLANK)
 };
 

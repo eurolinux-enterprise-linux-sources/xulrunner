@@ -5,28 +5,29 @@
 
 package org.mozilla.gecko;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.gfx.Layer;
 import org.mozilla.gecko.util.ThreadUtils;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Tab {
     private static final String LOGTAG = "GeckoTab";
@@ -41,9 +42,8 @@ public class Tab {
     private Bitmap mFavicon;
     private String mFaviconUrl;
     private int mFaviconSize;
-    private boolean mHasFeeds;
-    private boolean mHasOpenSearch;
-    private SiteIdentity mSiteIdentity;
+    private boolean mFeedsEnabled;
+    private JSONObject mIdentityData;
     private boolean mReaderEnabled;
     private BitmapDrawable mThumbnail;
     private int mHistoryIndex;
@@ -52,7 +52,8 @@ public class Tab {
     private boolean mExternal;
     private boolean mBookmark;
     private boolean mReadingListItem;
-    private int mFaviconLoadId;
+    private long mFaviconLoadId;
+    private String mDocumentURI;
     private String mContentType;
     private boolean mHasTouchListeners;
     private ZoomConstraints mZoomConstraints;
@@ -64,35 +65,16 @@ public class Tab {
     private Bitmap mThumbnailBitmap;
     private boolean mDesktopMode;
     private boolean mEnteringReaderMode;
-    private Context mAppContext;
-    private ErrorType mErrorType = ErrorType.NONE;
+    private Context mContext;
     private static final int MAX_HISTORY_LIST_SIZE = 50;
-    private volatile int mLoadProgress;
-    private volatile int mRecordingCount = 0;
-    private String mMostRecentHomePanel;
 
     public static final int STATE_DELAYED = 0;
     public static final int STATE_LOADING = 1;
     public static final int STATE_SUCCESS = 2;
     public static final int STATE_ERROR = 3;
 
-    public static final int LOAD_PROGRESS_INIT = 10;
-    public static final int LOAD_PROGRESS_START = 20;
-    public static final int LOAD_PROGRESS_LOCATION_CHANGE = 60;
-    public static final int LOAD_PROGRESS_LOADED = 80;
-    public static final int LOAD_PROGRESS_STOP = 100;
-
-    private static final int DEFAULT_BACKGROUND_COLOR = Color.WHITE;
-
-    public enum ErrorType {
-        CERT_ERROR,  // Pages with certificate problems
-        BLOCKED,     // Pages blocked for phishing or malware warnings
-        NET_ERROR,   // All other types of error
-        NONE         // Non error pages
-    }
-
     public Tab(Context context, int id, String url, boolean external, int parentId, String title) {
-        mAppContext = context.getApplicationContext();
+        mContext = context;
         mId = id;
         mLastUsed = 0;
         mUrl = url;
@@ -104,9 +86,8 @@ public class Tab {
         mFavicon = null;
         mFaviconUrl = null;
         mFaviconSize = 0;
-        mHasFeeds = false;
-        mHasOpenSearch = false;
-        mSiteIdentity = new SiteIdentity();
+        mFeedsEnabled = false;
+        mIdentityData = null;
         mReaderEnabled = false;
         mEnteringReaderMode = false;
         mThumbnail = null;
@@ -115,23 +96,21 @@ public class Tab {
         mBookmark = false;
         mReadingListItem = false;
         mFaviconLoadId = 0;
+        mDocumentURI = "";
         mContentType = "";
         mZoomConstraints = new ZoomConstraints(false);
         mPluginViews = new ArrayList<View>();
         mPluginLayers = new HashMap<Object, Layer>();
-        mState = shouldShowProgress(url) ? STATE_LOADING : STATE_SUCCESS;
-        mLoadProgress = LOAD_PROGRESS_INIT;
+        mState = shouldShowProgress(url) ? STATE_SUCCESS : STATE_LOADING;
 
         // At startup, the background is set to a color specified by LayerView
         // when the LayerView is created. Shortly after, this background color
         // will be used before the tab's content is shown.
-        mBackgroundColor = DEFAULT_BACKGROUND_COLOR;
-
-        updateBookmark();
+        mBackgroundColor = getBackgroundColorForUrl(url);
     }
 
     private ContentResolver getContentResolver() {
-        return mAppContext.getContentResolver();
+        return Tabs.getInstance().getContentResolver();
     }
 
     public void onDestroy() {
@@ -185,16 +164,8 @@ public class Tab {
         return mFavicon;
     }
 
-    public BitmapDrawable getThumbnail() {
+    public Drawable getThumbnail() {
         return mThumbnail;
-    }
-
-    public String getMostRecentHomePanel() {
-        return mMostRecentHomePanel;
-    }
-
-    public void setMostRecentHomePanel(String panelId) {
-        mMostRecentHomePanel = panelId;
     }
 
     public Bitmap getThumbnailBitmap(int width, int height) {
@@ -211,9 +182,7 @@ public class Tab {
         }
 
         if (mThumbnailBitmap == null) {
-            Bitmap.Config config = (GeckoAppShell.getScreenDepth() == 24) ?
-                Bitmap.Config.ARGB_8888 : Bitmap.Config.RGB_565;
-            mThumbnailBitmap = Bitmap.createBitmap(width, height, config);
+            mThumbnailBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565);
         }
 
         return mThumbnailBitmap;
@@ -225,7 +194,7 @@ public class Tab {
             public void run() {
                 if (b != null) {
                     try {
-                        mThumbnail = new BitmapDrawable(mAppContext.getResources(), b);
+                        mThumbnail = new BitmapDrawable(b);
                         if (mState == Tab.STATE_SUCCESS)
                             saveThumbnailToDB();
                     } catch (OutOfMemoryError oom) {
@@ -245,16 +214,21 @@ public class Tab {
         return mFaviconUrl;
     }
 
-    public boolean hasFeeds() {
-        return mHasFeeds;
+    public boolean getFeedsEnabled() {
+        return mFeedsEnabled;
     }
 
-    public boolean hasOpenSearch() {
-        return mHasOpenSearch;
+    public String getSecurityMode() {
+        try {
+            return mIdentityData.getString("mode");
+        } catch (Exception e) {
+            // If mIdentityData is null, or we get a JSONException
+            return SiteIdentityPopup.UNKNOWN;
+        }
     }
 
-    public SiteIdentity getSiteIdentity() {
-        return mSiteIdentity;
+    public JSONObject getIdentityData() {
+        return mIdentityData;
     }
 
     public boolean getReaderEnabled() {
@@ -276,6 +250,7 @@ public class Tab {
     public synchronized void updateURL(String url) {
         if (url != null && url.length() > 0) {
             mUrl = url;
+            updateBookmark();
         }
     }
 
@@ -283,23 +258,12 @@ public class Tab {
         mUserSearch = userSearch;
     }
 
-    public void setErrorType(String type) {
-        if ("blocked".equals(type))
-            setErrorType(ErrorType.BLOCKED);
-        else if ("certerror".equals(type))
-            setErrorType(ErrorType.CERT_ERROR);
-        else if ("neterror".equals(type))
-            setErrorType(ErrorType.NET_ERROR);
-        else
-            setErrorType(ErrorType.NONE);
+    public void setDocumentURI(String documentURI) {
+        mDocumentURI = documentURI;
     }
 
-    public void setErrorType(ErrorType type) {
-        mErrorType = type;
-    }
-
-    public ErrorType getErrorType() {
-        return mErrorType;
+    public String getDocumentURI() {
+        return mDocumentURI;
     }
 
     public void setContentType(String contentType) {
@@ -311,16 +275,9 @@ public class Tab {
     }
 
     public synchronized void updateTitle(String title) {
-        // Keep the title unchanged while entering reader mode.
-        if (mEnteringReaderMode) {
+        // Keep the title unchanged while entering reader mode
+        if (mEnteringReaderMode)
             return;
-        }
-
-        // If there was a title, but it hasn't changed, do nothing.
-        if (mTitle != null &&
-            TextUtils.equals(mTitle, title)) {
-            return;
-        }
 
         mTitle = (title == null ? "" : title);
         Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.TITLE);
@@ -361,23 +318,16 @@ public class Tab {
         return mHasTouchListeners;
     }
 
-    public void setFaviconLoadId(int faviconLoadId) {
+    public void setFaviconLoadId(long faviconLoadId) {
         mFaviconLoadId = faviconLoadId;
     }
 
-    public int getFaviconLoadId() {
+    public long getFaviconLoadId() {
         return mFaviconLoadId;
     }
 
-    /**
-     * Returns true if the favicon changed.
-     */
-    public boolean updateFavicon(Bitmap favicon) {
-        if (mFavicon == favicon) {
-            return false;
-        }
+    public void updateFavicon(Bitmap favicon) {
         mFavicon = favicon;
-        return true;
     }
 
     public synchronized void updateFaviconURL(String faviconUrl, int size) {
@@ -403,16 +353,12 @@ public class Tab {
         mFaviconSize = 0;
     }
 
-    public void setHasFeeds(boolean hasFeeds) {
-        mHasFeeds = hasFeeds;
-    }
-
-    public void setHasOpenSearch(boolean hasOpenSearch) {
-        mHasOpenSearch = hasOpenSearch;
+    public void setFeedsEnabled(boolean feedsEnabled) {
+        mFeedsEnabled = feedsEnabled;
     }
 
     public void updateIdentityData(JSONObject identityData) {
-        mSiteIdentity.update(identityData);
+        mIdentityData = identityData;
     }
 
     public void setReaderEnabled(boolean readerEnabled) {
@@ -421,21 +367,18 @@ public class Tab {
     }
 
     void updateBookmark() {
-        if (getURL() == null) {
-            return;
-        }
-
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
                 final String url = getURL();
-                if (url == null) {
+                if (url == null)
                     return;
+
+                if (url.equals(getURL())) {
+                    mBookmark = BrowserDB.isBookmark(getContentResolver(), url);
+                    mReadingListItem = BrowserDB.isReadingListItem(getContentResolver(), url);
                 }
 
-                final int flags = BrowserDB.getItemFlags(getContentResolver(), url);
-                mBookmark = (flags & Bookmarks.FLAG_BOOKMARK) > 0;
-                mReadingListItem = (flags & Bookmarks.FLAG_READING) > 0;
                 Tabs.getInstance().notifyListeners(Tab.this, Tabs.TabEvents.MENU_UPDATED);
             }
         });
@@ -484,11 +427,11 @@ public class Tab {
     }
 
     public void toggleReaderMode() {
-        if (AboutPages.isAboutReader(mUrl)) {
+        if (ReaderModeUtils.isAboutReader(mUrl)) {
             Tabs.getInstance().loadUrl(ReaderModeUtils.getUrlFromAboutReader(mUrl));
         } else if (mReaderEnabled) {
             mEnteringReaderMode = true;
-            Tabs.getInstance().loadUrl(ReaderModeUtils.getAboutReaderForUrl(mUrl, mId));
+            Tabs.getInstance().loadUrl(ReaderModeUtils.getAboutReaderForUrl(mUrl, mId, mReadingListItem));
         }
     }
 
@@ -625,54 +568,45 @@ public class Tab {
 
     void handleLocationChange(JSONObject message) throws JSONException {
         final String uri = message.getString("uri");
-        final String oldUrl = getURL();
-        final boolean sameDocument = message.getBoolean("sameDocument");
-        mEnteringReaderMode = ReaderModeUtils.isEnteringReaderMode(oldUrl, uri);
+        mEnteringReaderMode = ReaderModeUtils.isEnteringReaderMode(mUrl, uri);
+        updateURL(uri);
+        updateUserSearch(message.getString("userSearch"));
 
-        if (!TextUtils.equals(oldUrl, uri)) {
-            updateURL(uri);
-            updateBookmark();
-            if (!sameDocument) {
-                // We can unconditionally clear the favicon and title here: we
-                // already filtered both cases in which this was a (pseudo-)
-                // spurious location change, so we're definitely loading a new
-                // page.
-                clearFavicon();
-                updateTitle(null);
-            }
-        }
-
-        if (sameDocument) {
+        setDocumentURI(message.getString("documentURI"));
+        mBaseDomain = message.optString("baseDomain");
+        if (message.getBoolean("sameDocument")) {
             // We can get a location change event for the same document with an anchor tag
             // Notify listeners so that buttons like back or forward will update themselves
-            Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, oldUrl);
+            Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, uri);
             return;
         }
 
         setContentType(message.getString("contentType"));
-        updateUserSearch(message.getString("userSearch"));
-        mBaseDomain = message.optString("baseDomain");
-
-        setHasFeeds(false);
-        setHasOpenSearch(false);
+        clearFavicon();
+        setFeedsEnabled(false);
+        updateTitle(null);
         updateIdentityData(null);
         setReaderEnabled(false);
         setZoomConstraints(new ZoomConstraints(true));
         setHasTouchListeners(false);
-        setBackgroundColor(DEFAULT_BACKGROUND_COLOR);
-        setErrorType(ErrorType.NONE);
-        setLoadProgressIfLoading(LOAD_PROGRESS_LOCATION_CHANGE);
+        setBackgroundColor(getBackgroundColorForUrl(uri));
 
-        Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, oldUrl);
+        Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, uri);
     }
 
-    private static boolean shouldShowProgress(final String url) {
-        return !AboutPages.isAboutPage(url);
+    private boolean shouldShowProgress(String url) {
+        return "about:home".equals(url) || ReaderModeUtils.isAboutReader(url);
     }
 
-    void handleDocumentStart(boolean restoring, String url) {
-        setLoadProgress(LOAD_PROGRESS_START);
-        setState((!restoring && shouldShowProgress(url)) ? STATE_LOADING : STATE_SUCCESS);
+    private int getBackgroundColorForUrl(String url) {
+        if ("about:home".equals(url)) {
+            return mContext.getResources().getColor(R.color.background_normal);
+        }
+        return Color.WHITE;
+    }
+
+    void handleDocumentStart(boolean showProgress, String url) {
+        setState(shouldShowProgress(url) ? STATE_SUCCESS : STATE_LOADING);
         updateIdentityData(null);
         setReaderEnabled(false);
     }
@@ -682,7 +616,6 @@ public class Tab {
 
         final String oldURL = getURL();
         final Tab tab = this;
-        tab.setLoadProgress(LOAD_PROGRESS_STOP);
         ThreadUtils.getBackgroundHandler().postDelayed(new Runnable() {
             @Override
             public void run() {
@@ -693,25 +626,15 @@ public class Tab {
                 ThumbnailHelper.getInstance().getAndProcessThumbnailFor(tab);
             }
         }, 500);
-    }
-
-    void handleContentLoaded() {
-        setLoadProgressIfLoading(LOAD_PROGRESS_LOADED);
-    }
+     }
 
     protected void saveThumbnailToDB() {
-        final BitmapDrawable thumbnail = mThumbnail;
-        if (thumbnail == null) {
-            return;
-        }
-
         try {
             String url = getURL();
-            if (url == null) {
+            if (url == null)
                 return;
-            }
 
-            BrowserDB.updateThumbnailForUrl(getContentResolver(), url, thumbnail);
+            BrowserDB.updateThumbnailForUrl(getContentResolver(), url, mThumbnail);
         } catch (Exception e) {
             // ignore
         }
@@ -795,51 +718,5 @@ public class Tab {
 
     public boolean isPrivate() {
         return false;
-    }
-
-    /**
-     * Sets the tab load progress to the given percentage.
-     *
-     * @param progressPercentage Percentage to set progress to (0-100)
-     */
-    void setLoadProgress(int progressPercentage) {
-        mLoadProgress = progressPercentage;
-    }
-
-    /**
-     * Sets the tab load progress to the given percentage only if the tab is
-     * currently loading.
-     *
-     * about:neterror can trigger a STOP before other page load events (bug
-     * 976426), so any post-START events should make sure the page is loading
-     * before updating progress.
-     *
-     * @param progressPercentage Percentage to set progress to (0-100)
-     */
-    void setLoadProgressIfLoading(int progressPercentage) {
-        if (getState() == STATE_LOADING) {
-            setLoadProgress(progressPercentage);
-        }
-    }
-
-    /**
-     * Gets the tab load progress percentage.
-     *
-     * @return Current progress percentage
-     */
-    public int getLoadProgress() {
-        return mLoadProgress;
-    }
-
-    public void setRecording(boolean isRecording) {
-        if (isRecording) {
-            mRecordingCount++;
-        } else {
-            mRecordingCount--;
-        }
-    }
-
-    public boolean isRecording() {
-        return mRecordingCount > 0;
     }
 }

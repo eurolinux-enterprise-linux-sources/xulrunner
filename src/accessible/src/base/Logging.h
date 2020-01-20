@@ -8,13 +8,12 @@
 #define mozilla_a11y_logs_h__
 
 #include "nscore.h"
-#include "nsStringFwd.h"
+#include "nsAString.h"
 
 class nsIDocument;
 class nsINode;
 class nsIRequest;
 class nsISelection;
-class nsISupports;
 class nsIWebProgress;
 
 namespace mozilla {
@@ -118,8 +117,7 @@ void FocusDispatched(Accessible* aTarget);
 /**
  * Log the selection change.
  */
-void SelChange(nsISelection* aSelection, DocAccessible* aDocument,
-               int16_t aReason);
+void SelChange(nsISelection* aSelection, DocAccessible* aDocument);
 
 /**
  * Log the message ('title: text' format) on new line. Print the start and end

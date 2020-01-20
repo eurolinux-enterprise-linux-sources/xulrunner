@@ -3,10 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef nsHtml5RefPtr_h
-#define nsHtml5RefPtr_h
+#ifndef nsHtml5RefPtr_h___
+#define nsHtml5RefPtr_h___
 
-#include "nsThreadUtils.h"
+#include "nsIThread.h"
 
 template <class T>
 class nsHtml5RefPtrReleaser : public nsRunnable
@@ -485,4 +485,4 @@ operator==( int lhs, const nsHtml5RefPtr<T>& rhs )
 
 #endif // !defined(HAVE_CPP_TROUBLE_COMPARING_TO_ZERO)
 
-#endif // !defined(nsHtml5RefPtr_h)
+#endif // !defined(nsHtml5RefPtr_h___)

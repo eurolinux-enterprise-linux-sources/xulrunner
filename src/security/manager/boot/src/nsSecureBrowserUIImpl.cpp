@@ -16,6 +16,7 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIServiceManager.h"
+#include "nsIObserverService.h"
 #include "nsCURILoader.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
@@ -85,7 +86,7 @@ RequestMapInitEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
   return true;
 }
 
-static const PLDHashTableOps gMapOps = {
+static PLDHashTableOps gMapOps = {
   PL_DHashAllocTable,
   PL_DHashFreeTable,
   PL_DHashVoidPtrKeyStub,
@@ -99,17 +100,17 @@ static const PLDHashTableOps gMapOps = {
 #ifdef DEBUG
 class nsAutoAtomic {
   public:
-    nsAutoAtomic(Atomic<int32_t> &i)
+    nsAutoAtomic(int32_t &i)
     :mI(i) {
-      mI++;
+      PR_ATOMIC_INCREMENT(&mI);
     }
 
     ~nsAutoAtomic() {
-      mI--;
+      PR_ATOMIC_DECREMENT(&mI);
     }
 
   protected:
-    Atomic<int32_t> &mI;
+    int32_t &mI;
 
   private:
     nsAutoAtomic(); // not accessible
@@ -149,12 +150,13 @@ nsSecureBrowserUIImpl::~nsSecureBrowserUIImpl()
   }
 }
 
-NS_IMPL_ISUPPORTS(nsSecureBrowserUIImpl,
-                  nsISecureBrowserUI,
-                  nsIWebProgressListener,
-                  nsIFormSubmitObserver,
-                  nsISupportsWeakReference,
-                  nsISSLStatusProvider)
+NS_IMPL_THREADSAFE_ISUPPORTS6(nsSecureBrowserUIImpl,
+                              nsISecureBrowserUI,
+                              nsIWebProgressListener,
+                              nsIFormSubmitObserver,
+                              nsIObserver,
+                              nsISupportsWeakReference,
+                              nsISSLStatusProvider)
 
 NS_IMETHODIMP
 nsSecureBrowserUIImpl::Init(nsIDOMWindow *aWindow)
@@ -187,6 +189,12 @@ nsSecureBrowserUIImpl::Init(nsIDOMWindow *aWindow)
   mWindow = do_GetWeakReference(pwin, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // hook up to the form post notifications:
+  nsCOMPtr<nsIObserverService> svc(do_GetService("@mozilla.org/observer-service;1", &rv));
+  if (NS_SUCCEEDED(rv)) {
+    rv = svc->AddObserver(this, NS_FORMSUBMIT_SUBJECT, true);
+  }
+  
   nsCOMPtr<nsPIDOMWindow> piwindow(do_QueryInterface(aWindow));
   if (!piwindow) return NS_ERROR_FAILURE;
 
@@ -270,8 +278,9 @@ nsSecureBrowserUIImpl::MapInternalToExternalState(uint32_t* aState, lockIconStat
   if (!docShell)
     return NS_OK;
 
+  int32_t docShellType;
   // For content docShell's, the mixed content security state is set on the root docShell.
-  if (docShell->ItemType() == nsIDocShellTreeItem::typeContent) {
+  if (NS_SUCCEEDED(docShell->GetItemType(&docShellType)) && docShellType == nsIDocShellTreeItem::typeContent) {
     nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem(do_QueryInterface(docShell));
     nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
     docShellTreeItem->GetSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
@@ -314,6 +323,14 @@ nsSecureBrowserUIImpl::SetDocShell(nsIDocShell *aDocShell)
   mDocShell = do_GetWeakReference(aDocShell, &rv);
   return rv;
 }
+
+NS_IMETHODIMP
+nsSecureBrowserUIImpl::Observe(nsISupports*, const char*,
+                               const PRUnichar*)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 
 static nsresult IsChildOfDomWindow(nsIDOMWindow *parent, nsIDOMWindow *child,
                                    bool* value)
@@ -1478,7 +1495,7 @@ NS_IMETHODIMP
 nsSecureBrowserUIImpl::OnStatusChange(nsIWebProgress* aWebProgress,
                                       nsIRequest* aRequest,
                                       nsresult aStatus,
-                                      const char16_t* aMessage)
+                                      const PRUnichar* aMessage)
 {
   NS_NOTREACHED("notification excluded in AddProgressListener(...)");
   return NS_OK;
@@ -1614,7 +1631,7 @@ private:
   nsCOMPtr<nsIDOMWindow> mWindow;
 };
 
-NS_IMPL_ISUPPORTS(nsUIContext, nsIInterfaceRequestor)
+NS_IMPL_ISUPPORTS1(nsUIContext, nsIInterfaceRequestor)
 
 nsUIContext::nsUIContext(nsIDOMWindow *aWindow)
 : mWindow(aWindow)

@@ -5,25 +5,30 @@
 
 /* rendering object for list-item bullets */
 
-#include "nsBulletFrame.h"
-
-#include "mozilla/MathAlgorithms.h"
 #include "nsCOMPtr.h"
+#include "nsBulletFrame.h"
 #include "nsGkAtoms.h"
+#include "nsHTMLParts.h"
+#include "nsContainerFrame.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
 #include "nsRenderingContext.h"
+#include "nsILoadGroup.h"
+#include "nsIURL.h"
+#include "nsNetUtil.h"
 #include "prprf.h"
 #include "nsDisplayList.h"
 #include "nsCounterManager.h"
 
+#include "imgILoader.h"
 #include "imgIContainer.h"
 #include "imgRequestProxy.h"
-#include "nsIURI.h"
 
+#include "nsIServiceManager.h"
+#include "nsIComponentManager.h"
 #include <algorithm>
 
 #ifdef ACCESSIBILITY
@@ -35,12 +40,6 @@ using namespace mozilla;
 NS_DECLARE_FRAME_PROPERTY(FontSizeInflationProperty, nullptr)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsBulletFrame)
-
-#ifdef DEBUG
-NS_QUERYFRAME_HEAD(nsBulletFrame)
-  NS_QUERYFRAME_ENTRY(nsBulletFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
-#endif
 
 nsBulletFrame::~nsBulletFrame()
 {
@@ -67,8 +66,8 @@ nsBulletFrame::DestroyFrom(nsIFrame* aDestructRoot)
   nsFrame::DestroyFrom(aDestructRoot);
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsBulletFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Bullet"), aResult);
@@ -206,35 +205,33 @@ public:
   }
 #endif
 
-  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
-                           bool* aSnap) MOZ_OVERRIDE
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap)
   {
     *aSnap = false;
     return mFrame->GetVisualOverflowRectRelativeToSelf() + ToReferenceFrame();
   }
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
-                       HitTestState* aState,
-                       nsTArray<nsIFrame*> *aOutFrames) MOZ_OVERRIDE {
+                       HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) {
     aOutFrames->AppendElement(mFrame);
   }
   virtual void Paint(nsDisplayListBuilder* aBuilder,
-                     nsRenderingContext* aCtx) MOZ_OVERRIDE;
+                     nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("Bullet", TYPE_BULLET)
 
-  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE
+  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder)
   {
     bool snap;
     return GetBounds(aBuilder, &snap);
   }
 
-  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder)
   {
     return new nsDisplayBulletGeometry(this, aBuilder);
   }
 
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
-                                         nsRegion *aInvalidRegion) MOZ_OVERRIDE
+                                         nsRegion *aInvalidRegion)
   {
     const nsDisplayBulletGeometry* geometry = static_cast<const nsDisplayBulletGeometry*>(aGeometry);
     nsBulletFrame* f = static_cast<nsBulletFrame*>(mFrame);
@@ -356,7 +353,6 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
 
   case NS_STYLE_LIST_STYLE_DECIMAL:
   case NS_STYLE_LIST_STYLE_DECIMAL_LEADING_ZERO:
-  case NS_STYLE_LIST_STYLE_CJK_DECIMAL:
   case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
   case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
   case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
@@ -370,15 +366,6 @@ nsBulletFrame::PaintBullet(nsRenderingContext& aRenderingContext, nsPoint aPt,
   case NS_STYLE_LIST_STYLE_KATAKANA:
   case NS_STYLE_LIST_STYLE_HIRAGANA_IROHA:
   case NS_STYLE_LIST_STYLE_KATAKANA_IROHA:
-  case NS_STYLE_LIST_STYLE_JAPANESE_INFORMAL:
-  case NS_STYLE_LIST_STYLE_JAPANESE_FORMAL:
-  case NS_STYLE_LIST_STYLE_KOREAN_HANGUL_FORMAL:
-  case NS_STYLE_LIST_STYLE_KOREAN_HANJA_INFORMAL:
-  case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
-  case NS_STYLE_LIST_STYLE_SIMP_CHINESE_INFORMAL:
-  case NS_STYLE_LIST_STYLE_SIMP_CHINESE_FORMAL:
-  case NS_STYLE_LIST_STYLE_TRAD_CHINESE_INFORMAL:
-  case NS_STYLE_LIST_STYLE_TRAD_CHINESE_FORMAL:
   case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_INFORMAL: 
   case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_FORMAL: 
   case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_INFORMAL: 
@@ -478,15 +465,15 @@ static bool DecimalLeadingZeroToText(int32_t ordinal, nsString& result)
    result.AppendASCII(cbuf);
    return true;
 }
-static bool OtherDecimalToText(int32_t ordinal, char16_t zeroChar, nsString& result)
+static bool OtherDecimalToText(int32_t ordinal, PRUnichar zeroChar, nsString& result)
 {
-   char16_t diff = zeroChar - char16_t('0');
+   PRUnichar diff = zeroChar - PRUnichar('0');
    // We're going to be appending to whatever is in "result" already, so make
    // sure to only munge the new bits.  Note that we can't just grab the pointer
    // to the new stuff here, since appending to the string can realloc.
    size_t offset = result.Length();
    DecimalToText(ordinal, result);
-   char16_t* p = result.BeginWriting() + offset;
+   PRUnichar* p = result.BeginWriting() + offset;
    if (ordinal < 0) {
      // skip the leading '-'
      ++p;
@@ -497,19 +484,19 @@ static bool OtherDecimalToText(int32_t ordinal, char16_t zeroChar, nsString& res
 }
 static bool TamilToText(int32_t ordinal,  nsString& result)
 {
-   if (ordinal < 1 || ordinal > 9999) {
-     // Can't do those in this system.
-     return false;
-   }
-   char16_t diff = 0x0BE6 - char16_t('0');
+   PRUnichar diff = 0x0BE6 - PRUnichar('0');
    // We're going to be appending to whatever is in "result" already, so make
    // sure to only munge the new bits.  Note that we can't just grab the pointer
    // to the new stuff here, since appending to the string can realloc.
    size_t offset = result.Length();
    DecimalToText(ordinal, result); 
-   char16_t* p = result.BeginWriting() + offset;
+   if (ordinal < 1 || ordinal > 9999) {
+     // Can't do those in this system.
+     return false;
+   }
+   PRUnichar* p = result.BeginWriting() + offset;
    for(; '\0' != *p ; p++) 
-      if(*p != char16_t('0'))
+      if(*p != PRUnichar('0'))
          *p += diff;
    return true;
 }
@@ -523,13 +510,14 @@ static const char gUpperRomanCharsB[] = "VLD";
 static bool RomanToText(int32_t ordinal, nsString& result, const char* achars, const char* bchars)
 {
   if (ordinal < 1 || ordinal > 3999) {
+    DecimalToText(ordinal, result);
     return false;
   }
   nsAutoString addOn, decStr;
   decStr.AppendInt(ordinal, 10);
   int len = decStr.Length();
-  const char16_t* dp = decStr.get();
-  const char16_t* end = dp + len;
+  const PRUnichar* dp = decStr.get();
+  const PRUnichar* end = dp + len;
   int romanPos = len;
   int n;
 
@@ -538,27 +526,27 @@ static bool RomanToText(int32_t ordinal, nsString& result, const char* achars, c
     addOn.SetLength(0);
     switch(*dp) {
       case '3':
-        addOn.Append(char16_t(achars[romanPos]));
+        addOn.Append(PRUnichar(achars[romanPos]));
         // FALLTHROUGH
       case '2':
-        addOn.Append(char16_t(achars[romanPos]));
+        addOn.Append(PRUnichar(achars[romanPos]));
         // FALLTHROUGH
       case '1':
-        addOn.Append(char16_t(achars[romanPos]));
+        addOn.Append(PRUnichar(achars[romanPos]));
         break;
       case '4':
-        addOn.Append(char16_t(achars[romanPos]));
+        addOn.Append(PRUnichar(achars[romanPos]));
         // FALLTHROUGH
       case '5': case '6':
       case '7': case '8':
-        addOn.Append(char16_t(bchars[romanPos]));
+        addOn.Append(PRUnichar(bchars[romanPos]));
         for(n=0;'5'+n<*dp;n++) {
-          addOn.Append(char16_t(achars[romanPos]));
+          addOn.Append(PRUnichar(achars[romanPos]));
         }
         break;
       case '9':
-        addOn.Append(char16_t(achars[romanPos]));
-        addOn.Append(char16_t(achars[romanPos+1]));
+        addOn.Append(PRUnichar(achars[romanPos]));
+        addOn.Append(PRUnichar(achars[romanPos+1]));
         break;
       default:
         break;
@@ -569,7 +557,7 @@ static bool RomanToText(int32_t ordinal, nsString& result, const char* achars, c
 }
 
 #define ALPHA_SIZE 26
-static const char16_t gLowerAlphaChars[ALPHA_SIZE]  = 
+static const PRUnichar gLowerAlphaChars[ALPHA_SIZE]  = 
 {
 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, // A   B   C   D   E
 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, // F   G   H   I   J
@@ -579,7 +567,7 @@ static const char16_t gLowerAlphaChars[ALPHA_SIZE]  =
 0x007A                                  // Z
 };
 
-static const char16_t gUpperAlphaChars[ALPHA_SIZE]  = 
+static const PRUnichar gUpperAlphaChars[ALPHA_SIZE]  = 
 {
 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, // A   B   C   D   E
 0x0046, 0x0047, 0x0048, 0x0049, 0x004A, // F   G   H   I   J
@@ -593,7 +581,7 @@ static const char16_t gUpperAlphaChars[ALPHA_SIZE]  =
 #define KATAKANA_CHARS_SIZE 48
 // Page 94 Writing Systems of The World
 // after modification by momoi
-static const char16_t gKatakanaChars[KATAKANA_CHARS_SIZE] =
+static const PRUnichar gKatakanaChars[KATAKANA_CHARS_SIZE] =
 {
 0x30A2, 0x30A4, 0x30A6, 0x30A8, 0x30AA, //  a    i   u    e    o
 0x30AB, 0x30AD, 0x30AF, 0x30B1, 0x30B3, // ka   ki  ku   ke   ko
@@ -609,7 +597,7 @@ static const char16_t gKatakanaChars[KATAKANA_CHARS_SIZE] =
 };
 
 #define HIRAGANA_CHARS_SIZE 48 
-static const char16_t gHiraganaChars[HIRAGANA_CHARS_SIZE] =
+static const PRUnichar gHiraganaChars[HIRAGANA_CHARS_SIZE] =
 {
 0x3042, 0x3044, 0x3046, 0x3048, 0x304A, //  a    i    u    e    o
 0x304B, 0x304D, 0x304F, 0x3051, 0x3053, // ka   ki   ku   ke   ko
@@ -627,7 +615,7 @@ static const char16_t gHiraganaChars[HIRAGANA_CHARS_SIZE] =
 
 #define HIRAGANA_IROHA_CHARS_SIZE 47
 // Page 94 Writing Systems of The World
-static const char16_t gHiraganaIrohaChars[HIRAGANA_IROHA_CHARS_SIZE] =
+static const PRUnichar gHiraganaIrohaChars[HIRAGANA_IROHA_CHARS_SIZE] =
 {
 0x3044, 0x308D, 0x306F, 0x306B, 0x307B, //  i   ro   ha   ni   ho
 0x3078, 0x3068, 0x3061, 0x308A, 0x306C, // he   to  chi   ri   nu
@@ -642,7 +630,7 @@ static const char16_t gHiraganaIrohaChars[HIRAGANA_IROHA_CHARS_SIZE] =
 };
 
 #define KATAKANA_IROHA_CHARS_SIZE 47
-static const char16_t gKatakanaIrohaChars[KATAKANA_IROHA_CHARS_SIZE] =
+static const PRUnichar gKatakanaIrohaChars[KATAKANA_IROHA_CHARS_SIZE] =
 {
 0x30A4, 0x30ED, 0x30CF, 0x30CB, 0x30DB, //  i   ro   ha   ni   ho
 0x30D8, 0x30C8, 0x30C1, 0x30EA, 0x30CC, // he   to  chi   ri   nu
@@ -658,7 +646,7 @@ static const char16_t gKatakanaIrohaChars[KATAKANA_IROHA_CHARS_SIZE] =
 
 #define LOWER_GREEK_CHARS_SIZE 24
 // Note: 0x03C2 GREEK FINAL SIGMA is not used in here....
-static const char16_t gLowerGreekChars[LOWER_GREEK_CHARS_SIZE] =
+static const PRUnichar gLowerGreekChars[LOWER_GREEK_CHARS_SIZE] =
 {
 0x03B1, 0x03B2, 0x03B3, 0x03B4, 0x03B5, // alpha  beta  gamma  delta  epsilon
 0x03B6, 0x03B7, 0x03B8, 0x03B9, 0x03BA, // zeta   eta   theta  iota   kappa   
@@ -668,26 +656,26 @@ static const char16_t gLowerGreekChars[LOWER_GREEK_CHARS_SIZE] =
 };
 
 #define CJK_HEAVENLY_STEM_CHARS_SIZE 10 
-static const char16_t gCJKHeavenlyStemChars[CJK_HEAVENLY_STEM_CHARS_SIZE] =
+static const PRUnichar gCJKHeavenlyStemChars[CJK_HEAVENLY_STEM_CHARS_SIZE] =
 {
 0x7532, 0x4e59, 0x4e19, 0x4e01, 0x620a,
 0x5df1, 0x5e9a, 0x8f9b, 0x58ec, 0x7678
 };
 #define CJK_EARTHLY_BRANCH_CHARS_SIZE 12 
-static const char16_t gCJKEarthlyBranchChars[CJK_EARTHLY_BRANCH_CHARS_SIZE] =
+static const PRUnichar gCJKEarthlyBranchChars[CJK_EARTHLY_BRANCH_CHARS_SIZE] =
 {
 0x5b50, 0x4e11, 0x5bc5, 0x536f, 0x8fb0, 0x5df3,
 0x5348, 0x672a, 0x7533, 0x9149, 0x620c, 0x4ea5
 };
 #define HANGUL_CHARS_SIZE 14 
-static const char16_t gHangulChars[HANGUL_CHARS_SIZE] =
+static const PRUnichar gHangulChars[HANGUL_CHARS_SIZE] =
 {
 0xac00, 0xb098, 0xb2e4, 0xb77c, 0xb9c8, 0xbc14,
 0xc0ac, 0xc544, 0xc790, 0xcc28, 0xce74, 0xd0c0,
 0xd30c, 0xd558
 };
 #define HANGUL_CONSONANT_CHARS_SIZE 14 
-static const char16_t gHangulConsonantChars[HANGUL_CONSONANT_CHARS_SIZE] =
+static const PRUnichar gHangulConsonantChars[HANGUL_CONSONANT_CHARS_SIZE] =
 {                                      
 0x3131, 0x3134, 0x3137, 0x3139, 0x3141, 0x3142,
 0x3145, 0x3147, 0x3148, 0x314a, 0x314b, 0x314c,
@@ -699,7 +687,7 @@ static const char16_t gHangulConsonantChars[HANGUL_CONSONANT_CHARS_SIZE] =
 // per Momoi san's suggestion in bug 102252. 
 // For details, refer to http://www.ethiopic.org/Collation/OrderedLists.html.
 #define ETHIOPIC_HALEHAME_CHARS_SIZE 26
-static const char16_t gEthiopicHalehameChars[ETHIOPIC_HALEHAME_CHARS_SIZE] =
+static const PRUnichar gEthiopicHalehameChars[ETHIOPIC_HALEHAME_CHARS_SIZE] =
 {                                      
 0x1200, 0x1208, 0x1210, 0x1218, 0x1220, 0x1228,
 0x1230, 0x1240, 0x1260, 0x1270, 0x1280, 0x1290,
@@ -708,7 +696,7 @@ static const char16_t gEthiopicHalehameChars[ETHIOPIC_HALEHAME_CHARS_SIZE] =
 0x1348, 0x1350
 };
 #define ETHIOPIC_HALEHAME_AM_CHARS_SIZE 33
-static const char16_t gEthiopicHalehameAmChars[ETHIOPIC_HALEHAME_AM_CHARS_SIZE] =
+static const PRUnichar gEthiopicHalehameAmChars[ETHIOPIC_HALEHAME_AM_CHARS_SIZE] =
 {                                      
 0x1200, 0x1208, 0x1210, 0x1218, 0x1220, 0x1228,
 0x1230, 0x1238, 0x1240, 0x1260, 0x1270, 0x1278,
@@ -718,7 +706,7 @@ static const char16_t gEthiopicHalehameAmChars[ETHIOPIC_HALEHAME_AM_CHARS_SIZE] 
 0x1340, 0x1348, 0x1350
 };
 #define ETHIOPIC_HALEHAME_TI_ER_CHARS_SIZE 31
-static const char16_t gEthiopicHalehameTiErChars[ETHIOPIC_HALEHAME_TI_ER_CHARS_SIZE] =
+static const PRUnichar gEthiopicHalehameTiErChars[ETHIOPIC_HALEHAME_TI_ER_CHARS_SIZE] =
 {                                      
 0x1200, 0x1208, 0x1210, 0x1218, 0x1228, 0x1230,
 0x1238, 0x1240, 0x1250, 0x1260, 0x1270, 0x1278,
@@ -728,7 +716,7 @@ static const char16_t gEthiopicHalehameTiErChars[ETHIOPIC_HALEHAME_TI_ER_CHARS_S
 0x1350
 };
 #define ETHIOPIC_HALEHAME_TI_ET_CHARS_SIZE 34
-static const char16_t gEthiopicHalehameTiEtChars[ETHIOPIC_HALEHAME_TI_ET_CHARS_SIZE] =
+static const PRUnichar gEthiopicHalehameTiEtChars[ETHIOPIC_HALEHAME_TI_ET_CHARS_SIZE] =
 {                                      
 0x1200, 0x1208, 0x1210, 0x1218, 0x1220, 0x1228,
 0x1230, 0x1238, 0x1240, 0x1250, 0x1260, 0x1270,
@@ -746,11 +734,12 @@ static const char16_t gEthiopicHalehameTiEtChars[ETHIOPIC_HALEHAME_TI_ET_CHARS_S
 
 #define NUM_BUF_SIZE 34 
 
-static bool CharListToText(int32_t ordinal, nsString& result, const char16_t* chars, int32_t aBase)
+static bool CharListToText(int32_t ordinal, nsString& result, const PRUnichar* chars, int32_t aBase)
 {
-  char16_t buf[NUM_BUF_SIZE];
+  PRUnichar buf[NUM_BUF_SIZE];
   int32_t idx = NUM_BUF_SIZE;
   if (ordinal < 1) {
+    DecimalToText(ordinal, result);
     return false;
   }
   do {
@@ -763,226 +752,110 @@ static bool CharListToText(int32_t ordinal, nsString& result, const char16_t* ch
   return true;
 }
 
-static const char16_t gCJKDecimalChars[10] =
+
+static const PRUnichar gCJKIdeographicDigit1[10] =
 {
-  0x3007, 0x4e00, 0x4e8c, 0x4e09, 0x56db,
-  0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
+  0x96f6, 0x4e00, 0x4e8c, 0x4e09, 0x56db,  // 0 - 4
+  0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d   // 5 - 9
 };
-static bool CharListDecimalToText(int32_t ordinal, nsString& result, const char16_t* chars)
+static const PRUnichar gCJKIdeographicDigit2[10] =
 {
+  0x96f6, 0x58f9, 0x8cb3, 0x53c3, 0x8086,  // 0 - 4
+  0x4f0d, 0x9678, 0x67d2, 0x634c, 0x7396   // 5 - 9
+};
+static const PRUnichar gCJKIdeographicDigit3[10] =
+{
+  0x96f6, 0x58f9, 0x8d30, 0x53c1, 0x8086,  // 0 - 4
+  0x4f0d, 0x9646, 0x67d2, 0x634c, 0x7396   // 5 - 9
+};
+static const PRUnichar gCJKIdeographicUnit1[4] =
+{
+  0x000, 0x5341, 0x767e, 0x5343
+};
+static const PRUnichar gCJKIdeographicUnit2[4] =
+{
+  0x000, 0x62FE, 0x4F70, 0x4EDF
+};
+static const PRUnichar gCJKIdeographic10KUnit1[4] =
+{
+  0x000, 0x842c, 0x5104, 0x5146
+};
+static const PRUnichar gCJKIdeographic10KUnit2[4] =
+{
+  0x000, 0x4E07, 0x4ebf, 0x5146
+};
+static const PRUnichar gCJKIdeographic10KUnit3[4] =
+{
+  0x000, 0x4E07, 0x5104, 0x5146
+};
+
+static const bool CJKIdeographicToText(int32_t ordinal, nsString& result, 
+                                   const PRUnichar* digits,
+                                   const PRUnichar *unit, 
+                                   const PRUnichar* unit10k)
+{
+// In theory, we need the following if condiction,
+// However, the limit, 10 ^ 16, is greater than the max of uint32_t
+// so we don't really need to test it here.
+// if( ordinal > 9999999999999999)
+// {
+//    PR_snprintf(cbuf, sizeof(cbuf), "%ld", ordinal);
+//    result.Append(cbuf);
+// } 
+// else 
+// {
   if (ordinal < 0) {
+    DecimalToText(ordinal, result);
     return false;
   }
-  char16_t buf[NUM_BUF_SIZE];
+  PRUnichar c10kUnit = 0;
+  PRUnichar cUnit = 0;
+  PRUnichar cDigit = 0;
+  uint32_t ud = 0;
+  PRUnichar buf[NUM_BUF_SIZE];
   int32_t idx = NUM_BUF_SIZE;
+  bool bOutputZero = ( 0 == ordinal );
   do {
-    buf[--idx] = chars[ordinal % 10];
-    ordinal /= 10;
-  } while (ordinal > 0);
-  result.Append(buf + idx, NUM_BUF_SIZE - idx);
-  return true;
-}
-
-enum CJKIdeographicLang {
-  CHINESE, KOREAN, JAPANESE
-};
-struct CJKIdeographicData {
-  const char16_t *negative;
-  char16_t digit[10];
-  char16_t unit[3];
-  char16_t unit10K[2];
-  uint8_t lang;
-  bool informal;
-};
-static const char16_t gJapaneseNegative[] = {
-  0x30de, 0x30a4, 0x30ca, 0x30b9, 0x0000
-};
-static const CJKIdeographicData gDataJapaneseInformal = {
-  gJapaneseNegative,          // negative
-  {                           // digit
-    0x3007, 0x4e00, 0x4e8c, 0x4e09, 0x56db,
-    0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x5341, 0x767e, 0x5343 }, // unit
-  { 0x4e07, 0x5104 },         // unit10K
-  JAPANESE,                   // lang
-  true                        // informal
-};
-static const CJKIdeographicData gDataJapaneseFormal = {
-  gJapaneseNegative,          // negative
-  {                           // digit
-    0x96f6, 0x58f1, 0x5f10, 0x53c2, 0x56db,
-    0x4f0d, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x62fe, 0x767e, 0x9621 }, // unit
-  { 0x842c, 0x5104 },         // unit10K
-  JAPANESE,                   // lang
-  false                       // informal
-};
-static const char16_t gKoreanNegative[] = {
-  0xb9c8, 0xc774, 0xb108, 0xc2a4, 0x0020, 0x0000
-};
-static const CJKIdeographicData gDataKoreanHangulFormal = {
-  gKoreanNegative,            // negative
-  {                           // digit
-    0xc601, 0xc77c, 0xc774, 0xc0bc, 0xc0ac,
-    0xc624, 0xc721, 0xce60, 0xd314, 0xad6c
-  },
-  { 0xc2ed, 0xbc31, 0xcc9c }, // unit
-  { 0xb9cc, 0xc5b5 },         // unit10K
-  KOREAN,                     // lang
-  false                       // informal
-};
-static const CJKIdeographicData gDataKoreanHanjaInformal = {
-  gKoreanNegative,            // negative
-  {                           // digit
-    0x96f6, 0x4e00, 0x4e8c, 0x4e09, 0x56db,
-    0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x5341, 0x767e, 0x5343 }, // unit
-  { 0x842c, 0x5104 },         // unit10K
-  KOREAN,                     // lang
-  true                        // informal
-};
-static const CJKIdeographicData gDataKoreanHanjaFormal = {
-  gKoreanNegative,            // negative
-  {                           // digit
-    0x96f6, 0x58f9, 0x8cb3, 0x53c3, 0x56db,
-    0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x62fe, 0x767e, 0x4edf }, // unit
-  { 0x842c, 0x5104 },         // unit10K
-  KOREAN,                     // lang
-  false                       // informal
-};
-static const char16_t gSimpChineseNegative[] = {
-  0x8d1f, 0x0000
-};
-static const CJKIdeographicData gDataSimpChineseInformal = {
-  gSimpChineseNegative,       // negative
-  {                           // digit
-    0x96f6, 0x4e00, 0x4e8c, 0x4e09, 0x56db,
-    0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x5341, 0x767e, 0x5343 }, // unit
-  { 0x4e07, 0x4ebf },         // unit10K
-  CHINESE,                    // lang
-  true                        // informal
-};
-static const CJKIdeographicData gDataSimpChineseFormal = {
-  gSimpChineseNegative,       // negative
-  {                           // digit
-    0x96f6, 0x58f9, 0x8d30, 0x53c1, 0x8086,
-    0x4f0d, 0x9646, 0x67d2, 0x634c, 0x7396
-  },
-  { 0x62fe, 0x4f70, 0x4edf }, // unit
-  { 0x4e07, 0x4ebf },         // unit10K
-  CHINESE,                    // lang
-  false                       // informal
-};
-static const char16_t gTradChineseNegative[] = {
-  0x8ca0, 0x0000
-};
-static const CJKIdeographicData gDataTradChineseInformal = {
-  gTradChineseNegative,       // negative
-  {                           // digit
-    0x96f6, 0x4e00, 0x4e8c, 0x4e09, 0x56db,
-    0x4e94, 0x516d, 0x4e03, 0x516b, 0x4e5d
-  },
-  { 0x5341, 0x767e, 0x5343 }, // unit
-  { 0x842c, 0x5104 },         // unit10K
-  CHINESE,                    // lang
-  true                        // informal
-};
-static const CJKIdeographicData gDataTradChineseFormal = {
-  gTradChineseNegative,       // negative
-  {                           // digit
-    0x96f6, 0x58f9, 0x8cb3, 0x53c3, 0x8086,
-    0x4f0d, 0x9678, 0x67d2, 0x634c, 0x7396
-  },
-  { 0x62fe, 0x4f70, 0x4edf }, // unit
-  { 0x842c, 0x5104 },         // unit10K
-  CHINESE,                    // lang
-  false                       // informal
-};
-
-static const bool CJKIdeographicToText(int32_t aOrdinal, nsString& result,
-                                       const CJKIdeographicData& data)
-{
-  char16_t buf[NUM_BUF_SIZE];
-  int32_t idx = NUM_BUF_SIZE;
-  int32_t pos = 0;
-  bool isNegative = (aOrdinal < 0);
-  bool needZero = (aOrdinal == 0);
-  int32_t unitidx = 0, unit10Kidx = 0;
-  uint32_t ordinal = mozilla::Abs(aOrdinal);
-  do {
-    unitidx = pos % 4;
-    if (unitidx == 0) {
-      unit10Kidx = pos / 4;
+    if(0 == (ud % 4)) {
+      c10kUnit = unit10k[ud/4];
     }
     int32_t cur = ordinal % 10;
-    if (cur == 0) {
-      if (needZero) {
-        needZero = false;
-        buf[--idx] = data.digit[0];
+    cDigit = digits[cur];
+    if( 0 == cur)
+    {
+      cUnit = 0;
+      if(bOutputZero) {
+        bOutputZero = false;
+        if(0 != cDigit)
+          buf[--idx] = cDigit;
       }
-    } else {
-      if (data.lang == CHINESE) {
-        needZero = true;
-      }
-      if (unit10Kidx != 0) {
-        if (data.lang == KOREAN && idx != NUM_BUF_SIZE) {
-          buf[--idx] = ' ';
-        }
-        buf[--idx] = data.unit10K[unit10Kidx - 1];
-      }
-      if (unitidx != 0) {
-        buf[--idx] = data.unit[unitidx - 1];
-      }
-      if (cur != 1) {
-        buf[--idx] = data.digit[cur];
-      } else {
-        bool needOne = true;
-        if (data.informal) {
-          switch (data.lang) {
-            case CHINESE:
-              if (unitidx == 1 &&
-                  (ordinal == 1 || (pos > 4 && ordinal % 1000 == 1))) {
-                needOne = false;
-              }
-              break;
-            case JAPANESE:
-              if (unitidx > 0 &&
-                  (unitidx != 3 || (pos == 3 && ordinal == 1))) {
-                needOne = false;
-              }
-              break;
-            case KOREAN:
-              if (unitidx > 0 || (pos == 4 && (ordinal % 1000) == 1)) {
-                needOne = false;
-              }
-              break;
-          }
-        }
-        if (needOne) {
-          buf[--idx] = data.digit[1];
-        }
-      }
-      unit10Kidx = 0;
+    }
+    else
+    {
+      bOutputZero = true;
+      cUnit = unit[ud%4];
+
+      if(0 != c10kUnit)
+        buf[--idx] = c10kUnit;
+      if(0 != cUnit)
+        buf[--idx] = cUnit;
+      if((0 != cDigit) && 
+         ( (1 != cur) || (1 != (ud%4)) || ( ordinal > 10)) )
+        buf[--idx] = cDigit;
+
+      c10kUnit =  0;
     }
     ordinal /= 10;
-    pos++;
-  } while (ordinal > 0);
-  if (isNegative) {
-    result.Append(data.negative);
-  }
-  result.Append(buf + idx, NUM_BUF_SIZE - idx);
+    ++ud;
+
+  } while( ordinal > 0);
+  result.Append(buf+idx,NUM_BUF_SIZE-idx);
+// }
   return true;
 }
 
 #define HEBREW_GERESH       0x05F3
-static const char16_t gHebrewDigit[22] = 
+static const PRUnichar gHebrewDigit[22] = 
 {
 //   1       2       3       4       5       6       7       8       9
 0x05D0, 0x05D1, 0x05D2, 0x05D3, 0x05D4, 0x05D5, 0x05D6, 0x05D7, 0x05D8,
@@ -995,6 +868,7 @@ static const char16_t gHebrewDigit[22] =
 static bool HebrewToText(int32_t ordinal, nsString& result)
 {
   if (ordinal < 1 || ordinal > 999999) {
+    DecimalToText(ordinal, result);
     return false;
   }
   bool outputSep = false;
@@ -1036,7 +910,7 @@ static bool HebrewToText(int32_t ordinal, nsString& result)
     if ( n3 > 0)
       thousandsGroup.Append(gHebrewDigit[n3-1]);
     if (outputSep) 
-      thousandsGroup.Append((char16_t)HEBREW_GERESH);
+      thousandsGroup.Append((PRUnichar)HEBREW_GERESH);
     if (allText.IsEmpty())
       allText = thousandsGroup;
     else
@@ -1053,17 +927,18 @@ static bool HebrewToText(int32_t ordinal, nsString& result)
 static bool ArmenianToText(int32_t ordinal, nsString& result)
 {
   if (ordinal < 1 || ordinal > 9999) { // zero or reach the limit of Armenian numbering system
+    DecimalToText(ordinal, result);
     return false;
   }
 
-  char16_t buf[NUM_BUF_SIZE];
+  PRUnichar buf[NUM_BUF_SIZE];
   int32_t idx = NUM_BUF_SIZE;
   int32_t d = 0;
   do {
     int32_t cur = ordinal % 10;
     if (cur > 0)
     {
-      char16_t u = 0x0530 + (d * 9) + cur;
+      PRUnichar u = 0x0530 + (d * 9) + cur;
       buf[--idx] = u;
     }
     ++d;
@@ -1074,7 +949,7 @@ static bool ArmenianToText(int32_t ordinal, nsString& result)
 }
 
 
-static const char16_t gGeorgianValue [ 37 ] = { // 4 * 9 + 1 = 37
+static const PRUnichar gGeorgianValue [ 37 ] = { // 4 * 9 + 1 = 37
 //      1       2       3       4       5       6       7       8       9
    0x10D0, 0x10D1, 0x10D2, 0x10D3, 0x10D4, 0x10D5, 0x10D6, 0x10F1, 0x10D7,
 //     10      20      30      40      50      60      70      80      90
@@ -1089,17 +964,18 @@ static const char16_t gGeorgianValue [ 37 ] = { // 4 * 9 + 1 = 37
 static bool GeorgianToText(int32_t ordinal, nsString& result)
 {
   if (ordinal < 1 || ordinal > 19999) { // zero or reach the limit of Georgian numbering system
+    DecimalToText(ordinal, result);
     return false;
   }
 
-  char16_t buf[NUM_BUF_SIZE];
+  PRUnichar buf[NUM_BUF_SIZE];
   int32_t idx = NUM_BUF_SIZE;
   int32_t d = 0;
   do {
     int32_t cur = ordinal % 10;
     if (cur > 0)
     {
-      char16_t u = gGeorgianValue[(d * 9 ) + ( cur - 1)];
+      PRUnichar u = gGeorgianValue[(d * 9 ) + ( cur - 1)];
       buf[--idx] = u;
     }
     ++d;
@@ -1121,11 +997,12 @@ static bool GeorgianToText(int32_t ordinal, nsString& result)
 
 static bool EthiopicToText(int32_t ordinal, nsString& result)
 {
-  if (ordinal < 1) {
-    return false;
-  }
   nsAutoString asciiNumberString;      // decimal string representation of ordinal
   DecimalToText(ordinal, asciiNumberString);
+  if (ordinal < 1) {
+    result.Append(asciiNumberString);
+    return false;
+  }
   uint8_t asciiStringLength = asciiNumberString.Length();
 
   // If number length is odd, add a leading "0"
@@ -1161,21 +1038,21 @@ static bool EthiopicToText(int32_t ordinal, nsString& result)
     // put it all together...
     if (tensValue) {
       // map onto Ethiopic "tens":
-      result.Append((char16_t) (tensValue +  ETHIOPIC_TEN - 1));
+      result.Append((PRUnichar) (tensValue +  ETHIOPIC_TEN - 1));
     }
     if (unitsValue) {
       //map onto Ethiopic "units":
-      result.Append((char16_t) (unitsValue + ETHIOPIC_ONE - 1));
+      result.Append((PRUnichar) (unitsValue + ETHIOPIC_ONE - 1));
     }
     // Add a separator for all even groups except the last,
     // and for odd groups with non-zero value.
     if (oddGroup) {
       if (groupValue) {
-        result.Append((char16_t) ETHIOPIC_HUNDRED);
+        result.Append((PRUnichar) ETHIOPIC_HUNDRED);
       }
     } else {
       if (groupIndexFromRight) {
-        result.Append((char16_t) ETHIOPIC_TEN_THOUSAND);
+        result.Append((PRUnichar) ETHIOPIC_TEN_THOUSAND);
       }
     }
   }
@@ -1183,15 +1060,12 @@ static bool EthiopicToText(int32_t ordinal, nsString& result)
 }
 
 
-/* static */ void
+/* static */ bool
 nsBulletFrame::AppendCounterText(int32_t aListStyleType,
                                  int32_t aOrdinal,
-                                 nsString& result,
-                                 bool& isRTL)
+                                 nsString& result)
 {
   bool success = true;
-  int32_t fallback = NS_STYLE_LIST_STYLE_DECIMAL;
-  isRTL = false;
   
   switch (aListStyleType) {
     case NS_STYLE_LIST_STYLE_NONE: // used by counters code only
@@ -1199,32 +1073,27 @@ nsBulletFrame::AppendCounterText(int32_t aListStyleType,
 
     case NS_STYLE_LIST_STYLE_DISC: // used by counters code only
       // XXX We really need to do this the same way we do list bullets.
-      result.Append(char16_t(0x2022));
+      result.Append(PRUnichar(0x2022));
       break;
 
     case NS_STYLE_LIST_STYLE_CIRCLE: // used by counters code only
       // XXX We really need to do this the same way we do list bullets.
-      result.Append(char16_t(0x25E6));
+      result.Append(PRUnichar(0x25E6));
       break;
 
     case NS_STYLE_LIST_STYLE_SQUARE: // used by counters code only
       // XXX We really need to do this the same way we do list bullets.
-      result.Append(char16_t(0x25FE));
+      result.Append(PRUnichar(0x25FE));
       break;
 
     case NS_STYLE_LIST_STYLE_DECIMAL:
     default: // CSS2 say "A users  agent that does not recognize a numbering system
       // should use 'decimal'
       success = DecimalToText(aOrdinal, result);
-      NS_ASSERTION(success, "DecimalToText must never fail");
       break;
 
     case NS_STYLE_LIST_STYLE_DECIMAL_LEADING_ZERO:
       success = DecimalLeadingZeroToText(aOrdinal, result);
-      break;
-
-    case NS_STYLE_LIST_STYLE_CJK_DECIMAL:
-      success = CharListDecimalToText(aOrdinal, result, gCJKDecimalChars);
       break;
 
     case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
@@ -1270,63 +1139,43 @@ nsBulletFrame::AppendCounterText(int32_t aListStyleType,
       break;
 
     case NS_STYLE_LIST_STYLE_CJK_IDEOGRAPHIC: 
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_INFORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_INFORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success =
-        CJKIdeographicToText(aOrdinal, result, gDataTradChineseInformal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit1,
+                                     gCJKIdeographicUnit1,
+                                     gCJKIdeographic10KUnit1);
       break;
 
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_FORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_FORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success = CJKIdeographicToText(aOrdinal, result, gDataTradChineseFormal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit2,
+                                     gCJKIdeographicUnit2,
+                                     gCJKIdeographic10KUnit1);
       break;
 
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_INFORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_INFORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success =
-        CJKIdeographicToText(aOrdinal, result, gDataSimpChineseInformal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit1,
+                                     gCJKIdeographicUnit1,
+                                     gCJKIdeographic10KUnit2);
       break;
 
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_FORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_FORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success = CJKIdeographicToText(aOrdinal, result, gDataSimpChineseFormal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit3,
+                                     gCJKIdeographicUnit2,
+                                     gCJKIdeographic10KUnit2);
       break;
 
-    case NS_STYLE_LIST_STYLE_JAPANESE_INFORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_JAPANESE_INFORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success = CJKIdeographicToText(aOrdinal, result, gDataJapaneseInformal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit1,
+                                     gCJKIdeographicUnit1,
+                                     gCJKIdeographic10KUnit3);
       break;
 
-    case NS_STYLE_LIST_STYLE_JAPANESE_FORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_JAPANESE_FORMAL: 
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success = CJKIdeographicToText(aOrdinal, result, gDataJapaneseFormal);
-      break;
-
-    case NS_STYLE_LIST_STYLE_KOREAN_HANGUL_FORMAL:
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success =
-        CJKIdeographicToText(aOrdinal, result, gDataKoreanHangulFormal);
-      break;
-
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_INFORMAL:
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success =
-        CJKIdeographicToText(aOrdinal, result, gDataKoreanHanjaInformal);
-      break;
-
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
-      success = CJKIdeographicToText(aOrdinal, result, gDataKoreanHanjaFormal);
+      success = CJKIdeographicToText(aOrdinal, result, gCJKIdeographicDigit2,
+                                     gCJKIdeographicUnit2,
+                                     gCJKIdeographic10KUnit3);
       break;
 
     case NS_STYLE_LIST_STYLE_HEBREW: 
-      isRTL = true;
       success = HebrewToText(aOrdinal, result);
       break;
 
@@ -1400,13 +1249,11 @@ nsBulletFrame::AppendCounterText(int32_t aListStyleType,
       break;
 
     case NS_STYLE_LIST_STYLE_MOZ_CJK_HEAVENLY_STEM:
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
       success = CharListToText(aOrdinal, result, gCJKHeavenlyStemChars,
                                CJK_HEAVENLY_STEM_CHARS_SIZE);
       break;
 
     case NS_STYLE_LIST_STYLE_MOZ_CJK_EARTHLY_BRANCH:
-      fallback = NS_STYLE_LIST_STYLE_CJK_DECIMAL;
       success = CharListToText(aOrdinal, result, gCJKEarthlyBranchChars,
                                CJK_EARTHLY_BRANCH_CHARS_SIZE);
       break;
@@ -1444,58 +1291,10 @@ nsBulletFrame::AppendCounterText(int32_t aListStyleType,
                                ETHIOPIC_HALEHAME_TI_ET_CHARS_SIZE);
       break;
   }
-  if (!success) {
-    AppendCounterText(fallback, aOrdinal, result, isRTL);
-  }
+  return success;
 }
 
-/* static */ void
-nsBulletFrame::GetListItemSuffix(int32_t aListStyleType,
-                                 nsString& aResult,
-                                 bool& aSuppressPadding)
-{
-  aResult = '.';
-  aSuppressPadding = false;
-
-  switch (aListStyleType) {
-    case NS_STYLE_LIST_STYLE_NONE: // used by counters code only
-    case NS_STYLE_LIST_STYLE_DISC: // used by counters code only
-    case NS_STYLE_LIST_STYLE_CIRCLE: // used by counters code only
-    case NS_STYLE_LIST_STYLE_SQUARE: // used by counters code only
-      aResult.Truncate();
-      break;
-
-    case NS_STYLE_LIST_STYLE_CJK_DECIMAL:
-    case NS_STYLE_LIST_STYLE_CJK_IDEOGRAPHIC:
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_JAPANESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_JAPANESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_JAPANESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_JAPANESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_CJK_HEAVENLY_STEM:
-    case NS_STYLE_LIST_STYLE_MOZ_CJK_EARTHLY_BRANCH:
-      aResult = 0x3001;
-      aSuppressPadding = true;
-      break;
-
-    case NS_STYLE_LIST_STYLE_KOREAN_HANGUL_FORMAL:
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_INFORMAL:
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
-    case NS_STYLE_LIST_STYLE_MOZ_HANGUL:
-    case NS_STYLE_LIST_STYLE_MOZ_HANGUL_CONSONANT:
-      aResult = ',';
-      break;
-  }
-}
-
-void
+bool
 nsBulletFrame::GetListItemText(const nsStyleList& aListStyle,
                                nsString& result)
 {
@@ -1506,12 +1305,14 @@ nsBulletFrame::GetListItemText(const nsStyleList& aListStyle,
                aListStyle.mListStyleType != NS_STYLE_LIST_STYLE_CIRCLE &&
                aListStyle.mListStyleType != NS_STYLE_LIST_STYLE_SQUARE,
                "we should be using specialized code for these types");
+  bool success =
+    AppendCounterText(aListStyle.mListStyleType, mOrdinal, result);
+  if (success && aListStyle.mListStyleType == NS_STYLE_LIST_STYLE_HEBREW)
+    mTextIsRTL = true;
 
-  result.Truncate();
-  AppendCounterText(aListStyle.mListStyleType, mOrdinal, result, mTextIsRTL);
-
-  nsAutoString suffix;
-  GetListItemSuffix(aListStyle.mListStyleType, suffix, mSuppressPadding);
+  // XXX For some of these systems, "." is wrong!  This should really be
+  // pushed down into the individual cases!
+  nsString suffix = NS_LITERAL_STRING(".");
 
   // We're not going to do proper Bidi reordering on the list item marker, but
   // just display the whole thing as RTL or LTR, so we fake reordering by
@@ -1520,6 +1321,7 @@ nsBulletFrame::GetListItemText(const nsStyleList& aListStyle,
   // prepending it to the beginning if they are different.
   result = (mTextIsRTL == (vis->mDirection == NS_STYLE_DIRECTION_RTL)) ?
           result + suffix : suffix + result;
+  return success;
 }
 
 #define MIN_BULLET_SIZE 1
@@ -1545,8 +1347,8 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
     if (status & imgIRequest::STATUS_SIZE_AVAILABLE &&
         !(status & imgIRequest::STATUS_ERROR)) {
       // auto size the image
-      aMetrics.Width() = mIntrinsicSize.width;
-      aMetrics.SetTopAscent(aMetrics.Height() = mIntrinsicSize.height);
+      aMetrics.width = mIntrinsicSize.width;
+      aMetrics.ascent = aMetrics.height = mIntrinsicSize.height;
 
       AddStateBits(BULLET_FRAME_IMAGE_LOADING);
 
@@ -1570,8 +1372,8 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
   nsAutoString text;
   switch (myList->mListStyleType) {
     case NS_STYLE_LIST_STYLE_NONE:
-      aMetrics.Width() = aMetrics.Height() = 0;
-      aMetrics.SetTopAscent(0);
+      aMetrics.width = 0;
+      aMetrics.ascent = aMetrics.height = 0;
       break;
 
     case NS_STYLE_LIST_STYLE_DISC:
@@ -1581,14 +1383,13 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
       bulletSize = std::max(nsPresContext::CSSPixelsToAppUnits(MIN_BULLET_SIZE),
                           NSToCoordRound(0.8f * (float(ascent) / 2.0f)));
       mPadding.bottom = NSToCoordRound(float(ascent) / 8.0f);
-      aMetrics.Width() = aMetrics.Height() = bulletSize;
-      aMetrics.SetTopAscent(bulletSize + mPadding.bottom);
+      aMetrics.width = mPadding.right + bulletSize;
+      aMetrics.ascent = aMetrics.height = mPadding.bottom + bulletSize;
       break;
 
     default:
     case NS_STYLE_LIST_STYLE_DECIMAL_LEADING_ZERO:
     case NS_STYLE_LIST_STYLE_DECIMAL:
-    case NS_STYLE_LIST_STYLE_CJK_DECIMAL:
     case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
     case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
     case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
@@ -1602,15 +1403,6 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
     case NS_STYLE_LIST_STYLE_ARMENIAN: 
     case NS_STYLE_LIST_STYLE_GEORGIAN: 
     case NS_STYLE_LIST_STYLE_CJK_IDEOGRAPHIC: 
-    case NS_STYLE_LIST_STYLE_JAPANESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_JAPANESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_KOREAN_HANGUL_FORMAL:
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_INFORMAL:
-    case NS_STYLE_LIST_STYLE_KOREAN_HANJA_FORMAL:
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_SIMP_CHINESE_FORMAL:
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_INFORMAL:
-    case NS_STYLE_LIST_STYLE_TRAD_CHINESE_FORMAL:
     case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_INFORMAL: 
     case NS_STYLE_LIST_STYLE_MOZ_SIMP_CHINESE_FORMAL: 
     case NS_STYLE_LIST_STYLE_MOZ_TRAD_CHINESE_INFORMAL: 
@@ -1643,17 +1435,18 @@ nsBulletFrame::GetDesiredSize(nsPresContext*  aCX,
     case NS_STYLE_LIST_STYLE_MOZ_ETHIOPIC_HALEHAME_TI_ER:
     case NS_STYLE_LIST_STYLE_MOZ_ETHIOPIC_HALEHAME_TI_ET:
       GetListItemText(*myList, text);
-      aMetrics.Height() = fm->MaxHeight();
+      aMetrics.height = fm->MaxHeight();
       aRenderingContext->SetFont(fm);
-      aMetrics.Width() =
+      aMetrics.width =
         nsLayoutUtils::GetStringWidth(this, aRenderingContext,
                                       text.get(), text.Length());
-      aMetrics.SetTopAscent(fm->MaxAscent());
+      aMetrics.width += mPadding.right;
+      aMetrics.ascent = fm->MaxAscent();
       break;
   }
 }
 
-nsresult
+NS_IMETHODIMP
 nsBulletFrame::Reflow(nsPresContext* aPresContext,
                       nsHTMLReflowMetrics& aMetrics,
                       const nsHTMLReflowState& aReflowState,
@@ -1666,25 +1459,14 @@ nsBulletFrame::Reflow(nsPresContext* aPresContext,
   SetFontSizeInflation(inflation);
 
   // Get the base size
-  // This will also set mSuppressPadding appropriately (via GetListItemText())
-  // for the builtin counter styles with ideographic comma as suffix where the
-  // default padding from ua.css is not desired.
   GetDesiredSize(aPresContext, aReflowState.rendContext, aMetrics, inflation);
 
   // Add in the border and padding; split the top/bottom between the
   // ascent and descent to make things look nice
-  const nsMargin& borderPadding = aReflowState.ComputedPhysicalBorderPadding();
-  if (!mSuppressPadding ||
-      aPresContext->HasAuthorSpecifiedRules(this,
-                                            NS_AUTHOR_SPECIFIED_PADDING)) {
-    mPadding.top += NSToCoordRound(borderPadding.top * inflation);
-    mPadding.right += NSToCoordRound(borderPadding.right * inflation);
-    mPadding.bottom += NSToCoordRound(borderPadding.bottom * inflation);
-    mPadding.left += NSToCoordRound(borderPadding.left * inflation);
-  }
-  aMetrics.Width() += mPadding.left + mPadding.right;
-  aMetrics.Height() += mPadding.top + mPadding.bottom;
-  aMetrics.SetTopAscent(aMetrics.TopAscent() + mPadding.top);
+  const nsMargin& borderPadding = aReflowState.mComputedBorderPadding;
+  aMetrics.width += borderPadding.left + borderPadding.right;
+  aMetrics.height += borderPadding.top + borderPadding.bottom;
+  aMetrics.ascent += borderPadding.top;
 
   // XXX this is a bit of a hack, we're assuming that no glyphs used for bullets
   // overflow their font-boxes. It'll do for now; to fix it for real, we really
@@ -1700,19 +1482,19 @@ nsBulletFrame::Reflow(nsPresContext* aPresContext,
 /* virtual */ nscoord
 nsBulletFrame::GetMinWidth(nsRenderingContext *aRenderingContext)
 {
-  nsHTMLReflowMetrics metrics(GetWritingMode());
-  DISPLAY_MIN_WIDTH(this, metrics.Width());
+  nsHTMLReflowMetrics metrics;
+  DISPLAY_MIN_WIDTH(this, metrics.width);
   GetDesiredSize(PresContext(), aRenderingContext, metrics, 1.0f);
-  return metrics.Width();
+  return metrics.width;
 }
 
 /* virtual */ nscoord
 nsBulletFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
 {
-  nsHTMLReflowMetrics metrics(GetWritingMode());
-  DISPLAY_PREF_WIDTH(this, metrics.Width());
+  nsHTMLReflowMetrics metrics;
+  DISPLAY_PREF_WIDTH(this, metrics.width);
   GetDesiredSize(PresContext(), aRenderingContext, metrics, 1.0f);
-  return metrics.Width();
+  return metrics.width;
 }
 
 NS_IMETHODIMP
@@ -1803,7 +1585,7 @@ nsBulletFrame::GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGro
   if (!doc)
     return;
 
-  *aLoadGroup = doc->GetDocumentLoadGroup().take();
+  *aLoadGroup = doc->GetDocumentLoadGroup().get();  // already_AddRefed
 }
 
 union VoidPtrOrFloat {
@@ -1893,7 +1675,7 @@ nsBulletFrame::GetBaseline() const
 
 
 
-NS_IMPL_ISUPPORTS(nsBulletListener, imgINotificationObserver)
+NS_IMPL_ISUPPORTS1(nsBulletListener, imgINotificationObserver)
 
 nsBulletListener::nsBulletListener() :
   mFrame(nullptr)

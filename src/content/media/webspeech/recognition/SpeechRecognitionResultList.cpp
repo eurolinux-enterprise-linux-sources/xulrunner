@@ -6,6 +6,8 @@
 
 #include "SpeechRecognitionResultList.h"
 
+#include "nsContentUtils.h"
+
 #include "mozilla/dom/SpeechRecognitionResultListBinding.h"
 
 #include "SpeechRecognition.h"
@@ -34,13 +36,14 @@ SpeechRecognitionResultList::~SpeechRecognitionResultList()
 nsISupports*
 SpeechRecognitionResultList::GetParentObject() const
 {
-  return static_cast<DOMEventTargetHelper*>(mParent.get());
+  return static_cast<nsDOMEventTargetHelper*>(mParent.get());
 }
 
 JSObject*
-SpeechRecognitionResultList::WrapObject(JSContext* aCx)
+SpeechRecognitionResultList::WrapObject(JSContext* aCx,
+                                        JS::Handle<JSObject*> aScope)
 {
-  return SpeechRecognitionResultListBinding::Wrap(aCx, this);
+  return SpeechRecognitionResultListBinding::Wrap(aCx, aScope, this);
 }
 
 already_AddRefed<SpeechRecognitionResult>

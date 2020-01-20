@@ -12,9 +12,9 @@
 #include "mozilla/dom/SVGGradientElement.h"
 #include "mozilla/dom/SVGStopElement.h"
 #include "nsContentUtils.h"
+#include "nsIDOMSVGAnimatedNumber.h"
 #include "nsSVGEffects.h"
 #include "nsSVGAnimatedTransformList.h"
-#include "gfxColor.h"
 
 // XXX Tight coupling with content classes ahead!
 
@@ -24,14 +24,12 @@ using namespace mozilla::dom;
 //----------------------------------------------------------------------
 // Helper classes
 
-class MOZ_STACK_CLASS nsSVGGradientFrame::AutoGradientReferencer
+class nsSVGGradientFrame::AutoGradientReferencer
 {
 public:
-  AutoGradientReferencer(nsSVGGradientFrame *aFrame
-                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+  AutoGradientReferencer(nsSVGGradientFrame *aFrame)
     : mFrame(aFrame)
   {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     // Reference loops should normally be detected in advance and handled, so
     // we're not expecting to encounter them here
     NS_ABORT_IF_FALSE(!mFrame->mLoopFlag, "Undetected reference loop!");
@@ -42,7 +40,6 @@ public:
   }
 private:
   nsSVGGradientFrame *mFrame;
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 //----------------------------------------------------------------------
@@ -60,7 +57,14 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGGradientFrame)
 //----------------------------------------------------------------------
 // nsIFrame methods:
 
-nsresult
+/* virtual */ void
+nsSVGGradientFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
+{
+  nsSVGEffects::InvalidateDirectRenderingObservers(this);
+  nsSVGGradientFrameBase::DidSetStyleContext(aOldStyleContext);
+}
+
+NS_IMETHODIMP
 nsSVGGradientFrame::AttributeChanged(int32_t         aNameSpaceID,
                                      nsIAtom*        aAttribute,
                                      int32_t         aModType)
@@ -417,7 +421,7 @@ nsSVGLinearGradientFrame::GetType() const
   return nsGkAtoms::svgLinearGradientFrame;
 }
 
-nsresult
+NS_IMETHODIMP
 nsSVGLinearGradientFrame::AttributeChanged(int32_t         aNameSpaceID,
                                            nsIAtom*        aAttribute,
                                            int32_t         aModType)
@@ -526,7 +530,7 @@ nsSVGRadialGradientFrame::GetType() const
   return nsGkAtoms::svgRadialGradientFrame;
 }
 
-nsresult
+NS_IMETHODIMP
 nsSVGRadialGradientFrame::AttributeChanged(int32_t         aNameSpaceID,
                                            nsIAtom*        aAttribute,
                                            int32_t         aModType)

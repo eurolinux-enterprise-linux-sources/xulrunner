@@ -6,18 +6,15 @@
 
 TEST_DIRS += ['test']
 
+MODULE = 'dom'
+
 EXPORTS += [
     'nsJSON.h',
 ]
 
-UNIFIED_SOURCES += [
+CPP_SOURCES += [
     'nsJSON.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'json_s'
 
-LOCAL_INCLUDES += [
-    '/content/base/src',
-]
-
-FINAL_LIBRARY = 'gklayout'

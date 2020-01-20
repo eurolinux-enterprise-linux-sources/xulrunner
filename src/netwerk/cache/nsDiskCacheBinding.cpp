@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/MemoryReporting.h"
 #include "nsCache.h"
 #include <limits.h>
 
@@ -70,7 +69,7 @@ GetCacheEntryBinding(nsCacheEntry * entry)
  *  nsDiskCacheBinding
  *****************************************************************************/
 
-NS_IMPL_ISUPPORTS0(nsDiskCacheBinding)
+NS_IMPL_THREADSAFE_ISUPPORTS0(nsDiskCacheBinding)
 
 nsDiskCacheBinding::nsDiskCacheBinding(nsCacheEntry* entry, nsDiskCacheRecord * record)
     :   mCacheEntry(entry)
@@ -122,7 +121,7 @@ nsDiskCacheBinding::EnsureStreamIO()
  *
  *****************************************************************************/
 
-const PLDHashTableOps nsDiskCacheBindery::ops =
+PLDHashTableOps nsDiskCacheBindery::ops =
 {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
@@ -150,9 +149,10 @@ nsresult
 nsDiskCacheBindery::Init()
 {
     nsresult rv = NS_OK;
-    PL_DHashTableInit(&table, &ops, nullptr, sizeof(HashTableEntry), 0);
-    initialized = true;
+    initialized = PL_DHashTableInit(&table, &ops, nullptr, sizeof(HashTableEntry), 0);
 
+    if (!initialized) rv = NS_ERROR_OUT_OF_MEMORY;
+    
     return rv;
 }
 
@@ -372,7 +372,7 @@ nsDiskCacheBindery::ActiveBindings()
 
 struct AccumulatorArg {
     size_t mUsage;
-    mozilla::MallocSizeOf mMallocSizeOf;
+    nsMallocSizeOfFun mMallocSizeOf;
 };
 
 PLDHashOperator
@@ -408,7 +408,7 @@ AccumulateHeapUsage(PLDHashTable *table, PLDHashEntryHdr *hdr, uint32_t number,
  * SizeOfExcludingThis: return the amount of heap memory (bytes) being used by the bindery
  */
 size_t
-nsDiskCacheBindery::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+nsDiskCacheBindery::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf)
 {
     NS_ASSERTION(initialized, "nsDiskCacheBindery not initialized");
     if (!initialized) return 0;

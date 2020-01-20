@@ -9,20 +9,19 @@
 
 #include "nsHttp.h"
 #include "NullHttpTransaction.h"
+#include "nsProxyRelease.h"
 #include "nsHttpHandler.h"
-#include "nsHttpRequestHead.h"
 
 namespace mozilla {
 namespace net {
 
-NS_IMPL_ISUPPORTS0(NullHttpTransaction)
+NS_IMPL_THREADSAFE_ISUPPORTS0(NullHttpTransaction)
 
 NullHttpTransaction::NullHttpTransaction(nsHttpConnectionInfo *ci,
                                          nsIInterfaceRequestor *callbacks,
                                          uint32_t caps)
   : mStatus(NS_OK)
   , mCaps(caps | NS_HTTP_ALLOW_KEEPALIVE)
-  , mCapsToClear(0)
   , mCallbacks(callbacks)
   , mConnectionInfo(ci)
   , mRequestHead(nullptr)
@@ -52,7 +51,8 @@ void
 NullHttpTransaction::GetSecurityCallbacks(nsIInterfaceRequestor **outCB)
 {
   nsCOMPtr<nsIInterfaceRequestor> copyCB(mCallbacks);
-  *outCB = copyCB.forget().take();
+  *outCB = copyCB;
+  copyCB.forget();
 }
 
 void
@@ -76,14 +76,7 @@ NullHttpTransaction::Status()
 uint32_t
 NullHttpTransaction::Caps()
 {
-  return mCaps & ~mCapsToClear;
-}
-
-void
-NullHttpTransaction::SetDNSWasRefreshed()
-{
-  MOZ_ASSERT(NS_IsMainThread(), "SetDNSWasRefreshed on main thread only!");
-  mCapsToClear |= NS_HTTP_REFRESH_DNS;
+  return mCaps;
 }
 
 uint64_t

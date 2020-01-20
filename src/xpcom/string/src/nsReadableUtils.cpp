@@ -25,7 +25,7 @@ CopyASCIItoUTF16( const nsACString& aSource, nsAString& aDest )
   }
 
 void
-LossyCopyUTF16toASCII( const char16_t* aSource, nsACString& aDest )
+LossyCopyUTF16toASCII( const PRUnichar* aSource, nsACString& aDest )
   {
     aDest.Truncate();
     if (aSource) {
@@ -57,7 +57,7 @@ CopyUTF8toUTF16( const nsACString& aSource, nsAString& aDest )
   }
 
 void
-CopyUTF16toUTF8( const char16_t* aSource, nsACString& aDest )
+CopyUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest )
   {
     aDest.Truncate();
     AppendUTF16toUTF8(aSource, aDest);
@@ -92,19 +92,8 @@ LossyAppendUTF16toASCII( const nsAString& aSource, nsACString& aDest )
 void
 AppendASCIItoUTF16( const nsACString& aSource, nsAString& aDest )
   {
-    if (!AppendASCIItoUTF16(aSource, aDest, mozilla::fallible_t())) {
-      NS_ABORT_OOM(aDest.Length() + aSource.Length());
-    }
-  }
-
-bool
-AppendASCIItoUTF16( const nsACString& aSource, nsAString& aDest,
-                    const mozilla::fallible_t& )
-  {
     uint32_t old_dest_length = aDest.Length();
-    if (!aDest.SetLength(old_dest_length + aSource.Length(), mozilla::fallible_t())) {
-      return false;
-    }
+    aDest.SetLength(old_dest_length + aSource.Length());
 
     nsACString::const_iterator fromBegin, fromEnd;
 
@@ -117,11 +106,10 @@ AppendASCIItoUTF16( const nsACString& aSource, nsAString& aDest,
     LossyConvertEncoding8to16 converter(dest.get());
 
     copy_string(aSource.BeginReading(fromBegin), aSource.EndReading(fromEnd), converter);
-    return true;
   }
 
 void
-LossyAppendUTF16toASCII( const char16_t* aSource, nsACString& aDest )
+LossyAppendUTF16toASCII( const PRUnichar* aSource, nsACString& aDest )
   {
     if (aSource) {
       LossyAppendUTF16toASCII(nsDependentString(aSource), aDest);
@@ -138,15 +126,6 @@ AppendASCIItoUTF16( const char* aSource, nsAString& aDest )
 
 void
 AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest )
-{
-  if (!AppendUTF16toUTF8(aSource, aDest, mozilla::fallible_t())) {
-    NS_ABORT_OOM(aDest.Length() + aSource.Length());
-  }
-}
-
-bool
-AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest,
-                   const mozilla::fallible_t& )
   {
     nsAString::const_iterator source_start, source_end;
     CalculateUTF8Size calculator;
@@ -160,9 +139,7 @@ AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest,
         uint32_t old_dest_length = aDest.Length();
 
         // Grow the buffer if we need to.
-        if (!aDest.SetLength(old_dest_length + count, mozilla::fallible_t())) {
-          return false;
-        }
+        aDest.SetLength(old_dest_length + count);
 
         // All ready? Time to convert
 
@@ -174,15 +151,13 @@ AppendUTF16toUTF8( const nsAString& aSource, nsACString& aDest,
                      "Unexpected disparity between CalculateUTF8Size and "
                      "ConvertUTF16toUTF8");
       }
-
-    return true;
   }
 
 void
 AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest )
 {
   if (!AppendUTF8toUTF16(aSource, aDest, mozilla::fallible_t())) {
-    NS_ABORT_OOM(aDest.Length() + aSource.Length());
+    NS_RUNTIMEABORT("OOM");
   }
 }
 
@@ -228,7 +203,7 @@ AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest,
   }
 
 void
-AppendUTF16toUTF8( const char16_t* aSource, nsACString& aDest )
+AppendUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest )
   {
     if (aSource) {
       AppendUTF16toUTF8(nsDependentString(aSource), aDest);
@@ -312,25 +287,25 @@ ToNewCString( const nsACString& aSource )
     return result;
   }
 
-char16_t*
+PRUnichar*
 ToNewUnicode( const nsAString& aSource )
   {
     // no conversion needed, just allocate a buffer of the correct length and copy into it
 
-    char16_t* result = AllocateStringCopy(aSource, (char16_t*)0);
+    PRUnichar* result = AllocateStringCopy(aSource, (PRUnichar*)0);
     if (!result)
       return nullptr;
 
     nsAString::const_iterator fromBegin, fromEnd;
-    char16_t* toBegin = result;
-    *copy_string(aSource.BeginReading(fromBegin), aSource.EndReading(fromEnd), toBegin) = char16_t(0);
+    PRUnichar* toBegin = result;
+    *copy_string(aSource.BeginReading(fromBegin), aSource.EndReading(fromEnd), toBegin) = PRUnichar(0);
     return result;
   }
 
-char16_t*
+PRUnichar*
 ToNewUnicode( const nsACString& aSource )
   {
-    char16_t* result = AllocateStringCopy(aSource, (char16_t*)0);
+    PRUnichar* result = AllocateStringCopy(aSource, (PRUnichar*)0);
     if (!result)
       return nullptr;
 
@@ -350,8 +325,8 @@ CalcUTF8ToUnicodeLength( const nsACString& aSource)
     return calculator.Length();
   }
 
-char16_t*
-UTF8ToUnicodeBuffer( const nsACString& aSource, char16_t* aBuffer, uint32_t *aUTF16Count )
+PRUnichar*
+UTF8ToUnicodeBuffer( const nsACString& aSource, PRUnichar* aBuffer, uint32_t *aUTF16Count )
   {
     nsACString::const_iterator start, end;
     ConvertUTF8toUTF16 converter(aBuffer);
@@ -363,12 +338,12 @@ UTF8ToUnicodeBuffer( const nsACString& aSource, char16_t* aBuffer, uint32_t *aUT
     return aBuffer;
   }
 
-char16_t*
+PRUnichar*
 UTF8ToNewUnicode( const nsACString& aSource, uint32_t *aUTF16Count )
   {
     const uint32_t length = CalcUTF8ToUnicodeLength(aSource);
-    const size_t buffer_size = (length + 1) * sizeof(char16_t);
-    char16_t *buffer = static_cast<char16_t*>(nsMemory::Alloc(buffer_size));
+    const size_t buffer_size = (length + 1) * sizeof(PRUnichar);
+    PRUnichar *buffer = static_cast<PRUnichar*>(nsMemory::Alloc(buffer_size));
     if (!buffer)
       return nullptr;
 
@@ -381,11 +356,11 @@ UTF8ToNewUnicode( const nsACString& aSource, uint32_t *aUTF16Count )
     return buffer;
   }
 
-char16_t*
-CopyUnicodeTo( const nsAString& aSource, uint32_t aSrcOffset, char16_t* aDest, uint32_t aLength )
+PRUnichar*
+CopyUnicodeTo( const nsAString& aSource, uint32_t aSrcOffset, PRUnichar* aDest, uint32_t aLength )
   {
     nsAString::const_iterator fromBegin, fromEnd;
-    char16_t* toBegin = aDest;    
+    PRUnichar* toBegin = aDest;    
     copy_string(aSource.BeginReading(fromBegin).advance( int32_t(aSrcOffset) ), aSource.BeginReading(fromEnd).advance( int32_t(aSrcOffset+aLength) ), toBegin);
     return aDest;
   }
@@ -422,7 +397,7 @@ AppendUnicodeTo( const nsAString::const_iterator& aSrcStart,
 bool
 IsASCII( const nsAString& aString )
   {
-    static const char16_t NOT_ASCII = char16_t(~0x007F);
+    static const PRUnichar NOT_ASCII = PRUnichar(~0x007F);
 
 
     // Don't want to use |copy_string| for this task, since we can stop at the first non-ASCII character
@@ -431,8 +406,8 @@ IsASCII( const nsAString& aString )
     aString.BeginReading(iter);
     aString.EndReading(done_reading);
 
-    const char16_t* c = iter.get();
-    const char16_t* end = done_reading.get();
+    const PRUnichar* c = iter.get();
+    const PRUnichar* end = done_reading.get();
     
     while ( c < end )
       {
@@ -906,11 +881,11 @@ RFindInReadable( const nsACString& aPattern, nsACString::const_iterator& aSearch
   }
 
 bool
-FindCharInReadable( char16_t aChar, nsAString::const_iterator& aSearchStart, const nsAString::const_iterator& aSearchEnd )
+FindCharInReadable( PRUnichar aChar, nsAString::const_iterator& aSearchStart, const nsAString::const_iterator& aSearchEnd )
   {
     int32_t fragmentLength = aSearchEnd.get() - aSearchStart.get();
 
-    const char16_t* charFoundAt = nsCharTraits<char16_t>::find(aSearchStart.get(), fragmentLength, aChar);
+    const PRUnichar* charFoundAt = nsCharTraits<PRUnichar>::find(aSearchStart.get(), fragmentLength, aChar);
     if ( charFoundAt ) {
       aSearchStart.advance( charFoundAt - aSearchStart.get() );
       return true;
@@ -937,7 +912,7 @@ FindCharInReadable( char aChar, nsACString::const_iterator& aSearchStart, const 
 
 uint32_t
 CountCharInReadable( const nsAString& aStr,
-                     char16_t aChar )
+                     PRUnichar aChar )
 {
   uint32_t count = 0;
   nsAString::const_iterator begin, end;
@@ -1023,7 +998,7 @@ StringEndsWith( const nsACString& aSource, const nsACString& aSubstring,
 
 
 
-static const char16_t empty_buffer[1] = { '\0' };
+static const PRUnichar empty_buffer[1] = { '\0' };
 
 const nsAFlatString&
 EmptyString()
@@ -1067,7 +1042,7 @@ CompareUTF8toUTF16(const nsASingleFragmentCString& aUTF8String,
     aUTF8String.BeginReading(u8);
     aUTF8String.EndReading(u8end);
 
-    const char16_t *u16, *u16end;
+    const PRUnichar *u16, *u16end;
     aUTF16String.BeginReading(u16);
     aUTF16String.EndReading(u16end);
 
@@ -1140,7 +1115,7 @@ AppendUCS4ToUTF16(const uint32_t aSource, nsAString& aDest)
     NS_ASSERTION(IS_VALID_CHAR(aSource), "Invalid UCS4 char");
     if (IS_IN_BMP(aSource))
       {
-        aDest.Append(char16_t(aSource));
+        aDest.Append(PRUnichar(aSource));
       }
     else
       {

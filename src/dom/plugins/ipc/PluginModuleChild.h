@@ -31,12 +31,21 @@
 #include "mozilla/plugins/PPluginModuleChild.h"
 #include "mozilla/plugins/PluginInstanceChild.h"
 #include "mozilla/plugins/PluginIdentifierChild.h"
-#include "mozilla/plugins/PluginMessageUtils.h"
 
 // NOTE: stolen from nsNPAPIPlugin.h
 
+/*
+ * Use this macro before each exported function
+ * (between the return address and the function
+ * itself), to ensure that the function has the
+ * right calling conventions on OS/2.
+ */
+#define NP_CALLBACK NP_LOADDS
+
 #if defined(XP_WIN)
 #define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (__stdcall * _name)
+#elif defined(XP_OS2)
+#define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (_System * _name)
 #else
 #define NS_NPAPIPLUGIN_CALLBACK(_type, _name) _type (* _name)
 #endif
@@ -65,8 +74,8 @@ class PluginModuleChild : public PPluginModuleChild
 {
     typedef mozilla::dom::PCrashReporterChild PCrashReporterChild;
 protected:
-    virtual mozilla::ipc::RacyInterruptPolicy
-    MediateInterruptRace(const Message& parent, const Message& child) MOZ_OVERRIDE
+    virtual mozilla::ipc::RPCChannel::RacyRPCPolicy
+    MediateRPCRace(const Message& parent, const Message& child) MOZ_OVERRIDE
     {
         return MediateRace(parent, child);
     }
@@ -74,32 +83,32 @@ protected:
     virtual bool ShouldContinueFromReplyTimeout() MOZ_OVERRIDE;
 
     // Implement the PPluginModuleChild interface
-    virtual bool AnswerNP_GetEntryPoints(NPError* rv) MOZ_OVERRIDE;
-    virtual bool AnswerNP_Initialize(const uint32_t& aFlags, NPError* rv) MOZ_OVERRIDE;
+    virtual bool AnswerNP_GetEntryPoints(NPError* rv);
+    virtual bool AnswerNP_Initialize(const uint32_t& aFlags, NPError* rv);
 
     virtual PPluginIdentifierChild*
-    AllocPPluginIdentifierChild(const nsCString& aString,
-                                const int32_t& aInt,
-                                const bool& aTemporary) MOZ_OVERRIDE;
+    AllocPPluginIdentifier(const nsCString& aString,
+                           const int32_t& aInt,
+                           const bool& aTemporary);
 
     virtual bool
     RecvPPluginIdentifierConstructor(PPluginIdentifierChild* actor,
                                      const nsCString& aString,
                                      const int32_t& aInt,
-                                     const bool& aTemporary) MOZ_OVERRIDE;
+                                     const bool& aTemporary);
 
     virtual bool
-    DeallocPPluginIdentifierChild(PPluginIdentifierChild* aActor) MOZ_OVERRIDE;
+    DeallocPPluginIdentifier(PPluginIdentifierChild* aActor);
 
     virtual PPluginInstanceChild*
-    AllocPPluginInstanceChild(const nsCString& aMimeType,
-                              const uint16_t& aMode,
-                              const InfallibleTArray<nsCString>& aNames,
-                              const InfallibleTArray<nsCString>& aValues,
-                              NPError* rv) MOZ_OVERRIDE;
+    AllocPPluginInstance(const nsCString& aMimeType,
+                         const uint16_t& aMode,
+                         const InfallibleTArray<nsCString>& aNames,
+                         const InfallibleTArray<nsCString>& aValues,
+                         NPError* rv);
 
     virtual bool
-    DeallocPPluginInstanceChild(PPluginInstanceChild* aActor) MOZ_OVERRIDE;
+    DeallocPPluginInstance(PPluginInstanceChild* aActor);
 
     virtual bool
     AnswerPPluginInstanceConstructor(PPluginInstanceChild* aActor,
@@ -107,52 +116,52 @@ protected:
                                      const uint16_t& aMode,
                                      const InfallibleTArray<nsCString>& aNames,
                                      const InfallibleTArray<nsCString>& aValues,
-                                     NPError* rv) MOZ_OVERRIDE;
+                                     NPError* rv);
     virtual bool
-    AnswerNP_Shutdown(NPError *rv) MOZ_OVERRIDE;
+    AnswerNP_Shutdown(NPError *rv);
 
     virtual bool
     AnswerOptionalFunctionsSupported(bool *aURLRedirectNotify,
                                      bool *aClearSiteData,
-                                     bool *aGetSitesWithData) MOZ_OVERRIDE;
+                                     bool *aGetSitesWithData);
 
     virtual bool
     AnswerNPP_ClearSiteData(const nsCString& aSite,
                             const uint64_t& aFlags,
                             const uint64_t& aMaxAge,
-                            NPError* aResult) MOZ_OVERRIDE;
+                            NPError* aResult);
 
     virtual bool
-    AnswerNPP_GetSitesWithData(InfallibleTArray<nsCString>* aResult) MOZ_OVERRIDE;
+    AnswerNPP_GetSitesWithData(InfallibleTArray<nsCString>* aResult);
 
     virtual bool
     RecvSetAudioSessionData(const nsID& aId,
                             const nsString& aDisplayName,
-                            const nsString& aIconPath) MOZ_OVERRIDE;
+                            const nsString& aIconPath);
 
     virtual bool
-    RecvSetParentHangTimeout(const uint32_t& aSeconds) MOZ_OVERRIDE;
+    RecvSetParentHangTimeout(const uint32_t& aSeconds);
 
     virtual PCrashReporterChild*
-    AllocPCrashReporterChild(mozilla::dom::NativeThreadId* id,
-                             uint32_t* processType) MOZ_OVERRIDE;
+    AllocPCrashReporter(mozilla::dom::NativeThreadId* id,
+                        uint32_t* processType);
     virtual bool
-    DeallocPCrashReporterChild(PCrashReporterChild* actor) MOZ_OVERRIDE;
+    DeallocPCrashReporter(PCrashReporterChild* actor);
     virtual bool
     AnswerPCrashReporterConstructor(PCrashReporterChild* actor,
                                     mozilla::dom::NativeThreadId* id,
-                                    uint32_t* processType) MOZ_OVERRIDE;
+                                    uint32_t* processType);
 
     virtual void
-    ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
+    ActorDestroy(ActorDestroyReason why);
 
     MOZ_NORETURN void QuickExit();
 
     virtual bool
-    RecvProcessNativeEventsInInterruptCall() MOZ_OVERRIDE;
+    RecvProcessNativeEventsInRPCCall() MOZ_OVERRIDE;
 
     virtual bool
-    AnswerGeckoGetProfile(nsCString* aProfile) MOZ_OVERRIDE;
+    AnswerGeckoGetProfile(nsCString* aProfile);
 
 public:
     PluginModuleChild();
@@ -188,27 +197,27 @@ public:
     /**
      * The child implementation of NPN_CreateObject.
      */
-    static NPObject* NPN_CreateObject(NPP aNPP, NPClass* aClass);
+    static NPObject* NP_CALLBACK NPN_CreateObject(NPP aNPP, NPClass* aClass);
     /**
      * The child implementation of NPN_RetainObject.
      */
-    static NPObject* NPN_RetainObject(NPObject* aNPObj);
+    static NPObject* NP_CALLBACK NPN_RetainObject(NPObject* aNPObj);
     /**
      * The child implementation of NPN_ReleaseObject.
      */
-    static void NPN_ReleaseObject(NPObject* aNPObj);
+    static void NP_CALLBACK NPN_ReleaseObject(NPObject* aNPObj);
 
     /**
      * The child implementations of NPIdentifier-related functions.
      */
-    static NPIdentifier NPN_GetStringIdentifier(const NPUTF8* aName);
-    static void NPN_GetStringIdentifiers(const NPUTF8** aNames,
+    static NPIdentifier NP_CALLBACK NPN_GetStringIdentifier(const NPUTF8* aName);
+    static void NP_CALLBACK NPN_GetStringIdentifiers(const NPUTF8** aNames,
                                                      int32_t aNameCount,
                                                      NPIdentifier* aIdentifiers);
-    static NPIdentifier NPN_GetIntIdentifier(int32_t aIntId);
-    static bool NPN_IdentifierIsString(NPIdentifier aIdentifier);
-    static NPUTF8* NPN_UTF8FromIdentifier(NPIdentifier aIdentifier);
-    static int32_t NPN_IntFromIdentifier(NPIdentifier aIdentifier);
+    static NPIdentifier NP_CALLBACK NPN_GetIntIdentifier(int32_t aIntId);
+    static bool NP_CALLBACK NPN_IdentifierIsString(NPIdentifier aIdentifier);
+    static NPUTF8* NP_CALLBACK NPN_UTF8FromIdentifier(NPIdentifier aIdentifier);
+    static int32_t NP_CALLBACK NPN_IntFromIdentifier(NPIdentifier aIdentifier);
 
 #ifdef MOZ_WIDGET_COCOA
     void ProcessNativeEvents();
@@ -375,14 +384,14 @@ private:
     {
         NPObjectData(const NPObject* key)
             : nsPtrHashKey<NPObject>(key)
-            , instance(nullptr)
-            , actor(nullptr)
+            , instance(NULL)
+            , actor(NULL)
         { }
 
-        // never nullptr
+        // never NULL
         PluginInstanceChild* instance;
 
-        // sometimes nullptr (no actor associated with an NPObject)
+        // sometimes NULL (no actor associated with an NPObject)
         PluginScriptableObjectChild* actor;
     };
     /**
@@ -422,7 +431,7 @@ private:
     virtual void ExitedCall() MOZ_OVERRIDE;
 
     // Entered/ExitedCall notifications keep track of whether the plugin has
-    // entered a nested event loop within this interrupt call.
+    // entered a nested event loop within this RPC call.
     struct IncallFrame
     {
         IncallFrame()

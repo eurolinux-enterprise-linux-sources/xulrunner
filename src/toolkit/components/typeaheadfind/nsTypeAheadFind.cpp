@@ -31,6 +31,7 @@
 #include "nsIDOMHTMLElement.h"
 #include "nsIDocument.h"
 #include "nsISelection.h"
+#include "nsILink.h"
 #include "nsTextFragment.h"
 #include "nsIDOMNSEditableElement.h"
 #include "nsIEditor.h"
@@ -43,12 +44,11 @@
 #include "nsLayoutCID.h"
 #include "nsWidgetsCID.h"
 #include "nsIFormControl.h"
-#include "nsNameSpaceManager.h"
+#include "nsINameSpaceManager.h"
 #include "nsIWindowWatcher.h"
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/Link.h"
 #include "nsRange.h"
 
 #include "nsTypeAheadFind.h"
@@ -63,10 +63,10 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTypeAheadFind)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTypeAheadFind)
 
-NS_IMPL_CYCLE_COLLECTION(nsTypeAheadFind, mFoundLink, mFoundEditable,
-                         mCurrentWindow, mStartFindRange, mSearchRange,
-                         mStartPointRange, mEndPointRange, mSoundInterface,
-                         mFind)
+NS_IMPL_CYCLE_COLLECTION_9(nsTypeAheadFind, mFoundLink, mFoundEditable,
+                           mCurrentWindow, mStartFindRange, mSearchRange,
+                           mStartPointRange, mEndPointRange, mSoundInterface,
+                           mFind)
 
 static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
@@ -220,7 +220,7 @@ nsTypeAheadFind::CollapseSelection()
 
 NS_IMETHODIMP
 nsTypeAheadFind::Observe(nsISupports *aSubject, const char *aTopic,
-                         const char16_t *aData)
+                         const PRUnichar *aData)
 {
   if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID))
     return PrefsReset();
@@ -311,15 +311,17 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
       nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
   }
  
-  nsCOMPtr<nsIDocShell> startingDocShell(presContext->GetDocShell());
-  NS_ASSERTION(startingDocShell, "Bug 175321 Crashes with Type Ahead Find [@ nsTypeAheadFind::FindItNow]");
-  if (!startingDocShell)
+  nsCOMPtr<nsISupports> startingContainer = presContext->GetContainer();
+  nsCOMPtr<nsIDocShellTreeItem> treeItem(do_QueryInterface(startingContainer));
+  NS_ASSERTION(treeItem, "Bug 175321 Crashes with Type Ahead Find [@ nsTypeAheadFind::FindItNow]");
+  if (!treeItem)
     return NS_ERROR_FAILURE;
 
   nsCOMPtr<nsIDocShellTreeItem> rootContentTreeItem;
   nsCOMPtr<nsIDocShell> currentDocShell;
+  nsCOMPtr<nsIDocShell> startingDocShell(do_QueryInterface(startingContainer));
 
-  startingDocShell->GetSameTypeRootTreeItem(getter_AddRefs(rootContentTreeItem));
+  treeItem->GetSameTypeRootTreeItem(getter_AddRefs(rootContentTreeItem));
   nsCOMPtr<nsIDocShell> rootContentDocShell =
     do_QueryInterface(rootContentTreeItem);
 
@@ -332,7 +334,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
                                              getter_AddRefs(docShellEnumerator));
 
   // Default: can start at the current document
-  nsCOMPtr<nsISupports> currentContainer =
+  nsCOMPtr<nsISupports> currentContainer = startingContainer =
     do_QueryInterface(rootContentDocShell);
 
   // Iterate up to current shell, if there's more than 1 that we're
@@ -849,7 +851,7 @@ nsTypeAheadFind::RangeStartsInsideLink(nsIDOMRange *aRange,
     // eventually we'll run out of ancestors
 
     if (startContent->IsHTML()) {
-      nsCOMPtr<mozilla::dom::Link> link(do_QueryInterface(startContent));
+      nsCOMPtr<nsILink> link(do_QueryInterface(startContent));
       if (link) {
         // Check to see if inside HTML link
         *aIsInsideLink = startContent->HasAttr(kNameSpaceID_None, hrefAtom);
@@ -917,17 +919,15 @@ nsTypeAheadFind::Find(const nsAString& aSearchString, bool aLinksOnly,
   *aResult = FIND_NOTFOUND;
 
   nsCOMPtr<nsIPresShell> presShell (GetPresShell());
-  if (!presShell) {
+  if (!presShell) {    
     nsCOMPtr<nsIDocShell> ds (do_QueryReferent(mDocShell));
     NS_ENSURE_TRUE(ds, NS_ERROR_FAILURE);
 
     presShell = ds->GetPresShell();
-    NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
-    mPresShell = do_GetWeakReference(presShell);
-  }
-
+    mPresShell = do_GetWeakReference(presShell);    
+  }  
   nsCOMPtr<nsISelection> selection;
-  nsCOMPtr<nsISelectionController> selectionController =
+  nsCOMPtr<nsISelectionController> selectionController = 
     do_QueryReferent(mSelectionController);
   if (!selectionController) {
     GetSelection(presShell, getter_AddRefs(selectionController),
@@ -1222,7 +1222,7 @@ nsTypeAheadFind::GetPresShell()
   nsCOMPtr<nsIPresShell> shell = do_QueryReferent(mPresShell);
   if (shell) {
     nsPresContext *pc = shell->GetPresContext();
-    if (!pc || !pc->GetContainerWeak()) {
+    if (!pc || !nsCOMPtr<nsISupports>(pc->GetContainer())) {
       return nullptr;
     }
   }

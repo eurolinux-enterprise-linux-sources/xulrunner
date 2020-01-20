@@ -6,16 +6,15 @@
 #include "TextAttrs.h"
 
 #include "Accessible-inl.h"
+#include "HyperTextAccessibleWrap.h"
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
 #include "StyleInfo.h"
 
 #include "gfxFont.h"
+#include "gfxUserFontSet.h"
 #include "nsFontMetrics.h"
 #include "nsLayoutUtils.h"
-#include "HyperTextAccessible.h"
-#include "mozilla/AppUnits.h"
-#include "mozilla/gfx/2D.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -79,9 +78,6 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
   if (mOffsetAcc) {
     offsetNode = mOffsetAcc->GetContent();
     offsetElm = nsCoreUtils::GetDOMElementFor(offsetNode);
-    NS_ASSERTION(offsetElm, "No element for offset accessible!");
-    if (!offsetElm)
-      return;
     frame = offsetElm->GetPrimaryFrame();
   }
 
@@ -509,7 +505,7 @@ TextAttrsMgr::FontSizeTextAttr::
   //
   // XXX todo: consider sharing this code with layout module? (bug 474621)
   float px =
-    NSAppUnitsToFloatPixels(aValue, mozilla::AppUnitsPerCSSPixel());
+    NSAppUnitsToFloatPixels(aValue, nsDeviceContext::AppUnitsPerCSSPixel());
   // Each pt is 4/3 of a CSS pixel.
   int pts = NS_lround(px*3/4);
 
@@ -624,7 +620,7 @@ TextAttrsMgr::FontWeightTextAttr::
   if (font->IsSyntheticBold())
     return 700;
 
-#if defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#ifdef MOZ_PANGO
   // On Linux, font->GetStyle()->weight will give the absolute weight requested
   // of the font face. The Linux code uses the gfxFontEntry constructor which
   // doesn't initialize the weight field.
@@ -861,7 +857,6 @@ TextAttrsMgr::TextPosTextAttr::
     case eStyleUnit_Grad:
     case eStyleUnit_Radian:
     case eStyleUnit_Turn:
-    case eStyleUnit_FlexFraction:
     case eStyleUnit_Integer:
     case eStyleUnit_Calc:
       break;

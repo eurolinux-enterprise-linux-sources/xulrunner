@@ -8,6 +8,7 @@
 #include "plstr.h"
 #include "nsXULPrototypeDocument.h"
 #include "nsCSSStyleSheet.h"
+#include "nsIScriptRuntime.h"
 #include "nsIServiceManager.h"
 #include "nsIURI.h"
 
@@ -22,7 +23,7 @@
 #include "nsNetUtil.h"
 #include "nsAppDirectoryServiceDefs.h"
 
-#include "js/TracingAPI.h"
+#include "jsapi.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
@@ -53,7 +54,7 @@ UpdategDisableXULCache()
     
 }
 
-static void
+static int
 DisableXULCacheChangedCallback(const char* aPref, void* aClosure)
 {
     UpdategDisableXULCache();
@@ -62,6 +63,8 @@ DisableXULCacheChangedCallback(const char* aPref, void* aClosure)
     nsXULPrototypeCache* cache = nsXULPrototypeCache::GetInstance();
     if (cache)
         cache->Flush();
+
+    return 0;
 }
 
 //----------------------------------------------------------------------
@@ -80,13 +83,22 @@ nsXULPrototypeCache::~nsXULPrototypeCache()
 }
 
 
-NS_IMPL_ISUPPORTS(nsXULPrototypeCache, nsIObserver)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsXULPrototypeCache, nsIObserver)
 
 /* static */ nsXULPrototypeCache*
 nsXULPrototypeCache::GetInstance()
 {
     if (!sInstance) {
         NS_ADDREF(sInstance = new nsXULPrototypeCache());
+
+        sInstance->mPrototypeTable.Init();
+        sInstance->mStyleSheetTable.Init();
+        sInstance->mScriptTable.Init();
+        sInstance->mXBLDocTable.Init();
+
+        sInstance->mCacheURITable.Init();
+        sInstance->mInputStreamTable.Init();
+        sInstance->mOutputStreamTable.Init();
 
         UpdategDisableXULCache();
 
@@ -111,7 +123,7 @@ nsXULPrototypeCache::GetInstance()
 NS_IMETHODIMP
 nsXULPrototypeCache::Observe(nsISupports* aSubject,
                              const char *aTopic,
-                             const char16_t *aData)
+                             const PRUnichar *aData)
 {
     if (!strcmp(aTopic, "chrome-flush-skin-caches")) {
         FlushSkinFiles();
@@ -185,17 +197,20 @@ nsXULPrototypeCache::PutStyleSheet(nsCSSStyleSheet* aStyleSheet)
 JSScript*
 nsXULPrototypeCache::GetScript(nsIURI* aURI)
 {
-    return mScriptTable.Get(aURI);
+    JSScript* script;
+    if (!mScriptTable.Get(aURI, &script)) {
+        return nullptr;
+    }
+    return script;
 }
 
 nsresult
 nsXULPrototypeCache::PutScript(nsIURI* aURI,
                                JS::Handle<JSScript*> aScriptObject)
 {
-    MOZ_ASSERT(aScriptObject, "Need a non-NULL script");
-
 #ifdef DEBUG
-    if (mScriptTable.Get(aURI)) {
+    JSScript* existingScript;
+    if (mScriptTable.Get(aURI, &existingScript)) {
         nsAutoCString scriptName;
         aURI->GetSpec(scriptName);
         nsAutoCString message("Loaded script ");
@@ -314,6 +329,8 @@ nsXULPrototypeCache::AbortCaching()
     mCacheURITable.Clear();
 }
 
+
+static const char kDisableXULDiskCachePref[] = "nglayout.debug.disable_xul_fastload";
 
 nsresult
 nsXULPrototypeCache::WritePrototype(nsXULPrototypeDocument* aPrototypeDocument)
@@ -459,7 +476,7 @@ nsXULPrototypeCache::HasData(nsIURI* uri, bool* exists)
     return NS_OK;
 }
 
-static void
+static int
 CachePrefChangedCallback(const char* aPref, void* aClosure)
 {
     bool wasEnabled = !gDisableXULDiskCache;
@@ -473,6 +490,7 @@ CachePrefChangedCallback(const char* aPref, void* aClosure)
         if (cache)
             cache->AbortCaching();
     }
+    return 0;
 }
 
 nsresult
@@ -638,10 +656,10 @@ nsXULPrototypeCache::MarkInCCGeneration(uint32_t aGeneration)
 }
 
 static PLDHashOperator
-MarkScriptsInGC(nsIURI* aKey, JS::Heap<JSScript*>& aScript, void* aClosure)
+MarkScriptsInGC(nsIURI* aKey, JSScript*& aScript, void* aClosure)
 {
     JSTracer* trc = static_cast<JSTracer*>(aClosure);
-    JS_CallHeapScriptTracer(trc, &aScript, "nsXULPrototypeCache script");
+    JS_CallScriptTracer(trc, &aScript, "nsXULPrototypeCache script");
     return PL_DHASH_NEXT;
 }
 

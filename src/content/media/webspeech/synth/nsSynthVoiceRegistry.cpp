@@ -67,12 +67,8 @@ namespace dom {
 
 // VoiceData
 
-class VoiceData MOZ_FINAL
+class VoiceData
 {
-private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~VoiceData() {}
-
 public:
   VoiceData(nsISpeechService* aService, const nsAString& aUri,
             const nsAString& aName, const nsAString& aLang, bool aIsLocal)
@@ -81,6 +77,8 @@ public:
     , mName(aName)
     , mLang(aLang)
     , mIsLocal(aIsLocal) {}
+
+  ~VoiceData() {}
 
   NS_INLINE_DECL_REFCOUNTING(VoiceData)
 
@@ -99,11 +97,13 @@ public:
 
 static StaticRefPtr<nsSynthVoiceRegistry> gSynthVoiceRegistry;
 
-NS_IMPL_ISUPPORTS(nsSynthVoiceRegistry, nsISynthVoiceRegistry)
+NS_IMPL_ISUPPORTS1(nsSynthVoiceRegistry, nsISynthVoiceRegistry)
 
 nsSynthVoiceRegistry::nsSynthVoiceRegistry()
   : mSpeechSynthChild(nullptr)
 {
+  mUriVoiceMap.Init();
+
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
 
     mSpeechSynthChild = new SpeechSynthesisChild();

@@ -2,16 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsapi-tests/tests.h"
+#include "tests.h"
 
 BEGIN_TEST(test_BindCallable)
 {
   JS::RootedValue v(cx);
-  EVAL("({ somename : 1717 })", &v);
+  EVAL("({ somename : 1717 })", v.address());
   CHECK(v.isObject());
 
   JS::RootedValue func(cx);
-  EVAL("(function() { return this.somename; })", &func);
+  EVAL("(function() { return this.somename; })", func.address());
   CHECK(func.isObject());
 
   JS::RootedObject funcObj(cx, JSVAL_TO_OBJECT(func));
@@ -20,8 +20,7 @@ BEGIN_TEST(test_BindCallable)
   CHECK(newCallable);
 
   JS::RootedValue retval(cx);
-  JS::RootedValue fun(cx, JS::ObjectValue(*newCallable));
-  bool called = JS_CallFunctionValue(cx, JS::NullPtr(), fun, JS::HandleValueArray::empty(), &retval);
+  bool called = JS_CallFunctionValue(cx, NULL, OBJECT_TO_JSVAL(newCallable), 0, NULL, retval.address());
   CHECK(called);
 
   CHECK(JSVAL_IS_INT(retval));

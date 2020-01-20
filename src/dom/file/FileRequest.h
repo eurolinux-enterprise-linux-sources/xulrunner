@@ -12,10 +12,6 @@
 
 #include "DOMRequest.h"
 
-namespace mozilla {
-class EventChainPreVisitor;
-} // namespace mozilla
-
 BEGIN_FILE_NAMESPACE
 
 class FileHelper;
@@ -28,12 +24,11 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(FileRequest, DOMRequest)
 
   static already_AddRefed<FileRequest>
-  Create(nsPIDOMWindow* aOwner, LockedFile* aLockedFile,
-         bool aWrapAsDOMRequest);
+  Create(nsIDOMWindow* aOwner, LockedFile* aLockedFile, bool aIsFileRequest);
 
   // nsIDOMEventTarget
   virtual nsresult
-  PreHandleEvent(EventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   void
   OnProgress(uint64_t aProgress, uint64_t aProgressMax)
@@ -44,26 +39,14 @@ public:
   nsresult
   NotifyHelperCompleted(FileHelper* aFileHelper);
 
-  // nsWrapperCache
-  virtual JSObject*
-  WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-
-  // WebIDL
-  LockedFile*
-  GetLockedFile() const;
-
-  IMPL_EVENT_HANDLER(progress)
-
 protected:
-  FileRequest(nsPIDOMWindow* aWindow);
+  FileRequest(nsIDOMWindow* aWindow);
   ~FileRequest();
 
   void
   FireProgressEvent(uint64_t aLoaded, uint64_t aTotal);
 
   nsRefPtr<LockedFile> mLockedFile;
-
-  bool mWrapAsDOMRequest;
 };
 
 END_FILE_NAMESPACE

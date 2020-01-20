@@ -5,15 +5,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-include protocol PHttpChannel;
-include protocol PFTPChannel;
-include protocol PRtspChannel;
 include URIParams;
 include InputStreamParams;
+include "mozilla/net/PHttpChannelParams.h";
 
-using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
-using RequestHeaderTuples from "mozilla/net/PHttpChannelParams.h";
-using struct nsHttpAtom from "nsHttp.h";
+using mozilla::void_t;
+using RequestHeaderTuples;
+using nsHttpAtom;
 
 namespace mozilla {
 namespace net {
@@ -34,7 +32,7 @@ struct HttpChannelOpenArgs
   OptionalURIParams           apiRedirectTo;
   uint32_t                    loadFlags;
   RequestHeaderTuples         requestHeaders;
-  nsCString                   requestMethod;
+  nsHttpAtom                  requestMethod;
   OptionalInputStreamParams   uploadStream;
   bool                        uploadStreamHasHeaders;
   uint16_t                    priority;
@@ -47,7 +45,6 @@ struct HttpChannelOpenArgs
   bool                        chooseApplicationCache;
   nsCString                   appCacheClientID;
   bool                        allowSpdy;
-  OptionalFileDescriptorSet   fds;
 };
 
 struct HttpChannelConnectArgs
@@ -82,22 +79,6 @@ union FTPChannelCreationArgs
 {
   FTPChannelOpenArgs;      // For AsyncOpen: the common case.
   FTPChannelConnectArgs;   // Used for redirected-to channels
-};
-
-union ChannelDiverterArgs
-{
-  PHttpChannel;
-  PFTPChannel;
-};
-
-//-----------------------------------------------------------------------------
-// RTSP IPDL structs
-//-----------------------------------------------------------------------------
-
-struct RtspChannelConnectArgs
-{
-  URIParams uri;
-  uint32_t channelId;
 };
 
 } // namespace ipc

@@ -6,32 +6,37 @@
 
 DIRS += ['public']
 
+TEST_DIRS += ['tests/browser']
+
+MODULE = 'toolkitcomps'
+
 EXPORTS.mozilla += [
     'StartupTimeline.h',
 ]
 
-BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 
-UNIFIED_SOURCES += [
-    'nsAppStartup.cpp',
+CPP_SOURCES += [
     'StartupTimeline.cpp',
+    'nsAppStartup.cpp',
 ]
 
-if CONFIG['OS_ARCH'] == 'WINNT':
-    # This file cannot be built in unified mode because of name clashes with Windows headers.
-    SOURCES += [
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'os2':
+    CPP_SOURCES += [
+        'nsUserInfoOS2.cpp',
+    ]
+elif CONFIG['OS_ARCH'] == 'WINNT':
+    CPP_SOURCES += [
         'nsUserInfoWin.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    UNIFIED_SOURCES += [
+    CMMSRCS += [
         'nsUserInfoMac.mm',
     ]
 else:
-    UNIFIED_SOURCES += [
+    CPP_SOURCES += [
         'nsUserInfoUnix.cpp',
     ]
 
-FAIL_ON_WARNINGS = True
+LIBRARY_NAME = 'appstartup_s'
 
-FINAL_LIBRARY = 'toolkitcomps'

@@ -28,7 +28,6 @@
 #include "nsDebug.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/fallible.h"
-#include "mozilla/MemoryReporting.h"
 
 /**
  * The nsDequeFunctor class is used when you want to create
@@ -81,7 +80,7 @@ class NS_COM_GLUE nsDeque {
    */
   void Push(void* aItem) {
     if (!Push(aItem, fallible_t())) {
-      NS_ABORT_OOM(mSize);
+      NS_RUNTIMEABORT("OOM");
     }
   }
 
@@ -94,7 +93,7 @@ class NS_COM_GLUE nsDeque {
    */
   void PushFront(void* aItem) {
     if (!PushFront(aItem, fallible_t())) {
-      NS_ABORT_OOM(mSize);
+      NS_RUNTIMEABORT("OOM");
     }
   }
 
@@ -195,9 +194,6 @@ class NS_COM_GLUE nsDeque {
   const void* FirstThat(nsDequeFunctor& aFunctor) const;
 
   void SetDeallocator(nsDequeFunctor* aDeallocator);
-
-  size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
 protected:
   int32_t         mSize;

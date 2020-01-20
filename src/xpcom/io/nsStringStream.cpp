@@ -35,7 +35,7 @@ class nsStringInputStream MOZ_FINAL : public nsIStringInputStream
                                     , public nsIIPCSerializableInputStream
 {
 public:
-    NS_DECL_THREADSAFE_ISUPPORTS
+    NS_DECL_ISUPPORTS
     NS_DECL_NSIINPUTSTREAM
     NS_DECL_NSISTRINGINPUTSTREAM
     NS_DECL_NSISEEKABLESTREAM
@@ -78,22 +78,22 @@ private:
 
 // This class needs to support threadsafe refcounting since people often
 // allocate a string stream, and then read it from a background thread.
-NS_IMPL_ADDREF(nsStringInputStream)
-NS_IMPL_RELEASE(nsStringInputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsStringInputStream)
+NS_IMPL_THREADSAFE_RELEASE(nsStringInputStream)
 
-NS_IMPL_CLASSINFO(nsStringInputStream, nullptr, nsIClassInfo::THREADSAFE,
+NS_IMPL_CLASSINFO(nsStringInputStream, NULL, nsIClassInfo::THREADSAFE,
                   NS_STRINGINPUTSTREAM_CID)
-NS_IMPL_QUERY_INTERFACE_CI(nsStringInputStream,
-                           nsIStringInputStream,
-                           nsIInputStream,
-                           nsISupportsCString,
-                           nsISeekableStream,
-                           nsIIPCSerializableInputStream)
-NS_IMPL_CI_INTERFACE_GETTER(nsStringInputStream,
+NS_IMPL_QUERY_INTERFACE5_CI(nsStringInputStream,
                             nsIStringInputStream,
                             nsIInputStream,
                             nsISupportsCString,
-                            nsISeekableStream)
+                            nsISeekableStream,
+                            nsIIPCSerializableInputStream)
+NS_IMPL_CI_INTERFACE_GETTER4(nsStringInputStream,
+                             nsIStringInputStream,
+                             nsIInputStream,
+                             nsISupportsCString,
+                             nsISeekableStream)
 
 /////////
 // nsISupportsCString implementation
@@ -112,8 +112,7 @@ nsStringInputStream::GetData(nsACString &data)
     // The stream doesn't have any data when it is closed.  We could fake it
     // and return an empty string here, but it seems better to keep this return
     // value consistent with the behavior of the other 'getter' methods.
-    if (NS_WARN_IF(Closed()))
-        return NS_BASE_STREAM_CLOSED;
+    NS_ENSURE_TRUE(!Closed(), NS_BASE_STREAM_CLOSED);
 
     data.Assign(mData);
     return NS_OK;
@@ -141,8 +140,7 @@ nsStringInputStream::ToString(char **result)
 NS_IMETHODIMP
 nsStringInputStream::SetData(const char *data, int32_t dataLen)
 {
-    if (NS_WARN_IF(!data))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG_POINTER(data);
     mData.Assign(data, dataLen);
     mOffset = 0;
     return NS_OK;
@@ -151,8 +149,7 @@ nsStringInputStream::SetData(const char *data, int32_t dataLen)
 NS_IMETHODIMP
 nsStringInputStream::AdoptData(char *data, int32_t dataLen)
 {
-    if (NS_WARN_IF(!data))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG_POINTER(data);
     mData.Adopt(data, dataLen);
     mOffset = 0;
     return NS_OK;
@@ -161,8 +158,7 @@ nsStringInputStream::AdoptData(char *data, int32_t dataLen)
 NS_IMETHODIMP
 nsStringInputStream::ShareData(const char *data, int32_t dataLen)
 {
-    if (NS_WARN_IF(!data))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG_POINTER(data);
 
     if (dataLen < 0)
         dataLen = strlen(data);
@@ -266,8 +262,8 @@ nsStringInputStream::Seek(int32_t whence, int64_t offset)
         return NS_ERROR_INVALID_ARG;
     }
 
-    if (NS_WARN_IF(newPos < 0) || NS_WARN_IF(newPos > Length()))
-        return NS_ERROR_INVALID_ARG;
+    NS_ENSURE_ARG(newPos >= 0);
+    NS_ENSURE_ARG(newPos <= Length());
 
     mOffset = (uint32_t)newPos;
     return NS_OK;
@@ -294,8 +290,7 @@ nsStringInputStream::SetEOF()
 }
 
 void
-nsStringInputStream::Serialize(InputStreamParams& aParams,
-                               FileDescriptorArray& /* aFDs */)
+nsStringInputStream::Serialize(InputStreamParams& aParams)
 {
     StringInputStreamParams params;
     params.data() = PromiseFlatCString(mData);
@@ -303,8 +298,7 @@ nsStringInputStream::Serialize(InputStreamParams& aParams,
 }
 
 bool
-nsStringInputStream::Deserialize(const InputStreamParams& aParams,
-                                 const FileDescriptorArray& /* aFDs */)
+nsStringInputStream::Deserialize(const InputStreamParams& aParams)
 {
     if (aParams.type() != InputStreamParams::TStringInputStreamParams) {
         NS_ERROR("Received unknown parameters from the other process!");
@@ -392,8 +386,7 @@ nsStringInputStreamConstructor(nsISupports *outer, REFNSIID iid, void **result)
 {
     *result = nullptr;
 
-    if (NS_WARN_IF(outer))
-        return NS_ERROR_NO_AGGREGATION;
+    NS_ENSURE_TRUE(!outer, NS_ERROR_NO_AGGREGATION);
 
     nsStringInputStream *inst = new nsStringInputStream();
     if (!inst)

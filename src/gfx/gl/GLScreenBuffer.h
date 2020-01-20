@@ -16,11 +16,9 @@
 #define SCREEN_BUFFER_H_
 
 #include "SurfaceTypes.h"
-#include "SurfaceStream.h"
 #include "GLContextTypes.h"
 #include "GLDefs.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/Point.h"
+#include "gfxPoint.h"
 
 // Forwards:
 class gfxImageSurface;
@@ -50,18 +48,18 @@ public:
     static DrawBuffer* Create(GLContext* const gl,
                               const SurfaceCaps& caps,
                               const GLFormats& formats,
-                              const gfx::IntSize& size);
+                              const gfxIntSize& size);
 
 protected:
     GLContext* const mGL;
-    const gfx::IntSize mSize;
+    const gfxIntSize mSize;
     const GLuint mFB;
     const GLuint mColorMSRB;
     const GLuint mDepthRB;
     const GLuint mStencilRB;
 
     DrawBuffer(GLContext* gl,
-               const gfx::IntSize& size,
+               const gfxIntSize& size,
                GLuint fb,
                GLuint colorMSRB,
                GLuint depthRB,
@@ -77,7 +75,7 @@ protected:
 public:
     virtual ~DrawBuffer();
 
-    const gfx::IntSize& Size() const {
+    const gfxIntSize& Size() const {
         return mSize;
     }
 
@@ -126,7 +124,7 @@ public:
     // Cannot attach a surf of a different AttachType or Size than before.
     void Attach(SharedSurface_GL* surf);
 
-    const gfx::IntSize& Size() const;
+    const gfxIntSize& Size() const;
 
     GLuint FB() const {
         return mFB;
@@ -150,14 +148,14 @@ protected:
 public:
     // Infallible.
     static GLScreenBuffer* Create(GLContext* gl,
-                                  const gfx::IntSize& size,
+                                  const gfxIntSize& size,
                                   const SurfaceCaps& caps);
 
 protected:
     GLContext* const mGL;         // Owns us.
     SurfaceCaps mCaps;
     SurfaceFactory_GL* mFactory;  // Owned by us.
-    RefPtr<SurfaceStream> mStream;
+    SurfaceStream* mStream;       // Owned by us.
 
     DrawBuffer* mDraw;            // Owned by us.
     ReadBuffer* mRead;            // Owned by us.
@@ -233,7 +231,7 @@ public:
 
     void DeletingFB(GLuint fb);
 
-    const gfx::IntSize& Size() const {
+    const gfxIntSize& Size() const {
         MOZ_ASSERT(mRead);
         MOZ_ASSERT(!mDraw || mDraw->Size() == mRead->Size());
         return mRead->Size();
@@ -245,16 +243,6 @@ public:
     void AssureBlitted();
     void AfterDrawCall();
     void BeforeReadCall();
-
-    /**
-     * Attempts to read pixels from the current bound framebuffer, if
-     * it is backed by a SharedSurface_GL.
-     *
-     * Returns true if the pixel data has been read back, false
-     * otherwise.
-     */
-    bool ReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
-                    GLenum format, GLenum type, GLvoid *pixels);
 
     /* Morph swaps out our SurfaceStream mechanism and replaces it with
      * one best suited to our platform and compositor configuration.
@@ -272,20 +260,19 @@ public:
 
 protected:
     // Returns false on error or inability to resize.
-    bool Swap(const gfx::IntSize& size);
+    bool Swap(const gfxIntSize& size);
 
 public:
-    bool PublishFrame(const gfx::IntSize& size);
+    bool PublishFrame(const gfxIntSize& size);
 
-    bool Resize(const gfx::IntSize& size);
+    bool Resize(const gfxIntSize& size);
 
-    void Readback(SharedSurface_GL* src, gfx::DataSourceSurface* dest);
-    void DeprecatedReadback(SharedSurface_GL* src, gfxImageSurface* dest);
+    void Readback(SharedSurface_GL* src, gfxImageSurface* dest);
 
 protected:
-    void Attach(SharedSurface* surface, const gfx::IntSize& size);
+    void Attach(SharedSurface* surface, const gfxIntSize& size);
 
-    DrawBuffer* CreateDraw(const gfx::IntSize& size);
+    DrawBuffer* CreateDraw(const gfxIntSize& size);
     ReadBuffer* CreateRead(SharedSurface_GL* surf);
 
 public:

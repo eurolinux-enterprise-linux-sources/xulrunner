@@ -20,7 +20,6 @@
 #include "nsIXULOverlayProvider.h"
 #include "IHistory.h"
 #include "nsIXPConnect.h"
-#include "inIDOMUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::services;
@@ -30,14 +29,14 @@ using namespace mozilla::services;
  * eg. gIOService and GetIOService()
  */
 #define MOZ_SERVICE(NAME, TYPE, CONTRACT_ID)                            \
-  static TYPE* g##NAME = nullptr;                                       \
+  static TYPE* g##NAME = nullptr;                                        \
                                                                         \
   already_AddRefed<TYPE>                                                \
   mozilla::services::Get##NAME()                                        \
   {                                                                     \
     if (!g##NAME) {                                                     \
       nsCOMPtr<TYPE> os = do_GetService(CONTRACT_ID);                   \
-      g##NAME = os.forget().take();                            \
+      g##NAME = os.forget().get();                                      \
     }                                                                   \
     nsRefPtr<TYPE> ret = g##NAME;                                       \
     return ret.forget();                                                \

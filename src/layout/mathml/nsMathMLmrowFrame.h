@@ -7,6 +7,7 @@
 #define nsMathMLmrowFrame_h___
 
 #include "mozilla/Attributes.h"
+#include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
 //
@@ -19,7 +20,7 @@ public:
 
   friend nsIFrame* NS_NewMathMLmrowFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-  virtual nsresult
+  NS_IMETHOD
   AttributeChanged(int32_t  aNameSpaceID,
                    nsIAtom* aAttribute,
                    int32_t  aModType) MOZ_OVERRIDE;
@@ -30,18 +31,6 @@ public:
   NS_IMETHOD
   TransmitAutomaticData() MOZ_OVERRIDE {
     return TransmitAutomaticDataForMrowLikeElement();
-  }
-
-  virtual eMathMLFrameType
-  GetMathMLFrameType() MOZ_OVERRIDE; 
-
-  bool
-  IsMrowLike() MOZ_OVERRIDE {
-    // <mrow> elements with a single child are treated identically to the case
-    // where the child wasn't within an mrow, so we pretend the mrow isn't an
-    // mrow in that situation.
-    return mFrames.FirstChild() != mFrames.LastChild() ||
-           !mFrames.FirstChild();
   }
 
 protected:

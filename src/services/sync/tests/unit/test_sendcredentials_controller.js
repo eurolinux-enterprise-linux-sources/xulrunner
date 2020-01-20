@@ -8,13 +8,12 @@ Cu.import("resource://services-sync/util.js");
 Cu.import("resource://testing-common/services/sync/utils.js");
 
 function run_test() {
-  ensureLegacyIdentityManager();
   setBasicCredentials("johndoe", "ilovejane", Utils.generatePassphrase());
   Service.serverURL  = "http://weave.server/";
 
   initTestLogging("Trace");
-  Log.repository.getLogger("Sync.SendCredentialsController").level = Log.Level.Trace;
-  Log.repository.getLogger("Sync.SyncScheduler").level = Log.Level.Trace;
+  Log4Moz.repository.getLogger("Sync.SendCredentialsController").level = Log4Moz.Level.Trace;
+  Log4Moz.repository.getLogger("Sync.SyncScheduler").level = Log4Moz.Level.Trace;
   run_next_test();
 }
 

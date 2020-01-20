@@ -7,9 +7,8 @@
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
 #include "nsIDOMHTMLInputElement.h"
-#include "mozilla/EventStateManager.h"
+#include "nsEventStateManager.h"
 #include "mozilla/LookAndFeel.h"
-#include "nsDeviceContext.h"
 
 using namespace mozilla;
 
@@ -73,7 +72,7 @@ nsFormControlFrame::GetBaseline() const
   return mRect.height - GetUsedBorderAndPadding().bottom;
 }
 
-nsresult
+NS_METHOD
 nsFormControlFrame::Reflow(nsPresContext*          aPresContext,
                            nsHTMLReflowMetrics&     aDesiredSize,
                            const nsHTMLReflowState& aReflowState,
@@ -94,8 +93,8 @@ nsFormControlFrame::Reflow(nsPresContext*          aPresContext,
 
   if (nsLayoutUtils::FontSizeInflationEnabled(aPresContext)) {
     float inflation = nsLayoutUtils::FontSizeInflationFor(this);
-    aDesiredSize.Width() *= inflation;
-    aDesiredSize.Height() *= inflation;
+    aDesiredSize.width *= inflation;
+    aDesiredSize.height *= inflation;
     aDesiredSize.UnionOverflowAreasWithDesiredBounds();
     FinishAndStoreOverflow(&aDesiredSize);
   }
@@ -116,7 +115,7 @@ nsFormControlFrame::RegUnRegAccessKey(nsIFrame * aFrame, bool aDoReg)
   nsIContent* content = aFrame->GetContent();
   content->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey, accessKey);
   if (!accessKey.IsEmpty()) {
-    EventStateManager* stateManager = presContext->EventStateManager();
+    nsEventStateManager *stateManager = presContext->EventStateManager();
     if (aDoReg) {
       stateManager->RegisterAccessKey(content, (uint32_t)accessKey.First());
     } else {
@@ -132,10 +131,10 @@ nsFormControlFrame::SetFocus(bool aOn, bool aRepaint)
 {
 }
 
-nsresult
+NS_METHOD
 nsFormControlFrame::HandleEvent(nsPresContext* aPresContext, 
-                                WidgetGUIEvent* aEvent,
-                                nsEventStatus* aEventStatus)
+                                          nsGUIEvent* aEvent,
+                                          nsEventStatus* aEventStatus)
 {
   // Check for user-input:none style
   const nsStyleUserInterface* uiStyle = StyleUserInterface();

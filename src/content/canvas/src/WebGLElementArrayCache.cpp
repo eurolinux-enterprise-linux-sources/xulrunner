@@ -7,7 +7,6 @@
 
 #include "nsTArray.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/MemoryReporting.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -15,24 +14,6 @@
 #include <algorithm>
 
 namespace mozilla {
-
-static void
-SetUpperBound(uint32_t* out_upperBound, uint32_t newBound)
-{
-  if (!out_upperBound)
-      return;
-
-  *out_upperBound = newBound;
-}
-
-static void
-UpdateUpperBound(uint32_t* out_upperBound, uint32_t newBound)
-{
-  if (!out_upperBound)
-      return;
-
-  *out_upperBound = std::max(*out_upperBound, newBound);
-}
 
 /*
  * WebGLElementArrayCacheTree contains most of the implementation of WebGLElementArrayCache,
@@ -152,7 +133,7 @@ struct WebGLElementArrayCacheTree
 
 private:
   WebGLElementArrayCache& mParent;
-  FallibleTArray<T> mTreeData;
+  nsTArray<T> mTreeData;
   size_t mNumLeaves;
   bool mInvalidated;
   size_t mFirstInvalidatedLeaf;
@@ -245,9 +226,7 @@ public:
     return ((numElements - 1) | sElementsPerLeafMask) + 1;
   }
 
-  bool Validate(T maxAllowed, size_t firstLeaf, size_t lastLeaf,
-                uint32_t* out_upperBound)
-  {
+  bool Validate(T maxAllowed, size_t firstLeaf, size_t lastLeaf) {
     MOZ_ASSERT(!mInvalidated);
 
     size_t firstTreeIndex = TreeIndexForLeaf(firstLeaf);
@@ -260,17 +239,13 @@ public:
 
       // final case where there is only 1 node to validate at the current tree level
       if (lastTreeIndex == firstTreeIndex) {
-        const T& curData = mTreeData[firstTreeIndex];
-        UpdateUpperBound(out_upperBound, curData);
-        return curData <= maxAllowed;
+        return mTreeData[firstTreeIndex] <= maxAllowed;
       }
 
       // if the first node at current tree level is a right node, handle it individually
       // and replace it with its right neighbor, which is a left node
       if (IsRightNode(firstTreeIndex)) {
-        const T& curData = mTreeData[firstTreeIndex];
-        UpdateUpperBound(out_upperBound, curData);
-        if (curData > maxAllowed)
+        if (mTreeData[firstTreeIndex] > maxAllowed)
           return false;
         firstTreeIndex = RightNeighborNode(firstTreeIndex);
       }
@@ -278,9 +253,7 @@ public:
       // if the last node at current tree level is a left node, handle it individually
       // and replace it with its left neighbor, which is a right node
       if (IsLeftNode(lastTreeIndex)) {
-        const T& curData = mTreeData[lastTreeIndex];
-        UpdateUpperBound(out_upperBound, curData);
-        if (curData > maxAllowed)
+        if (mTreeData[lastTreeIndex] > maxAllowed)
           return false;
         lastTreeIndex = LeftNeighborNode(lastTreeIndex);
       }
@@ -333,7 +306,7 @@ public:
 
   void Update();
 
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
+  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
   {
     return aMallocSizeOf(this) + mTreeData.SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -516,18 +489,10 @@ void WebGLElementArrayCache::InvalidateTrees(size_t firstByte, size_t lastByte)
 }
 
 template<typename T>
-bool
-WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
-                                 size_t countElements, uint32_t* out_upperBound)
-{
-  SetUpperBound(out_upperBound, 0);
-
+bool WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement, size_t countElements) {
   // if maxAllowed is >= the max T value, then there is no way that a T index could be invalid
-  uint32_t maxTSize = std::numeric_limits<T>::max();
-  if (maxAllowed >= maxTSize) {
-    SetUpperBound(out_upperBound, maxTSize);
+  if (maxAllowed >= std::numeric_limits<T>::max())
     return true;
-  }
 
   T maxAllowedT(maxAllowed);
 
@@ -549,10 +514,8 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
 
   // fast exit path when the global maximum for the whole element array buffer
   // falls in the allowed range
-  T globalMax = tree->GlobalMaximum();
-  if (globalMax <= maxAllowedT)
+  if (tree->GlobalMaximum() <= maxAllowedT)
   {
-    SetUpperBound(out_upperBound, globalMax);
     return true;
   }
 
@@ -563,18 +526,14 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
   size_t firstElementAdjustmentEnd = std::min(lastElement,
                                             tree->LastElementUnderSameLeaf(firstElement));
   while (firstElement <= firstElementAdjustmentEnd) {
-    const T& curData = elements[firstElement];
-    UpdateUpperBound(out_upperBound, curData);
-    if (curData > maxAllowedT)
+    if (elements[firstElement] > maxAllowedT)
       return false;
     firstElement++;
   }
   size_t lastElementAdjustmentEnd = std::max(firstElement,
                                            tree->FirstElementUnderSameLeaf(lastElement));
   while (lastElement >= lastElementAdjustmentEnd) {
-    const T& curData = elements[lastElement];
-    UpdateUpperBound(out_upperBound, curData);
-    if (curData > maxAllowedT)
+    if (elements[lastElement] > maxAllowedT)
       return false;
     lastElement--;
   }
@@ -586,29 +545,20 @@ WebGLElementArrayCache::Validate(uint32_t maxAllowed, size_t firstElement,
   // general case
   return tree->Validate(maxAllowedT,
                         tree->LeafForElement(firstElement),
-                        tree->LeafForElement(lastElement),
-                        out_upperBound);
+                        tree->LeafForElement(lastElement));
 }
 
-bool
-WebGLElementArrayCache::Validate(GLenum type, uint32_t maxAllowed,
-                                 size_t firstElement, size_t countElements,
-                                 uint32_t* out_upperBound)
-{
+bool WebGLElementArrayCache::Validate(GLenum type, uint32_t maxAllowed, size_t firstElement, size_t countElements) {
   if (type == LOCAL_GL_UNSIGNED_BYTE)
-    return Validate<uint8_t>(maxAllowed, firstElement, countElements, out_upperBound);
+    return Validate<uint8_t>(maxAllowed, firstElement, countElements);
   if (type == LOCAL_GL_UNSIGNED_SHORT)
-    return Validate<uint16_t>(maxAllowed, firstElement, countElements, out_upperBound);
+    return Validate<uint16_t>(maxAllowed, firstElement, countElements);
   if (type == LOCAL_GL_UNSIGNED_INT)
-    return Validate<uint32_t>(maxAllowed, firstElement, countElements, out_upperBound);
-
-  MOZ_ASSERT(false, "Invalid type.");
+    return Validate<uint32_t>(maxAllowed, firstElement, countElements);
   return false;
 }
 
-size_t
-WebGLElementArrayCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-{
+size_t WebGLElementArrayCache::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
   size_t uint8TreeSize  = mUint8Tree  ? mUint8Tree->SizeOfIncludingThis(aMallocSizeOf) : 0;
   size_t uint16TreeSize = mUint16Tree ? mUint16Tree->SizeOfIncludingThis(aMallocSizeOf) : 0;
   size_t uint32TreeSize = mUint32Tree ? mUint32Tree->SizeOfIncludingThis(aMallocSizeOf) : 0;

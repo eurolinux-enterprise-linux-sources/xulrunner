@@ -19,7 +19,7 @@ class ImageLayerD3D9 : public ImageLayer,
 {
 public:
   ImageLayerD3D9(LayerManagerD3D9 *aManager)
-    : ImageLayer(aManager, nullptr)
+    : ImageLayer(aManager, NULL)
     , LayerD3D9(aManager)
   {
     mImplData = static_cast<LayerD3D9*>(this);
@@ -30,10 +30,16 @@ public:
 
   virtual void RenderLayer();
 
-  virtual already_AddRefed<IDirect3DTexture9> GetAsTexture(gfx::IntSize* aSize);
+  virtual already_AddRefed<IDirect3DTexture9> GetAsTexture(gfxIntSize* aSize);
 
 private:
   IDirect3DTexture9* GetTexture(Image *aImage, bool& aHasAlpha);
+};
+
+class ImageD3D9
+{
+public:
+  virtual already_AddRefed<gfxASurface> GetAsSurface() = 0;
 };
 
 

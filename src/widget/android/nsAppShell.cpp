@@ -3,14 +3,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsAppShell.h"
-
+// Make sure the order of included headers
 #include "base/basictypes.h"
+#include "nspr/prtypes.h"
 #include "base/message_loop.h"
 #include "base/task.h"
+
 #include "mozilla/Hal.h"
-#include "nsIScreen.h"
-#include "nsIScreenManager.h"
+#include "nsAppShell.h"
 #include "nsWindow.h"
 #include "nsThreadUtils.h"
 #include "nsICommandLineRunner.h"
@@ -19,6 +19,7 @@
 #include "nsIGeolocationProvider.h"
 #include "nsCacheService.h"
 #include "nsIDOMEventListener.h"
+#include "nsDOMNotifyPaintEvent.h"
 #include "nsIDOMClientRectList.h"
 #include "nsIDOMClientRect.h"
 #include "nsIDOMWakeLockListener.h"
@@ -33,7 +34,6 @@
 #include "prenv.h"
 
 #include "AndroidBridge.h"
-#include "AndroidBridgeUtilities.h"
 #include <android/log.h>
 #include <pthread.h>
 #include <wchar.h>
@@ -68,7 +68,7 @@ nsAutoPtr<mozilla::AndroidGeckoEvent> gLastSizeChange;
 
 nsAppShell *nsAppShell::gAppShell = nullptr;
 
-NS_IMPL_ISUPPORTS_INHERITED(nsAppShell, nsBaseAppShell, nsIObserver)
+NS_IMPL_ISUPPORTS_INHERITED1(nsAppShell, nsBaseAppShell, nsIObserver)
 
 class ThumbnailRunnable : public nsRunnable {
 public:
@@ -82,20 +82,20 @@ public:
         nsCOMPtr<nsIBrowserTab> tab;
         mBrowserApp->GetBrowserTab(mTabId, getter_AddRefs(tab));
         if (!tab) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, false);
             return NS_ERROR_FAILURE;
         }
 
         tab->GetWindow(getter_AddRefs(domWindow));
         if (!domWindow) {
-            mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, false);
+            AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, false);
             return NS_ERROR_FAILURE;
         }
 
         NS_ASSERTION(mPoints.Length() == 1, "Thumbnail event does not have enough coordinates");
 
         nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer);
-        mozilla::widget::android::ThumbnailHelper::SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv));
+        AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv));
         return rv;
     }
 private:
@@ -110,14 +110,14 @@ class WakeLockListener MOZ_FINAL : public nsIDOMMozWakeLockListener {
   NS_DECL_ISUPPORTS;
 
   nsresult Callback(const nsAString& topic, const nsAString& state) {
-    mozilla::widget::android::GeckoAppShell::NotifyWakeLockChanged(topic, state);
+    AndroidBridge::Bridge()->NotifyWakeLockChanged(topic, state);
     return NS_OK;
   }
 };
 
-NS_IMPL_ISUPPORTS(WakeLockListener, nsIDOMMozWakeLockListener)
+NS_IMPL_ISUPPORTS1(WakeLockListener, nsIDOMMozWakeLockListener)
 nsCOMPtr<nsIPowerManagerService> sPowerManagerService = nullptr;
-StaticRefPtr<WakeLockListener> sWakeLockListener;
+nsCOMPtr<nsIDOMMozWakeLockListener> sWakeLockListener = nullptr;
 
 nsAppShell::nsAppShell()
     : mQueueLock("nsAppShell.mQueueLock"),
@@ -162,8 +162,12 @@ nsAppShell::NotifyNativeEvent()
     mQueueCond.Notify();
 }
 
+#define PREFNAME_MATCH_OS  "intl.locale.matchOS"
+#define PREFNAME_UA_LOCALE "general.useragent.locale"
 #define PREFNAME_COALESCE_TOUCHES "dom.event.touch.coalescing.enabled"
 static const char* kObservedPrefs[] = {
+  PREFNAME_MATCH_OS,
+  PREFNAME_UA_LOCALE,
   PREFNAME_COALESCE_TOUCHES,
   nullptr
 };
@@ -176,7 +180,11 @@ nsAppShell::Init()
         gWidgetLog = PR_NewLogModule("Widget");
 #endif
 
+    mObserversHash.Init();
+
     nsresult rv = nsBaseAppShell::Init();
+    AndroidBridge* bridge = AndroidBridge::Bridge();
+
     nsCOMPtr<nsIObserverService> obsServ =
         mozilla::services::GetObserverService();
     if (obsServ) {
@@ -186,7 +194,27 @@ nsAppShell::Init()
     if (sPowerManagerService)
         sPowerManagerService->AddWakeLockListener(sWakeLockListener);
 
+    if (!bridge)
+        return rv;
+
     Preferences::AddStrongObservers(this, kObservedPrefs);
+
+    bool match;
+    rv = Preferences::GetBool(PREFNAME_MATCH_OS, &match);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (match) {
+        bridge->SetSelectedLocale(EmptyString());
+        return NS_OK;
+    }
+
+    nsAutoString locale;
+    rv = Preferences::GetLocalizedString(PREFNAME_UA_LOCALE, &locale);
+    if (NS_FAILED(rv)) {
+        rv = Preferences::GetString(PREFNAME_UA_LOCALE, &locale);
+    }
+
+    bridge->SetSelectedLocale(locale);
     mAllowCoalescingTouches = Preferences::GetBool(PREFNAME_COALESCE_TOUCHES, true);
     return rv;
 }
@@ -194,16 +222,42 @@ nsAppShell::Init()
 NS_IMETHODIMP
 nsAppShell::Observe(nsISupports* aSubject,
                     const char* aTopic,
-                    const char16_t* aData)
+                    const PRUnichar* aData)
 {
     if (!strcmp(aTopic, "xpcom-shutdown")) {
         // We need to ensure no observers stick around after XPCOM shuts down
         // or we'll see crashes, as the app shell outlives XPConnect.
         mObserversHash.Clear();
         return nsBaseAppShell::Observe(aSubject, aTopic, aData);
-    } else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) &&
-               aData &&
-               nsDependentString(aData).Equals(NS_LITERAL_STRING(PREFNAME_COALESCE_TOUCHES))) {
+    } else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) && aData && (
+                   nsDependentString(aData).Equals(
+                       NS_LITERAL_STRING(PREFNAME_UA_LOCALE)) ||
+                   nsDependentString(aData).Equals(
+                       NS_LITERAL_STRING(PREFNAME_COALESCE_TOUCHES)) ||
+                   nsDependentString(aData).Equals(
+                       NS_LITERAL_STRING(PREFNAME_MATCH_OS)))) {
+        AndroidBridge* bridge = AndroidBridge::Bridge();
+        if (!bridge) {
+            return NS_OK;
+        }
+
+        bool match;
+        nsresult rv = Preferences::GetBool(PREFNAME_MATCH_OS, &match);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        if (match) {
+            bridge->SetSelectedLocale(EmptyString());
+            return NS_OK;
+        }
+
+        nsAutoString locale;
+        if (NS_FAILED(Preferences::GetLocalizedString(PREFNAME_UA_LOCALE,
+                                                      &locale))) {
+            locale = Preferences::GetString(PREFNAME_UA_LOCALE);
+        }
+
+        bridge->SetSelectedLocale(locale);
+
         mAllowCoalescingTouches = Preferences::GetBool(PREFNAME_COALESCE_TOUCHES, true);
         return NS_OK;
     }
@@ -258,25 +312,19 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         NativeEventCallback();
         break;
 
-    case AndroidGeckoEvent::SENSOR_EVENT: {
+    case AndroidGeckoEvent::SENSOR_EVENT:
+      {
         InfallibleTArray<float> values;
         mozilla::hal::SensorType type = (mozilla::hal::SensorType) curEvent->Flags();
 
         switch (type) {
-          // Bug 938035, transfer HAL data for orientation sensor to meet w3c
-          // spec, ex: HAL report alpha=90 means East but alpha=90 means West
-          // in w3c spec
           case hal::SENSOR_ORIENTATION:
-            values.AppendElement(360 -curEvent->X());
-            values.AppendElement(-curEvent->Y());
-            values.AppendElement(-curEvent->Z());
-            break;
           case hal::SENSOR_LINEAR_ACCELERATION:
           case hal::SENSOR_ACCELERATION:
           case hal::SENSOR_GYROSCOPE:
           case hal::SENSOR_PROXIMITY:
             values.AppendElement(curEvent->X());
-            values.AppendElement(curEvent->Y());
+            values.AppendElement(curEvent->Y()); 
             values.AppendElement(curEvent->Z());
             break;
 
@@ -359,16 +407,21 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         if (!mBrowserApp)
             break;
 
+        AndroidBridge* bridge = AndroidBridge::Bridge();
+        if (!bridge)
+            break;
+
         int32_t tabId = curEvent->MetaState();
         const nsTArray<nsIntPoint>& points = curEvent->Points();
         RefCountedJavaObject* buffer = curEvent->ByteBuffer();
-        nsRefPtr<ThumbnailRunnable> sr = new ThumbnailRunnable(mBrowserApp, tabId, points, buffer);
+        nsCOMPtr<ThumbnailRunnable> sr = new ThumbnailRunnable(mBrowserApp, tabId, points, buffer);
         MessageLoop::current()->PostIdleTask(FROM_HERE, NewRunnableMethod(sr.get(), &ThumbnailRunnable::Run));
         break;
     }
 
     case AndroidGeckoEvent::VIEWPORT:
     case AndroidGeckoEvent::BROADCAST: {
+
         if (curEvent->Characters().Length() == 0)
             break;
 
@@ -379,57 +432,6 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         const nsPromiseFlatString& data = PromiseFlatString(curEvent->CharactersExtra());
 
         obsServ->NotifyObservers(nullptr, topic.get(), data.get());
-        break;
-    }
-
-    case AndroidGeckoEvent::TELEMETRY_UI_SESSION_STOP: {
-        if (curEvent->Characters().Length() == 0)
-            break;
-
-        nsCOMPtr<nsIUITelemetryObserver> obs;
-        mBrowserApp->GetUITelemetryObserver(getter_AddRefs(obs));
-        if (!obs)
-            break;
-
-        obs->StopSession(
-                nsString(curEvent->Characters()).get(),
-                nsString(curEvent->CharactersExtra()).get(),
-                curEvent->Time()
-                );
-        break;
-    }
-
-    case AndroidGeckoEvent::TELEMETRY_UI_SESSION_START: {
-        if (curEvent->Characters().Length() == 0)
-            break;
-
-        nsCOMPtr<nsIUITelemetryObserver> obs;
-        mBrowserApp->GetUITelemetryObserver(getter_AddRefs(obs));
-        if (!obs)
-            break;
-
-        obs->StartSession(
-                nsString(curEvent->Characters()).get(),
-                curEvent->Time()
-                );
-        break;
-    }
-
-    case AndroidGeckoEvent::TELEMETRY_UI_EVENT: {
-        if (curEvent->Data().Length() == 0)
-            break;
-
-        nsCOMPtr<nsIUITelemetryObserver> obs;
-        mBrowserApp->GetUITelemetryObserver(getter_AddRefs(obs));
-        if (!obs)
-            break;
-
-        obs->AddEvent(
-                nsString(curEvent->Data()).get(),
-                nsString(curEvent->Characters()).get(),
-                curEvent->Time(),
-                nsString(curEvent->CharactersExtra()).get()
-                );
         break;
     }
 
@@ -486,9 +488,8 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
     }
 
     case AndroidGeckoEvent::NETWORK_CHANGED: {
-        hal::NotifyNetworkChange(hal::NetworkInformation(curEvent->ConnectionType(),
-                                                         curEvent->IsWifi(),
-                                                         curEvent->DHCPGateway()));
+        hal::NotifyNetworkChange(hal::NetworkInformation(curEvent->Bandwidth(),
+                                                         curEvent->CanBeMetered()));
         break;
     }
 
@@ -541,27 +542,6 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         AddObserver(curEvent->Characters(), curEvent->Observer());
         break;
 
-    case AndroidGeckoEvent::PREFERENCES_GET:
-    case AndroidGeckoEvent::PREFERENCES_OBSERVE: {
-        const nsTArray<nsString> &prefNames = curEvent->PrefNames();
-        size_t count = prefNames.Length();
-        nsAutoArrayPtr<const char16_t*> prefNamePtrs(new const char16_t*[count]);
-        for (size_t i = 0; i < count; ++i) {
-            prefNamePtrs[i] = prefNames[i].get();
-        }
-
-        if (curEvent->Type() == AndroidGeckoEvent::PREFERENCES_GET) {
-            mBrowserApp->GetPreferences(curEvent->RequestId(), prefNamePtrs, count);
-        } else {
-            mBrowserApp->ObservePreferences(curEvent->RequestId(), prefNamePtrs, count);
-        }
-        break;
-    }
-
-    case AndroidGeckoEvent::PREFERENCES_REMOVE_OBSERVERS:
-        mBrowserApp->RemovePreferenceObservers(curEvent->RequestId());
-        break;
-
     case AndroidGeckoEvent::LOW_MEMORY:
         // TODO hook in memory-reduction stuff for different levels here
         if (curEvent->MetaState() >= AndroidGeckoEvent::MEMORY_PRESSURE_MEDIUM) {
@@ -569,7 +549,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
             if (os) {
                 os->NotifyObservers(nullptr,
                                     "memory-pressure",
-                                    MOZ_UTF16("low-memory"));
+                                    NS_LITERAL_STRING("low-memory").get());
             }
         }
         break;
@@ -585,11 +565,6 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         break;
     }
 
-    case AndroidGeckoEvent::TELEMETRY_HISTOGRAM_ADD:
-        Telemetry::Accumulate(NS_ConvertUTF16toUTF8(curEvent->Characters()).get(),
-                              curEvent->Count());
-        break;
-
     case AndroidGeckoEvent::NOOP:
         break;
 
@@ -599,7 +574,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
     }
 
     if (curEvent->AckNeeded()) {
-        mozilla::widget::android::GeckoAppShell::AcknowledgeEvent();
+        AndroidBridge::Bridge()->AcknowledgeEvent();
     }
 
     EVLOG("nsAppShell: -- done event %p %d", (void*)curEvent.get(), curEvent->Type());

@@ -5,8 +5,10 @@
 
 #include "ipc/IPCMessageUtils.h"
 
+#include "nsAlgorithm.h"
 #include "nsBufferedStreams.h"
 #include "nsStreamUtils.h"
+#include "nsCRT.h"
 #include "nsNetCID.h"
 #include "nsIClassInfoImpl.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -59,7 +61,7 @@ nsBufferedStream::~nsBufferedStream()
     Close();
 }
 
-NS_IMPL_ISUPPORTS(nsBufferedStream, nsISeekableStream)
+NS_IMPL_THREADSAFE_ISUPPORTS1(nsBufferedStream, nsISeekableStream)
 
 nsresult
 nsBufferedStream::Init(nsISupports* stream, uint32_t bufferSize)
@@ -96,7 +98,7 @@ nsBufferedStream::Close()
         if (!tfp) {
             tfp = fopen("/tmp/bufstats", "w");
             if (tfp)
-                setvbuf(tfp, nullptr, _IOLBF, 0);
+                setvbuf(tfp, NULL, _IOLBF, 0);
         }
         if (tfp) {
             fprintf(tfp, "seeks within buffer:    %u\n",
@@ -247,7 +249,7 @@ nsBufferedStream::SetEOF()
 NS_IMPL_ADDREF_INHERITED(nsBufferedInputStream, nsBufferedStream)
 NS_IMPL_RELEASE_INHERITED(nsBufferedInputStream, nsBufferedStream)
 
-NS_IMPL_CLASSINFO(nsBufferedInputStream, nullptr, nsIClassInfo::THREADSAFE,
+NS_IMPL_CLASSINFO(nsBufferedInputStream, NULL, nsIClassInfo::THREADSAFE,
                   NS_BUFFEREDINPUTSTREAM_CID)
 
 NS_INTERFACE_MAP_BEGIN(nsBufferedInputStream)
@@ -258,11 +260,11 @@ NS_INTERFACE_MAP_BEGIN(nsBufferedInputStream)
     NS_IMPL_QUERY_CLASSINFO(nsBufferedInputStream)
 NS_INTERFACE_MAP_END_INHERITING(nsBufferedStream)
 
-NS_IMPL_CI_INTERFACE_GETTER(nsBufferedInputStream,
-                            nsIInputStream,
-                            nsIBufferedInputStream,
-                            nsISeekableStream,
-                            nsIStreamBufferAccess)
+NS_IMPL_CI_INTERFACE_GETTER4(nsBufferedInputStream,
+                             nsIInputStream,
+                             nsIBufferedInputStream,
+                             nsISeekableStream,
+                             nsIStreamBufferAccess)
 
 nsresult
 nsBufferedInputStream::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
@@ -486,17 +488,20 @@ nsBufferedInputStream::GetUnbufferedStream(nsISupports* *aStream)
 }
 
 void
-nsBufferedInputStream::Serialize(InputStreamParams& aParams,
-                                 FileDescriptorArray& aFileDescriptors)
+nsBufferedInputStream::Serialize(InputStreamParams& aParams)
 {
     BufferedInputStreamParams params;
 
     if (mStream) {
-        nsCOMPtr<nsIInputStream> stream = do_QueryInterface(mStream);
-        MOZ_ASSERT(stream);
+        nsCOMPtr<nsIIPCSerializableInputStream> stream =
+            do_QueryInterface(mStream);
+        NS_ASSERTION(stream, "Wrapped stream is not serializable!");
 
         InputStreamParams wrappedParams;
-        SerializeInputStream(stream, wrappedParams, aFileDescriptors);
+        stream->Serialize(wrappedParams);
+
+        NS_ASSERTION(wrappedParams.type() != InputStreamParams::T__None,
+                     "Wrapped stream failed to serialize!");
 
         params.optionalStream() = wrappedParams;
     }
@@ -510,8 +515,7 @@ nsBufferedInputStream::Serialize(InputStreamParams& aParams,
 }
 
 bool
-nsBufferedInputStream::Deserialize(const InputStreamParams& aParams,
-                                   const FileDescriptorArray& aFileDescriptors)
+nsBufferedInputStream::Deserialize(const InputStreamParams& aParams)
 {
     if (aParams.type() != InputStreamParams::TBufferedInputStreamParams) {
         NS_ERROR("Received unknown parameters from the other process!");
@@ -524,8 +528,7 @@ nsBufferedInputStream::Deserialize(const InputStreamParams& aParams,
 
     nsCOMPtr<nsIInputStream> stream;
     if (wrappedParams.type() == OptionalInputStreamParams::TInputStreamParams) {
-        stream = DeserializeInputStream(wrappedParams.get_InputStreamParams(),
-                                        aFileDescriptors);
+        stream = DeserializeInputStream(wrappedParams.get_InputStreamParams());
         if (!stream) {
             NS_WARNING("Failed to deserialize wrapped stream!");
             return false;
@@ -628,7 +631,7 @@ nsBufferedOutputStream::Flush()
     nsresult rv;
     uint32_t amt;
     if (!mStream) {
-        // Stream already cancelled/flushed; probably because of previous error.
+        // Stream already cancelled/flushed; probably because of error.
         return NS_OK;
     }
     rv = Sink()->Write(mBuffer, mFillPoint, &amt);

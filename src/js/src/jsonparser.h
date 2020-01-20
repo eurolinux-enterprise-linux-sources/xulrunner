@@ -9,7 +9,8 @@
 
 #include "mozilla/Attributes.h"
 
-#include "ds/IdValuePair.h"
+#include "jsapi.h"
+
 #include "vm/String.h"
 
 namespace js {
@@ -23,8 +24,8 @@ class MOZ_STACK_CLASS JSONParser : private AutoGCRooter
     /* Data members */
 
     JSContext * const cx;
-    JS::ConstTwoByteChars current;
-    const JS::ConstTwoByteChars begin, end;
+    StableCharPtr current;
+    const StableCharPtr end;
 
     Value v;
 
@@ -103,16 +104,17 @@ class MOZ_STACK_CLASS JSONParser : private AutoGCRooter
     Token lastToken;
 #endif
 
+    JSONParser *thisDuringConstruction() { return this; }
+
   public:
     /* Public API */
 
     /* Create a parser for the provided JSON data. */
-    JSONParser(JSContext *cx, JS::ConstTwoByteChars data, size_t length,
+    JSONParser(JSContext *cx, JS::StableCharPtr data, size_t length,
                ErrorHandling errorHandling = RaiseError)
       : AutoGCRooter(cx, JSONPARSER),
         cx(cx),
         current(data),
-        begin(data),
         end((data + length).get(), data.get(), length),
         errorHandling(errorHandling),
         stack(cx),
@@ -200,8 +202,6 @@ class MOZ_STACK_CLASS JSONParser : private AutoGCRooter
     JSObject *createFinishedObject(PropertyVector &properties);
     bool finishObject(MutableHandleValue vp, PropertyVector &properties);
     bool finishArray(MutableHandleValue vp, ElementVector &elements);
-
-    void getTextPosition(uint32_t *column, uint32_t *line);
 
     friend void AutoGCRooter::trace(JSTracer *trc);
     void trace(JSTracer *trc);

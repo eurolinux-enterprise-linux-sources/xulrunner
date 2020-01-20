@@ -4,12 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/HangMonitor.h"
-#include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/ProcessedStack.h"
-#include "mozilla/Atomics.h"
 #include "nsXULAppAPI.h"
 #include "nsThreadUtils.h"
 #include "nsStackWalk.h"
@@ -36,7 +34,11 @@ volatile bool gDebugDisableHangMonitor = false;
 
 const char kHangMonitorPrefName[] = "hangmonitor.timeout";
 
+#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+const char kTelemetryPrefName[] = "toolkit.telemetry.enabledPreRelease";
+#else
 const char kTelemetryPrefName[] = "toolkit.telemetry.enabled";
+#endif
 
 // Monitor protects gShutdown and gTimeout, but not gTimestamp which rely on
 // being atomically set by the processor; synchronization doesn't really matter
@@ -53,11 +55,11 @@ bool gShutdown;
 
 // The timestamp of the last event notification, or PR_INTERVAL_NO_WAIT if
 // we're currently not processing events.
-Atomic<PRIntervalTime> gTimestamp(PR_INTERVAL_NO_WAIT);
+volatile PRIntervalTime gTimestamp = PR_INTERVAL_NO_WAIT;
 
 #ifdef REPORT_CHROME_HANGS
 // Main thread ID used in reporting chrome hangs under Windows
-static HANDLE winMainThreadHandle = nullptr;
+static HANDLE winMainThreadHandle = NULL;
 
 // Default timeout for reporting chrome hangs to Telemetry (5 seconds)
 static const int32_t DEFAULT_CHROME_HANG_INTERVAL = 5;
@@ -67,7 +69,7 @@ static const int32_t MAX_CALL_STACK_PCS = 400;
 #endif
 
 // PrefChangedFunc
-void
+int
 PrefChanged(const char*, void*)
 {
   int32_t newval = Preferences::GetInt(kHangMonitorPrefName);
@@ -85,6 +87,8 @@ PrefChanged(const char*, void*)
     gTimeout = newval;
     lock.Notify();
   }
+
+  return 0;
 }
 
 void
@@ -122,9 +126,7 @@ ChromeStackWalker(void *aPC, void *aSP, void *aClosure)
 }
 
 static void
-GetChromeHangReport(Telemetry::ProcessedStack &aStack,
-                    int32_t &aSystemUptime,
-                    int32_t &aFirefoxUptime)
+GetChromeHangReport(Telemetry::ProcessedStack &aStack)
 {
   MOZ_ASSERT(winMainThreadHandle);
 
@@ -142,19 +144,6 @@ GetChromeHangReport(Telemetry::ProcessedStack &aStack,
   if (ret == -1)
     return;
   aStack = Telemetry::GetStackAndModules(rawStack);
-
-  // Record system uptime (in minutes) at the time of the hang
-  aSystemUptime = ((GetTickCount() / 1000) - (gTimeout * 2)) / 60;
-
-  // Record Firefox uptime (in minutes) at the time of the hang
-  bool error;
-  TimeStamp processCreation = TimeStamp::ProcessCreation(error);
-  if (!error) {
-    TimeDuration td = TimeStamp::Now() - processCreation;
-    aFirefoxUptime = (static_cast<int32_t>(td.ToSeconds()) - (gTimeout * 2)) / 60;
-  } else {
-    aFirefoxUptime = -1;
-  }
 }
 #endif
 
@@ -173,8 +162,6 @@ ThreadMain(void*)
 
 #ifdef REPORT_CHROME_HANGS
   Telemetry::ProcessedStack stack;
-  int32_t systemUptime = -1;
-  int32_t firefoxUptime = -1;
 #endif
 
   while (true) {
@@ -197,31 +184,24 @@ ThreadMain(void*)
         timestamp == lastTimestamp &&
         gTimeout > 0) {
       ++waitCount;
-#ifdef REPORT_CHROME_HANGS
-      // Capture the chrome-hang stack + Firefox & system uptimes after
-      // the minimum hang duration has been reached (not when the hang ends)
-      if (waitCount == 2) {
-        GetChromeHangReport(stack, systemUptime, firefoxUptime);
-      }
-#else
-      // This is the crash-on-hang feature.
-      // See bug 867313 for the quirk in the waitCount comparison
       if (waitCount >= 2) {
+#ifdef REPORT_CHROME_HANGS
+        GetChromeHangReport(stack);
+#else
         int32_t delay =
           int32_t(PR_IntervalToSeconds(now - timestamp));
         if (delay >= gTimeout) {
           MonitorAutoUnlock unlock(*gMonitor);
           Crash();
         }
-      }
 #endif
+      }
     }
     else {
 #ifdef REPORT_CHROME_HANGS
       if (waitCount >= 2) {
         uint32_t hangDuration = PR_IntervalToSeconds(now - lastTimestamp);
-        Telemetry::RecordChromeHang(hangDuration, stack,
-                                    systemUptime, firefoxUptime);
+        Telemetry::RecordChromeHang(hangDuration, stack);
         stack.Clear();
       }
 #endif
@@ -252,11 +232,11 @@ Startup()
   MOZ_ASSERT(!gMonitor, "Hang monitor already initialized");
   gMonitor = new Monitor("HangMonitor");
 
-  Preferences::RegisterCallback(PrefChanged, kHangMonitorPrefName, nullptr);
-  PrefChanged(nullptr, nullptr);
+  Preferences::RegisterCallback(PrefChanged, kHangMonitorPrefName, NULL);
+  PrefChanged(NULL, NULL);
 
 #ifdef REPORT_CHROME_HANGS
-  Preferences::RegisterCallback(PrefChanged, kTelemetryPrefName, nullptr);
+  Preferences::RegisterCallback(PrefChanged, kTelemetryPrefName, NULL);
   winMainThreadHandle =
     OpenThread(THREAD_ALL_ACCESS, FALSE, GetCurrentThreadId());
   if (!winMainThreadHandle)
@@ -271,7 +251,7 @@ Startup()
 
   gThread = PR_CreateThread(PR_USER_THREAD,
                             ThreadMain,
-                            nullptr, PR_PRIORITY_LOW, PR_GLOBAL_THREAD,
+                            NULL, PR_PRIORITY_LOW, PR_GLOBAL_THREAD,
                             PR_JOINABLE_THREAD, 0);
 }
 
@@ -292,11 +272,11 @@ Shutdown()
   // thread creation could theoretically fail
   if (gThread) {
     PR_JoinThread(gThread);
-    gThread = nullptr;
+    gThread = NULL;
   }
 
   delete gMonitor;
-  gMonitor = nullptr;
+  gMonitor = NULL;
 }
 
 static bool
@@ -309,11 +289,11 @@ IsUIMessageWaiting()
   #define NS_WM_IMELAST  WM_IME_KEYUP
   BOOL haveUIMessageWaiting = FALSE;
   MSG msg;
-  haveUIMessageWaiting |= ::PeekMessageW(&msg, nullptr, WM_KEYFIRST, 
+  haveUIMessageWaiting |= ::PeekMessageW(&msg, NULL, WM_KEYFIRST, 
                                          WM_IME_KEYLAST, PM_NOREMOVE);
-  haveUIMessageWaiting |= ::PeekMessageW(&msg, nullptr, NS_WM_IMEFIRST,
+  haveUIMessageWaiting |= ::PeekMessageW(&msg, NULL, NS_WM_IMEFIRST,
                                          NS_WM_IMELAST, PM_NOREMOVE);
-  haveUIMessageWaiting |= ::PeekMessageW(&msg, nullptr, WM_MOUSEFIRST,
+  haveUIMessageWaiting |= ::PeekMessageW(&msg, NULL, WM_MOUSEFIRST,
                                          WM_MOUSELAST, PM_NOREMOVE);
   return haveUIMessageWaiting;
 #endif
@@ -365,10 +345,6 @@ NotifyActivity(ActivityType activityType)
     }
     cumulativeUILagMS = 0;
   }
-
-  if (gThread && !gShutdown) {
-    mozilla::BackgroundHangMonitor().NotifyActivity();
-  }
 }
 
 void
@@ -379,10 +355,6 @@ Suspend()
 
   // Because gTimestamp changes this resets the wait count.
   gTimestamp = PR_INTERVAL_NO_WAIT;
-
-  if (gThread && !gShutdown) {
-    mozilla::BackgroundHangMonitor().NotifyWait();
-  }
 }
 
 } } // namespace mozilla::HangMonitor

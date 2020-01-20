@@ -10,7 +10,7 @@
  * prefix, namespace, and localName.
  */
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 #include "mozilla/Likely.h"
 
 #include "nscore.h"
@@ -38,6 +38,7 @@ nsNodeInfo::~nsNodeInfo()
   NS_RELEASE(mInner.mName);
   NS_IF_RELEASE(mInner.mPrefix);
   NS_IF_RELEASE(mInner.mExtraName);
+  NS_RELEASE(mOwnerManager);
 }
 
 
@@ -53,7 +54,7 @@ nsNodeInfo::nsNodeInfo(nsIAtom *aName, nsIAtom *aPrefix, int32_t aNamespaceID,
   NS_IF_ADDREF(mInner.mPrefix = aPrefix);
   mInner.mNamespaceID = aNamespaceID;
   mInner.mNodeType = aNodeType;
-  mOwnerManager = aOwnerManager;
+  NS_ADDREF(mOwnerManager = aOwnerManager);
   NS_IF_ADDREF(mInner.mExtraName = aExtraName);
 
   mDocument = aOwnerManager->GetDocument();
@@ -110,8 +111,6 @@ nsNodeInfo::nsNodeInfo(nsIAtom *aName, nsIAtom *aPrefix, int32_t aNamespaceID,
 
 // nsISupports
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsNodeInfo)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsNodeInfo)
 
 static const char* kNSURIs[] = {
@@ -146,7 +145,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsNodeInfo)
     NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsNodeInfo, tmp->mRefCnt.get())
   }
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwnerManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mOwnerManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsNodeInfo)
@@ -165,7 +164,7 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsNodeInfo)
 NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(nsNodeInfo, LastRelease())
 NS_INTERFACE_TABLE_HEAD(nsNodeInfo)
-  NS_INTERFACE_TABLE(nsNodeInfo, nsINodeInfo)
+  NS_INTERFACE_TABLE1(nsNodeInfo, nsINodeInfo)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsNodeInfo)
 NS_INTERFACE_MAP_END
 

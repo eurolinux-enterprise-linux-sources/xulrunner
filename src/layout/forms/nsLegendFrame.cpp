@@ -5,6 +5,7 @@
 
 #include "nsLegendFrame.h"
 #include "nsIContent.h"
+#include "nsIAtom.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
 #include "nsHTMLParts.h"
@@ -47,7 +48,7 @@ NS_QUERYFRAME_HEAD(nsLegendFrame)
   NS_QUERYFRAME_ENTRY(nsLegendFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
-nsresult 
+NS_IMETHODIMP 
 nsLegendFrame::Reflow(nsPresContext*          aPresContext,
                      nsHTMLReflowMetrics&     aDesiredSize,
                      const nsHTMLReflowState& aReflowState,
@@ -66,9 +67,11 @@ nsLegendFrame::Reflow(nsPresContext*          aPresContext,
 int32_t nsLegendFrame::GetAlign()
 {
   int32_t intValue = NS_STYLE_TEXT_ALIGN_LEFT;
+#ifdef IBMBIDI
   if (mParent && NS_STYLE_DIRECTION_RTL == mParent->StyleVisibility()->mDirection) {
     intValue = NS_STYLE_TEXT_ALIGN_RIGHT;
   }
+#endif // IBMBIDI
 
   nsGenericHTMLElement *content = nsGenericHTMLElement::FromContent(mContent);
 
@@ -81,8 +84,8 @@ int32_t nsLegendFrame::GetAlign()
   return intValue;
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsLegendFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Legend"), aResult);

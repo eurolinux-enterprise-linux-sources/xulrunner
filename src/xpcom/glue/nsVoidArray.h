@@ -9,8 +9,7 @@
 
 #include "nsDebug.h"
 
-#include "mozilla/MemoryReporting.h"
-#include <stdint.h>
+#include "mozilla/StandardInteger.h"
 
 // Comparator callback function for sorting array values.
 typedef int (* nsVoidArrayComparatorFunc)
@@ -22,7 +21,7 @@ typedef bool (* nsVoidArrayEnumFuncConst)(const void* aElement, void *aData);
 
 // SizeOfExcludingThis callback function.
 typedef size_t (* nsVoidArraySizeOfElementIncludingThisFunc)(const void* aElement,
-                                                             mozilla::MallocSizeOf aMallocSizeOf,
+                                                             nsMallocSizeOfFun aMallocSizeOf,
                                                              void *aData);
 
 /// A basic zero-based array of void*'s that manages its own memory
@@ -108,11 +107,11 @@ public:
   bool EnumerateBackwards(nsVoidArrayEnumFunc aFunc, void* aData);
 
   // Measures the size of the array's element storage, and if
-  // |aSizeOfElementIncludingThis| is non-nullptr, measures the size of things
+  // |aSizeOfElementIncludingThis| is non-NULL, measures the size of things
   // pointed to by elements.
   size_t SizeOfExcludingThis(
            nsVoidArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-           mozilla::MallocSizeOf aMallocSizeOf, void* aData = nullptr) const;
+           nsMallocSizeOfFun aMallocSizeOf, void* aData = NULL) const;
 
 protected:
   bool GrowArrayBy(int32_t aGrowBy);

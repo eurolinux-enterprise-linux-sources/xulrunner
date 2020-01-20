@@ -101,9 +101,9 @@ InitGlobals()
     return false;
   }
 
-  cs.forget(&sConsoleService);
-  sf.forget(&sScriptErrorFactory);
-  sb.forget(&sStringBundle);
+  sConsoleService = cs.forget().get();
+  sScriptErrorFactory = sf.forget().get();
+  sStringBundle = sb.forget().get();
 
   return true;
 }
@@ -217,14 +217,6 @@ ErrorReporter::OutputError()
 }
 
 void
-ErrorReporter::OutputError(uint32_t aLineNumber, uint32_t aLineOffset)
-{
-  mErrorLineNumber = aLineNumber;
-  mErrorColNumber = aLineOffset;
-  OutputError();
-}
-
-void
 ErrorReporter::ClearError()
 {
   mError.Truncate();
@@ -271,7 +263,7 @@ ErrorReporter::ReportUnexpected(const char *aMessage,
 
   nsAutoString qparam;
   nsStyleUtil::AppendEscapedCSSIdent(aParam, qparam);
-  const char16_t *params[1] = { qparam.get() };
+  const PRUnichar *params[1] = { qparam.get() };
 
   nsAutoString str;
   sStringBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),
@@ -288,7 +280,7 @@ ErrorReporter::ReportUnexpected(const char *aMessage,
 
   nsAutoString tokenString;
   aToken.AppendToString(tokenString);
-  const char16_t *params[1] = { tokenString.get() };
+  const PRUnichar *params[1] = { tokenString.get() };
 
   nsAutoString str;
   sStringBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),
@@ -300,14 +292,14 @@ ErrorReporter::ReportUnexpected(const char *aMessage,
 void
 ErrorReporter::ReportUnexpected(const char *aMessage,
                                 const nsCSSToken &aToken,
-                                char16_t aChar)
+                                PRUnichar aChar)
 {
   if (!ShouldReportErrors()) return;
 
   nsAutoString tokenString;
   aToken.AppendToString(tokenString);
-  const char16_t charStr[2] = { aChar, 0 };
-  const char16_t *params[2] = { tokenString.get(), charStr };
+  const PRUnichar charStr[2] = { aChar, 0 };
+  const PRUnichar *params[2] = { tokenString.get(), charStr };
 
   nsAutoString str;
   sStringBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),
@@ -324,27 +316,27 @@ ErrorReporter::ReportUnexpectedEOF(const char *aMessage)
   nsAutoString innerStr;
   sStringBundle->GetStringFromName(NS_ConvertASCIItoUTF16(aMessage).get(),
                                    getter_Copies(innerStr));
-  const char16_t *params[1] = { innerStr.get() };
+  const PRUnichar *params[1] = { innerStr.get() };
 
   nsAutoString str;
-  sStringBundle->FormatStringFromName(MOZ_UTF16("PEUnexpEOF2"),
+  sStringBundle->FormatStringFromName(NS_LITERAL_STRING("PEUnexpEOF2").get(),
                                       params, ArrayLength(params),
                                       getter_Copies(str));
   AddToError(str);
 }
 
 void
-ErrorReporter::ReportUnexpectedEOF(char16_t aExpected)
+ErrorReporter::ReportUnexpectedEOF(PRUnichar aExpected)
 {
   if (!ShouldReportErrors()) return;
 
-  const char16_t expectedStr[] = {
-    char16_t('\''), aExpected, char16_t('\''), char16_t(0)
+  const PRUnichar expectedStr[] = {
+    PRUnichar('\''), aExpected, PRUnichar('\''), PRUnichar(0)
   };
-  const char16_t *params[1] = { expectedStr };
+  const PRUnichar *params[1] = { expectedStr };
 
   nsAutoString str;
-  sStringBundle->FormatStringFromName(MOZ_UTF16("PEUnexpEOF2"),
+  sStringBundle->FormatStringFromName(NS_LITERAL_STRING("PEUnexpEOF2").get(),
                                       params, ArrayLength(params),
                                       getter_Copies(str));
   AddToError(str);

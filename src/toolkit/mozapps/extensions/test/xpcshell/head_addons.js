@@ -12,46 +12,20 @@ const PREF_EM_CHECK_UPDATE_SECURITY   = "extensions.checkUpdateSecurity";
 const PREF_EM_STRICT_COMPATIBILITY    = "extensions.strictCompatibility";
 const PREF_EM_MIN_COMPAT_APP_VERSION      = "extensions.minCompatibleAppVersion";
 const PREF_EM_MIN_COMPAT_PLATFORM_VERSION = "extensions.minCompatiblePlatformVersion";
-const PREF_GETADDONS_BYIDS               = "extensions.getAddons.get.url";
-const PREF_GETADDONS_BYIDS_PERFORMANCE   = "extensions.getAddons.getWithPerformance.url";
 
 // Forcibly end the test if it runs longer than 15 minutes
 const TIMEOUT_MS = 900000;
 
-Components.utils.import("resource://gre/modules/addons/AddonRepository.jsm");
+Components.utils.import("resource://gre/modules/AddonManager.jsm");
+Components.utils.import("resource://gre/modules/AddonRepository.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/FileUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/NetUtil.jsm");
-Components.utils.import("resource://gre/modules/Promise.jsm");
-Components.utils.import("resource://gre/modules/Task.jsm");
-Components.utils.import("resource://gre/modules/osfile.jsm");
-
-Services.prefs.setBoolPref("toolkit.osfile.log", true);
-
-// We need some internal bits of AddonManager
-let AMscope = Components.utils.import("resource://gre/modules/AddonManager.jsm");
-let AddonManager = AMscope.AddonManager;
-let AddonManagerInternal = AMscope.AddonManagerInternal;
-// Mock out AddonManager's reference to the AsyncShutdown module so we can shut
-// down AddonManager from the test
-let MockAsyncShutdown = {
-  hook: null,
-  profileBeforeChange: {
-    addBlocker: function(aName, aBlocker) {
-      do_print("Mock profileBeforeChange blocker for '" + aName + "'");
-      MockAsyncShutdown.hook = aBlocker;
-    }
-  }
-};
-AMscope.AsyncShutdown = MockAsyncShutdown;
 
 var gInternalManager = null;
 var gAppInfo = null;
 var gAddonsList;
-
-var gPort = null;
-var gUrlToFileMap = {};
 
 var TEST_UNPACKED = false;
 
@@ -251,17 +225,10 @@ function do_check_addon(aActualAddon, aExpectedAddon, aProperties) {
 
     // Check that all undefined expected properties are null on actual add-on
     if (!(aProperty in aExpectedAddon)) {
-      if (actualValue !== undefined && actualValue !== null) {
+      if (actualValue !== undefined && actualValue !== null)
         do_throw("Unexpected defined/non-null property for add-on " +
-                 aExpectedAddon.id + " (addon[" + aProperty + "] = " +
-                 actualValue.toSource() + ")");
-      }
+                 aExpectedAddon.id + " (addon[" + aProperty + "] = " + actualValue);
 
-      return;
-    }
-    else if (expectedValue && !actualValue) {
-      do_throw("Missing property for add-on " + aExpectedAddon.id +
-        ": expected addon[" + aProperty + "] = " + expectedValue);
       return;
     }
 
@@ -303,7 +270,7 @@ function do_check_addon(aActualAddon, aExpectedAddon, aProperties) {
         break;
 
       default:
-        if (remove_port(actualValue) !== remove_port(expectedValue))
+        if (actualValue !== expectedValue)
           do_throw("Failed for " + aProperty + " for add-on " + aExpectedAddon.id +
                    " (" + actualValue + " === " + expectedValue + ")");
     }
@@ -363,13 +330,9 @@ function do_check_compatibilityoverride(aActual, aExpected) {
 
 function do_check_icons(aActual, aExpected) {
   for (var size in aExpected) {
-    do_check_eq(remove_port(aActual[size]), remove_port(aExpected[size]));
+    do_check_eq(aActual[size], aExpected[size]);
   }
 }
-
-// Record the error (if any) from trying to save the XPI
-// database at shutdown time
-let gXPISaveError = null;
 
 /**
  * Starts up the add-on manager as if it was started by the application.
@@ -384,8 +347,10 @@ function startupManager(aAppChanged) {
     do_throw("Test attempt to startup manager that was already started.");
 
   if (aAppChanged || aAppChanged === undefined) {
-    if (gExtensionsINI.exists())
-      gExtensionsINI.remove(true);
+    var file = gProfD.clone();
+    file.append("extensions.ini");
+    if (file.exists())
+      file.remove(true);
   }
 
   gInternalManager = AM_Cc["@mozilla.org/addons/integration;1"].
@@ -399,25 +364,6 @@ function startupManager(aAppChanged) {
 }
 
 /**
- * Helper to spin the event loop until a promise resolves or rejects
- */
-function loopUntilPromise(aPromise) {
-  let done = false;
-  aPromise.then(
-    () => done = true,
-    err => {
-      do_report_unexpected_exception(err);
-      done = true;
-    });
-
-  let thr = Services.tm.mainThread;
-
-  while (!done) {
-    thr.processNextEvent(true);
-  }
-}
-
-/**
  * Restarts the add-on manager as if the host application was restarted.
  *
  * @param  aNewVersion
@@ -426,58 +372,67 @@ function loopUntilPromise(aPromise) {
  *         the application version has changed.
  */
 function restartManager(aNewVersion) {
-  loopUntilPromise(promiseRestartManager(aNewVersion));
-}
-
-function promiseRestartManager(aNewVersion) {
-  return promiseShutdownManager()
-    .then(null, err => do_report_unexpected_exception(err))
-    .then(() => {
-      if (aNewVersion) {
-        gAppInfo.version = aNewVersion;
-        startupManager(true);
-      }
-      else {
-        startupManager(false);
-      }
-    });
+  shutdownManager();
+  if (aNewVersion) {
+    gAppInfo.version = aNewVersion;
+    startupManager(true);
+  }
+  else {
+    startupManager(false);
+  }
 }
 
 function shutdownManager() {
-  loopUntilPromise(promiseShutdownManager());
-}
+  if (!gInternalManager)
+    return;
 
-function promiseShutdownManager() {
-  if (!gInternalManager) {
-    return Promise.resolve(false);
+  let obs = AM_Cc["@mozilla.org/observer-service;1"].
+            getService(AM_Ci.nsIObserverService);
+
+  let xpiShutdown = false;
+  obs.addObserver({
+    observe: function(aSubject, aTopic, aData) {
+      xpiShutdown = true;
+      obs.removeObserver(this, "xpi-provider-shutdown");
+    }
+  }, "xpi-provider-shutdown", false);
+
+  let repositoryShutdown = false;
+  obs.addObserver({
+    observe: function(aSubject, aTopic, aData) {
+      repositoryShutdown = true;
+      obs.removeObserver(this, "addon-repository-shutdown");
+    }
+  }, "addon-repository-shutdown", false);
+
+  obs.notifyObservers(null, "quit-application-granted", null);
+  let scope = Components.utils.import("resource://gre/modules/AddonManager.jsm");
+  scope.AddonManagerInternal.shutdown();
+  gInternalManager = null;
+
+  AddonRepository.shutdown();
+
+  // Load the add-ons list as it was after application shutdown
+  loadAddonsList();
+
+  // Clear any crash report annotations
+  gAppInfo.annotations = {};
+
+  let thr = AM_Cc["@mozilla.org/thread-manager;1"].
+            getService(AM_Ci.nsIThreadManager).
+            mainThread;
+
+  // Wait until we observe the shutdown notifications
+  while (!repositoryShutdown || !xpiShutdown) {
+    if (thr.hasPendingEvents())
+      thr.processNextEvent(false);
   }
 
-  let hookErr = null;
-  Services.obs.notifyObservers(null, "quit-application-granted", null);
-  return MockAsyncShutdown.hook()
-    .then(null, err => hookErr = err)
-    .then( () => {
-      gInternalManager = null;
-
-      // Load the add-ons list as it was after application shutdown
-      loadAddonsList();
-
-      // Clear any crash report annotations
-      gAppInfo.annotations = {};
-
-      // Force the XPIProvider provider to reload to better
-      // simulate real-world usage.
-      let XPIscope = Components.utils.import("resource://gre/modules/addons/XPIProvider.jsm");
-      // This would be cleaner if I could get it as the rejection reason from
-      // the AddonManagerInternal.shutdown() promise
-      gXPISaveError = XPIscope.XPIProvider._shutdownError;
-      do_print("gXPISaveError set to: " + gXPISaveError);
-      AddonManagerPrivate.unregisterProvider(XPIscope.XPIProvider);
-      Components.utils.unload("resource://gre/modules/addons/XPIProvider.jsm");
-      if (hookErr) {
-        throw hookErr;
-      }
-    });
+  // Force the XPIProvider provider to reload to better
+  // simulate real-world usage.
+  scope = Components.utils.import("resource://gre/modules/XPIProvider.jsm");
+  AddonManagerPrivate.unregisterProvider(scope.XPIProvider);
+  Components.utils.unload("resource://gre/modules/XPIProvider.jsm");
 }
 
 function loadAddonsList() {
@@ -505,12 +460,14 @@ function loadAddonsList() {
     themes: []
   };
 
-  if (!gExtensionsINI.exists())
+  var file = gProfD.clone();
+  file.append("extensions.ini");
+  if (!file.exists())
     return;
 
   var factory = AM_Cc["@mozilla.org/xpcom/ini-parser-factory;1"].
                 getService(AM_Ci.nsIINIParserFactory);
-  var parser = factory.createINIParser(gExtensionsINI);
+  var parser = factory.createINIParser(file);
   gAddonsList.extensions = readDirectories("ExtensionDirs");
   gAddonsList.themes = readDirectories("ThemeDirs");
 }
@@ -648,7 +605,7 @@ function createInstallRDF(aData) {
 function writeInstallRDFToDir(aData, aDir, aExtraFile) {
   var rdf = createInstallRDF(aData);
   if (!aDir.exists())
-    aDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    aDir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, 0755);
   var file = aDir.clone();
   file.append("install.rdf");
   if (file.exists())
@@ -666,7 +623,7 @@ function writeInstallRDFToDir(aData, aDir, aExtraFile) {
 
   file = aDir.clone();
   file.append(aExtraFile);
-  file.create(AM_Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
+  file.create(AM_Ci.nsIFile.NORMAL_FILE_TYPE, 0644);
 }
 
 /**
@@ -698,7 +655,7 @@ function writeInstallRDFForExtension(aData, aDir, aId, aExtraFile) {
   }
 
   if (!dir.exists())
-    dir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    dir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, 0755);
   dir.append(id + ".xpi");
   var rdf = createInstallRDF(aData);
   var stream = AM_Cc["@mozilla.org/io/string-input-stream;1"].
@@ -723,8 +680,6 @@ function writeInstallRDFForExtension(aData, aDir, aId, aExtraFile) {
  *
  * @param aExt   a file pointing to either the packed extension or its unpacked directory.
  * @param aTime  the time to which we set the lastModifiedTime of the extension
- *
- * @deprecated Please use promiseSetExtensionModifiedTime instead
  */
 function setExtensionModifiedTime(aExt, aTime) {
   aExt.lastModifiedTime = aTime;
@@ -735,25 +690,6 @@ function setExtensionModifiedTime(aExt, aTime) {
       setExtensionModifiedTime(entries.nextFile, aTime);
     entries.close();
   }
-}
-function promiseSetExtensionModifiedTime(aPath, aTime) {
-  return Task.spawn(function* () {
-    yield OS.File.setDates(aPath, aTime, aTime);
-    let entries, iterator;
-    try {
-      let iterator = new OS.File.DirectoryIterator(aPath);
-      entries = yield iterator.nextBatch();
-    } catch (ex if ex instanceof OS.File.Error) {
-      return;
-    } finally {
-      if (iterator) {
-        iterator.close();
-      }
-    }
-    for (let entry of entries) {
-      yield promiseSetExtensionModifiedTime(entry.path, aTime);
-    }
-  });
 }
 
 /**
@@ -772,7 +708,7 @@ function manuallyInstall(aXPIFile, aInstallLocation, aID) {
   if (TEST_UNPACKED) {
     let dir = aInstallLocation.clone();
     dir.append(aID);
-    dir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    dir.create(AM_Ci.nsIFile.DIRECTORY_TYPE, 0755);
     let zip = AM_Cc["@mozilla.org/libjar/zip-reader;1"].
               createInstance(AM_Ci.nsIZipReader);
     zip.open(aXPIFile);
@@ -1053,19 +989,19 @@ function prepare_test(aExpectedEvents, aExpectedInstalls, aNext) {
 // Checks if all expected events have been seen and if so calls the callback
 function check_test_completed(aArgs) {
   if (!gNext)
-    return undefined;
+    return;
 
   if (gExpectedInstalls instanceof Array &&
       gExpectedInstalls.length > 0)
-    return undefined;
+    return;
   else for each (let installList in gExpectedInstalls) {
     if (installList.length > 0)
-      return undefined;
+      return;
   }
 
   for (let id in gExpectedEvents) {
     if (gExpectedEvents[id].length > 0)
-      return undefined;
+      return;
   }
 
   return gNext.apply(null, aArgs);
@@ -1103,7 +1039,7 @@ function completeAllInstalls(aInstalls, aCallback) {
     aInstall.removeListener(listener);
 
     if (--count == 0)
-      do_execute_soon(aCallback);
+      aCallback();
   }
 
   let listener = {
@@ -1135,11 +1071,7 @@ function completeAllInstalls(aInstalls, aCallback) {
 function installAllFiles(aFiles, aCallback, aIgnoreIncompatible) {
   let count = aFiles.length;
   let installs = [];
-  function callback() {
-    if (aCallback) {
-      aCallback();
-    }
-  }
+
   aFiles.forEach(function(aFile) {
     AddonManager.getInstallForFile(aFile, function(aInstall) {
       if (!aInstall)
@@ -1150,40 +1082,25 @@ function installAllFiles(aFiles, aCallback, aIgnoreIncompatible) {
         installs.push(aInstall);
 
       if (--count == 0)
-        completeAllInstalls(installs, callback);
+        completeAllInstalls(installs, aCallback);
     });
   });
-}
-
-function promiseInstallAllFiles(aFiles, aIgnoreIncompatible) {
-  let deferred = Promise.defer();
-  installAllFiles(aFiles, deferred.resolve, aIgnoreIncompatible);
-  return deferred.promise;
-
 }
 
 if ("nsIWindowsRegKey" in AM_Ci) {
   var MockRegistry = {
     LOCAL_MACHINE: {},
     CURRENT_USER: {},
-    CLASSES_ROOT: {},
-
-    getRoot: function(aRoot) {
-      switch (aRoot) {
-      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE:
-        return MockRegistry.LOCAL_MACHINE;
-      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER:
-        return MockRegistry.CURRENT_USER;
-      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_CLASSES_ROOT:
-        return MockRegistry.CLASSES_ROOT;
-      default:
-        do_throw("Unknown root " + aRootKey);
-        return null;
-      }
-    },
 
     setValue: function(aRoot, aPath, aName, aValue) {
-      let rootKey = MockRegistry.getRoot(aRoot);
+      switch (aRoot) {
+      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE:
+        var rootKey = MockRegistry.LOCAL_MACHINE;
+        break
+      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER:
+        rootKey = MockRegistry.CURRENT_USER;
+        break
+      }
 
       if (!(aPath in rootKey)) {
         rootKey[aPath] = [];
@@ -1225,7 +1142,14 @@ if ("nsIWindowsRegKey" in AM_Ci) {
 
     // --- Overridden nsIWindowsRegKey interface functions ---
     open: function(aRootKey, aRelPath, aMode) {
-      let rootKey = MockRegistry.getRoot(aRootKey);
+      switch (aRootKey) {
+      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE:
+        var rootKey = MockRegistry.LOCAL_MACHINE;
+        break
+      case AM_Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER:
+        rootKey = MockRegistry.CURRENT_USER;
+        break
+      }
 
       if (!(aRelPath in rootKey))
         rootKey[aRelPath] = [];
@@ -1253,7 +1177,6 @@ if ("nsIWindowsRegKey" in AM_Ci) {
         if (value.name == aName)
           return value.value;
       }
-      return null;
     }
   };
 
@@ -1275,14 +1198,6 @@ if ("nsIWindowsRegKey" in AM_Ci) {
 
 // Get the profile directory for tests to use.
 const gProfD = do_get_profile();
-
-const EXTENSIONS_DB = "extensions.json";
-let gExtensionsJSON = gProfD.clone();
-gExtensionsJSON.append(EXTENSIONS_DB);
-
-const EXTENSIONS_INI = "extensions.ini";
-let gExtensionsINI = gProfD.clone();
-gExtensionsINI.append(EXTENSIONS_INI);
 
 // Enable more extensive EM logging
 Services.prefs.setBoolPref("extensions.logging.enabled", true);
@@ -1338,16 +1253,6 @@ var data = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
 stream.write(data, data.length);
 stream.close();
 
-// Copies blocklistFile (an nsIFile) to gProfD/blocklist.xml.
-function copyBlocklistToProfile(blocklistFile) {
-  var dest = gProfD.clone();
-  dest.append("blocklist.xml");
-  if (dest.exists())
-    dest.remove(false);
-  blocklistFile.copyTo(gProfD, "blocklist.xml");
-  dest.lastModifiedTime = Date.now();
-}
-
 // Throw a failure and attempt to abandon the test if it looks like it is going
 // to timeout
 function timeout() {
@@ -1361,14 +1266,7 @@ function timeout() {
 var timer = AM_Cc["@mozilla.org/timer;1"].createInstance(AM_Ci.nsITimer);
 timer.init(timeout, TIMEOUT_MS, AM_Ci.nsITimer.TYPE_ONE_SHOT);
 
-// Make sure that a given path does not exist
-function pathShouldntExist(aPath) {
-  if (aPath.exists()) {
-    do_throw("Test cleanup: path " + aPath.path + " exists when it should not");
-  }
-}
-
-do_register_cleanup(function addon_cleanup() {
+do_register_cleanup(function() {
   if (timer)
     timer.cancel();
 
@@ -1376,7 +1274,7 @@ do_register_cleanup(function addon_cleanup() {
   var dirEntries = gTmpD.directoryEntries
                         .QueryInterface(AM_Ci.nsIDirectoryEnumerator);
   var entry;
-  while ((entry = dirEntries.nextFile)) {
+  while (entry = dirEntries.nextFile) {
     do_throw("Found unexpected file in temporary directory: " + entry.leafName);
   }
   dirEntries.close();
@@ -1384,13 +1282,13 @@ do_register_cleanup(function addon_cleanup() {
   var testDir = gProfD.clone();
   testDir.append("extensions");
   testDir.append("trash");
-  pathShouldntExist(testDir);
+  do_check_false(testDir.exists());
 
   testDir.leafName = "staged";
-  pathShouldntExist(testDir);
+  do_check_false(testDir.exists());
 
   testDir.leafName = "staged-xpis";
-  pathShouldntExist(testDir);
+  do_check_false(testDir.exists());
 
   shutdownManager();
 
@@ -1402,162 +1300,3 @@ do_register_cleanup(function addon_cleanup() {
     Services.prefs.clearUserPref(PREF_EM_STRICT_COMPATIBILITY);
   } catch (e) {}
 });
-
-/**
- * Handler function that responds with the interpolated
- * static file associated to the URL specified by request.path.
- * This replaces the %PORT% entries in the file with the actual
- * value of the running server's port (stored in gPort).
- */
-function interpolateAndServeFile(request, response) {
-  try {
-    let file = gUrlToFileMap[request.path];
-    var data = "";
-    var fstream = Components.classes["@mozilla.org/network/file-input-stream;1"].
-    createInstance(Components.interfaces.nsIFileInputStream);
-    var cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
-    createInstance(Components.interfaces.nsIConverterInputStream);
-    fstream.init(file, -1, 0, 0);
-    cstream.init(fstream, "UTF-8", 0, 0);
-
-    let (str = {}) {
-      let read = 0;
-      do {
-        // read as much as we can and put it in str.value
-        read = cstream.readString(0xffffffff, str);
-        data += str.value;
-      } while (read != 0);
-    }
-    data = data.replace(/%PORT%/g, gPort);
-
-    response.write(data);
-  } catch (e) {
-    do_throw("Exception while serving interpolated file.");
-  } finally {
-    cstream.close(); // this closes fstream as well
-  }
-}
-
-/**
- * Sets up a path handler for the given URL and saves the
- * corresponding file in the global url -> file map.
- *
- * @param  url
- *         the actual URL
- * @param  file
- *         nsILocalFile representing a static file
- */
-function mapUrlToFile(url, file, server) {
-  server.registerPathHandler(url, interpolateAndServeFile);
-  gUrlToFileMap[url] = file;
-}
-
-function mapFile(path, server) {
-  mapUrlToFile(path, do_get_file(path), server);
-}
-
-/**
- * Take out the port number in an URL
- *
- * @param url
- *        String that represents an URL with a port number in it
- */
-function remove_port(url) {
-  if (typeof url === "string")
-    return url.replace(/:\d+/, "");
-  return url;
-}
-// Wrap a function (typically a callback) to catch and report exceptions
-function do_exception_wrap(func) {
-  return function() {
-    try {
-      func.apply(null, arguments);
-    }
-    catch(e) {
-      do_report_unexpected_exception(e);
-    }
-  };
-}
-
-/**
- * Change the schema version of the JSON extensions database
- */
-function changeXPIDBVersion(aNewVersion) {
-  let jData = loadJSON(gExtensionsJSON);
-  jData.schemaVersion = aNewVersion;
-  saveJSON(jData, gExtensionsJSON);
-}
-
-/**
- * Load a file into a string
- */
-function loadFile(aFile) {
-  let data = "";
-  let fstream = Components.classes["@mozilla.org/network/file-input-stream;1"].
-          createInstance(Components.interfaces.nsIFileInputStream);
-  let cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
-          createInstance(Components.interfaces.nsIConverterInputStream);
-  fstream.init(aFile, -1, 0, 0);
-  cstream.init(fstream, "UTF-8", 0, 0);
-  let (str = {}) {
-    let read = 0;
-    do {
-      read = cstream.readString(0xffffffff, str); // read as much as we can and put it in str.value
-      data += str.value;
-    } while (read != 0);
-  }
-  cstream.close();
-  return data;
-}
-
-/**
- * Raw load of a JSON file
- */
-function loadJSON(aFile) {
-  let data = loadFile(aFile);
-  do_print("Loaded JSON file " + aFile.path);
-  return(JSON.parse(data));
-}
-
-/**
- * Raw save of a JSON blob to file
- */
-function saveJSON(aData, aFile) {
-  do_print("Starting to save JSON file " + aFile.path);
-  let stream = FileUtils.openSafeFileOutputStream(aFile);
-  let converter = AM_Cc["@mozilla.org/intl/converter-output-stream;1"].
-    createInstance(AM_Ci.nsIConverterOutputStream);
-  converter.init(stream, "UTF-8", 0, 0x0000);
-  // XXX pretty print the JSON while debugging
-  converter.writeString(JSON.stringify(aData, null, 2));
-  converter.flush();
-  // nsConverterOutputStream doesn't finish() safe output streams on close()
-  FileUtils.closeSafeFileOutputStream(stream);
-  converter.close();
-  do_print("Done saving JSON file " + aFile.path);
-}
-
-/**
- * Create a callback function that calls do_execute_soon on an actual callback and arguments
- */
-function callback_soon(aFunction) {
-  return function(...args) {
-    do_execute_soon(function() {
-      aFunction.apply(null, args);
-    }, aFunction.name ? "delayed callback " + aFunction.name : "delayed callback");
-  }
-}
-
-/**
- * A promise-based variant of AddonManager.getAddonsByIDs.
- *
- * @param {array} list As the first argument of AddonManager.getAddonsByIDs
- * @return {promise}
- * @resolve {array} The list of add-ons sent by AddonManaget.getAddonsByIDs to
- * its callback.
- */
-function promiseAddonsByIDs(list) {
-  let deferred = Promise.defer();
-  AddonManager.getAddonsByIDs(list, deferred.resolve);
-  return deferred.promise;
-}

@@ -8,7 +8,6 @@
 #define vm_BooleanObject_h
 
 #include "jsbool.h"
-#include "jsobj.h"
 
 namespace js {
 
@@ -20,7 +19,7 @@ class BooleanObject : public JSObject
   public:
     static const unsigned RESERVED_SLOTS = 1;
 
-    static const Class class_;
+    static Class class_;
 
     /*
      * Creates a new Boolean object boxing the given primitive bool.  The

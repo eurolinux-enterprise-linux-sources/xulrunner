@@ -5,7 +5,7 @@
 
 #include "RootAccessible.h"
 
-#include "mozilla/ArrayUtils.h"
+#include "mozilla/Util.h"
 
 #define CreateEvent CreateEventA
 #include "nsIDOMDocument.h"
@@ -28,18 +28,18 @@
 #include "nsIAccessibleRelation.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
-#include "mozilla/dom/Event.h"
 #include "mozilla/dom/EventTarget.h"
-#include "nsIDOMCustomEvent.h"
+#include "nsIDOMDataContainerEvent.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIDocument.h"
+#include "nsEventListenerManager.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIPropertyBag2.h"
 #include "nsIServiceManager.h"
 #include "nsPIDOMWindow.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsReadableUtils.h"
 #include "nsFocusManager.h"
+#include "nsDOMEvent.h"
 
 #ifdef MOZ_XUL
 #include "nsIXULDocument.h"
@@ -53,7 +53,7 @@ using namespace mozilla::dom;
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED(RootAccessible, DocAccessible, nsIAccessibleDocument)
+NS_IMPL_ISUPPORTS_INHERITED1(RootAccessible, DocAccessible, nsIAccessibleDocument)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Constructor/destructor
@@ -84,7 +84,9 @@ RootAccessible::Name(nsString& aName)
       return eNameOK;
   }
 
-  mDocumentNode->GetTitle(aName);
+  nsCOMPtr<nsIDOMDocument> document = do_QueryInterface(mDocumentNode);
+  NS_ENSURE_TRUE(document, eNameOK);
+  document->GetTitle(aName);
   return eNameOK;
 }
 
@@ -234,7 +236,7 @@ NS_IMETHODIMP
 RootAccessible::HandleEvent(nsIDOMEvent* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
+  nsDOMEvent* event = aDOMEvent->InternalDOMEvent();
   nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
   if (!origTargetNode)
     return NS_OK;
@@ -266,7 +268,7 @@ void
 RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
 {
   MOZ_ASSERT(aDOMEvent);
-  Event* event = aDOMEvent->InternalDOMEvent();
+  nsDOMEvent* event = aDOMEvent->InternalDOMEvent();
   nsCOMPtr<nsINode> origTargetNode = do_QueryInterface(event->GetOriginalTarget());
 
   nsAutoString eventType;
@@ -308,13 +310,16 @@ RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
 
   if (eventType.EqualsLiteral("RadioStateChange")) {
     uint64_t state = accessible->State();
+
+    // radiogroup in prefWindow is exposed as a list,
+    // and panebutton is exposed as XULListitem in A11y.
+    // XULListitemAccessible::GetStateInternal uses STATE_SELECTED in this case,
+    // so we need to check states::SELECTED also.
     bool isEnabled = (state & (states::CHECKED | states::SELECTED)) != 0;
 
-    if (accessible->NeedsDOMUIEvent()) {
-      nsRefPtr<AccEvent> accEvent =
-        new AccStateChangeEvent(accessible, states::CHECKED, isEnabled);
-      nsEventShell::FireEvent(accEvent);
-    }
+    nsRefPtr<AccEvent> accEvent =
+      new AccStateChangeEvent(accessible, states::CHECKED, isEnabled);
+    nsEventShell::FireEvent(accEvent);
 
     if (isEnabled) {
       FocusMgr()->ActiveItemChanged(accessible);
@@ -328,14 +333,14 @@ RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
   }
 
   if (eventType.EqualsLiteral("CheckboxStateChange")) {
-    if (accessible->NeedsDOMUIEvent()) {
-      uint64_t state = accessible->State();
-      bool isEnabled = !!(state & states::CHECKED);
+    uint64_t state = accessible->State();
 
-      nsRefPtr<AccEvent> accEvent =
-        new AccStateChangeEvent(accessible, states::CHECKED, isEnabled);
-      nsEventShell::FireEvent(accEvent);
-    }
+    bool isEnabled = !!(state & states::CHECKED);
+
+    nsRefPtr<AccEvent> accEvent =
+      new AccStateChangeEvent(accessible, states::CHECKED, isEnabled);
+
+    nsEventShell::FireEvent(accEvent);
     return;
   }
 
@@ -450,10 +455,14 @@ RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
       logging::ActiveItemChangeCausedBy("DOMMenuBarInactive", accessible);
 #endif
   }
-  else if (accessible->NeedsDOMUIEvent() &&
-           eventType.EqualsLiteral("ValueChange")) {
-     targetDocument->FireDelayedEvent(nsIAccessibleEvent::EVENT_VALUE_CHANGE,
-                                      accessible);
+  else if (eventType.EqualsLiteral("ValueChange")) {
+
+    //We don't process 'ValueChange' events for progress meters since we listen
+    //@value attribute change for them.
+    if (!accessible->IsProgress()) {
+      targetDocument->FireDelayedEvent(nsIAccessibleEvent::EVENT_VALUE_CHANGE,
+                                       accessible);
+    }
   }
 #ifdef DEBUG_DRAGDROPSTART
   else if (eventType.EqualsLiteral("mouseover")) {
@@ -465,12 +474,12 @@ RootAccessible::ProcessDOMEvent(nsIDOMEvent* aDOMEvent)
 
 
 ////////////////////////////////////////////////////////////////////////////////
-// Accessible
+// nsAccessNode
 
 void
 RootAccessible::Shutdown()
 {
-  // Called manually or by Accessible::LastRelease()
+  // Called manually or by nsAccessNode::LastRelease()
   if (!PresShell())
     return;  // Already shutdown
 
@@ -479,9 +488,9 @@ RootAccessible::Shutdown()
 
 // nsIAccessible method
 Relation
-RootAccessible::RelationByType(RelationType aType)
+RootAccessible::RelationByType(uint32_t aType)
 {
-  if (!mDocumentNode || aType != RelationType::EMBEDS)
+  if (!mDocumentNode || aType != nsIAccessibleRelation::RELATION_EMBEDS)
     return DocAccessibleWrap::RelationByType(aType);
 
   nsIDOMWindow* rootWindow = mDocumentNode->GetWindow();
@@ -658,30 +667,25 @@ void
 RootAccessible::HandleTreeRowCountChangedEvent(nsIDOMEvent* aEvent,
                                                XULTreeAccessible* aAccessible)
 {
-  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
-  if (!customEvent)
+  nsCOMPtr<nsIDOMDataContainerEvent> dataEvent(do_QueryInterface(aEvent));
+  if (!dataEvent)
     return;
 
-  nsCOMPtr<nsIVariant> detailVariant;
-  customEvent->GetDetail(getter_AddRefs(detailVariant));
-  if (!detailVariant)
+  nsCOMPtr<nsIVariant> indexVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("index"),
+                     getter_AddRefs(indexVariant));
+  if (!indexVariant)
     return;
 
-  nsCOMPtr<nsISupports> supports;
-  detailVariant->GetAsISupports(getter_AddRefs(supports));
-  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
-  if (!propBag)
+  nsCOMPtr<nsIVariant> countVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("count"),
+                     getter_AddRefs(countVariant));
+  if (!countVariant)
     return;
 
-  nsresult rv;
   int32_t index, count;
-  rv = propBag->GetPropertyAsInt32(NS_LITERAL_STRING("index"), &index);
-  if (NS_FAILED(rv))
-    return;
-
-  rv = propBag->GetPropertyAsInt32(NS_LITERAL_STRING("count"), &count);
-  if (NS_FAILED(rv))
-    return;
+  indexVariant->GetAsInt32(&index);
+  countVariant->GetAsInt32(&count);
 
   aAccessible->InvalidateCache(index, count);
 }
@@ -690,30 +694,35 @@ void
 RootAccessible::HandleTreeInvalidatedEvent(nsIDOMEvent* aEvent,
                                            XULTreeAccessible* aAccessible)
 {
-  nsCOMPtr<nsIDOMCustomEvent> customEvent(do_QueryInterface(aEvent));
-  if (!customEvent)
-    return;
-
-  nsCOMPtr<nsIVariant> detailVariant;
-  customEvent->GetDetail(getter_AddRefs(detailVariant));
-  if (!detailVariant)
-    return;
-
-  nsCOMPtr<nsISupports> supports;
-  detailVariant->GetAsISupports(getter_AddRefs(supports));
-  nsCOMPtr<nsIPropertyBag2> propBag(do_QueryInterface(supports));
-  if (!propBag)
+  nsCOMPtr<nsIDOMDataContainerEvent> dataEvent(do_QueryInterface(aEvent));
+  if (!dataEvent)
     return;
 
   int32_t startRow = 0, endRow = -1, startCol = 0, endCol = -1;
-  propBag->GetPropertyAsInt32(NS_LITERAL_STRING("startrow"),
-                              &startRow);
-  propBag->GetPropertyAsInt32(NS_LITERAL_STRING("endrow"),
-                              &endRow);
-  propBag->GetPropertyAsInt32(NS_LITERAL_STRING("startcolumn"),
-                              &startCol);
-  propBag->GetPropertyAsInt32(NS_LITERAL_STRING("endcolumn"),
-                              &endCol);
+
+  nsCOMPtr<nsIVariant> startRowVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("startrow"),
+                     getter_AddRefs(startRowVariant));
+  if (startRowVariant)
+    startRowVariant->GetAsInt32(&startRow);
+
+  nsCOMPtr<nsIVariant> endRowVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("endrow"),
+                     getter_AddRefs(endRowVariant));
+  if (endRowVariant)
+    endRowVariant->GetAsInt32(&endRow);
+
+  nsCOMPtr<nsIVariant> startColVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("startcolumn"),
+                     getter_AddRefs(startColVariant));
+  if (startColVariant)
+    startColVariant->GetAsInt32(&startCol);
+
+  nsCOMPtr<nsIVariant> endColVariant;
+  dataEvent->GetData(NS_LITERAL_STRING("endcolumn"),
+                     getter_AddRefs(endColVariant));
+  if (endColVariant)
+    endColVariant->GetAsInt32(&endCol);
 
   aAccessible->TreeViewInvalidated(startRow, endRow, startCol, endCol);
 }

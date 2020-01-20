@@ -23,6 +23,7 @@
 #include "nsIServiceManager.h"
 #include "nsIPresShell.h"
 #include "nsIContent.h"
+#include "nsGUIEvent.h"
 #include "nsMenuBarFrame.h"
 #include "nsMenuPopupFrame.h"
 
@@ -154,7 +155,7 @@ XULMenuitemAccessible::AccessKey() const
   static int32_t gMenuAccesskeyModifier = -1;  // magic value of -1 indicates unitialized state
 
   // We do not use nsCoreUtils::GetAccesskeyFor() because accesskeys for
-  // menu are't registered by EventStateManager.
+  // menu are't registered by nsEventStateManager.
   nsAutoString accesskey;
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::accesskey,
                     accesskey);
@@ -438,7 +439,7 @@ XULMenupopupAccessible::
     mType = eMenuPopupType;
 
   // May be the anonymous <menupopup> inside <menulist> (a combobox)
-  mSelectControl = do_QueryInterface(mContent->GetFlattenedTreeParent());
+  mSelectControl = do_QueryInterface(mContent->GetParent());
   if (!mSelectControl)
     mGenericTypes &= ~eSelect;
 }
@@ -476,7 +477,7 @@ XULMenupopupAccessible::NativeName(nsString& aName)
   nsIContent* content = mContent;
   while (content && aName.IsEmpty()) {
     content->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
-    content = content->GetFlattenedTreeParent();
+    content = content->GetParent();
   }
 
   return eNameOK;

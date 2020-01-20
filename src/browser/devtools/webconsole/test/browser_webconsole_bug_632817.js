@@ -17,13 +17,8 @@ let requestCallback = null;
 function test()
 {
   const PREF = "devtools.webconsole.persistlog";
-  let original = Services.prefs.getBoolPref("devtools.webconsole.filter.networkinfo");
-  Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", true);
   Services.prefs.setBoolPref(PREF, true);
-  registerCleanupFunction(() => {
-    Services.prefs.setBoolPref("devtools.webconsole.filter.networkinfo", original);
-    Services.prefs.clearUserPref(PREF);
-  });
+  registerCleanupFunction(() => Services.prefs.clearUserPref(PREF));
 
   addTab("data:text/html;charset=utf-8,Web Console network logging tests");
 
@@ -33,7 +28,7 @@ function test()
     openConsole(null, function(aHud) {
       hud = aHud;
 
-      HUDService.lastFinishedRequest.callback = function(aRequest) {
+      HUDService.lastFinishedRequestCallback = function(aRequest) {
         lastRequest = aRequest;
         if (requestCallback) {
           requestCallback();
@@ -129,20 +124,12 @@ function testFormSubmission()
     // There should be 3 network requests pointing to the HTML file.
     waitForMessages({
       webconsole: hud,
-      messages: [
-        {
-          text: "test-network-request.html",
-          category: CATEGORY_NETWORK,
-          severity: SEVERITY_LOG,
-          count: 3,
-        },
-        {
-          text: "test-data.json",
-          category: CATEGORY_NETWORK,
-          severity: SEVERITY_LOG,
-          count: 2,
-        },
-      ],
+      messages: [{
+        text: "test-network-request.html",
+        category: CATEGORY_NETWORK,
+        severity: SEVERITY_LOG,
+        count: 3,
+      }],
     }).then(testLiveFilteringOnSearchStrings);
   };
 
@@ -183,14 +170,14 @@ function testLiveFilteringOnSearchStrings() {
   is(countMessageNodes(), 0, "the log nodes are hidden when searching for " +
     "the string \"foo\"bar'baz\"boo'\"");
 
-  HUDService.lastFinishedRequest.callback = null;
+  HUDService.lastFinishedRequestCallback = null;
   lastRequest = null;
   requestCallback = null;
   finishTest();
 }
 
 function countMessageNodes() {
-  let messageNodes = hud.outputNode.querySelectorAll(".message");
+  let messageNodes = hud.outputNode.querySelectorAll(".hud-msg-node");
   let displayedMessageNodes = 0;
   let view = hud.iframeWindow;
   for (let i = 0; i < messageNodes.length; i++) {

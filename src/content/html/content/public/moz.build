@@ -13,6 +13,8 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'content_html'
 
+MODULE = 'content'
+
 EXPORTS += [
     'nsFormSubmission.h',
     'nsIConstraintValidation.h',
@@ -20,6 +22,7 @@ EXPORTS += [
     'nsIFormControl.h',
     'nsIFormProcessor.h',
     'nsIHTMLCollection.h',
+    'nsILink.h',
     'nsIRadioGroupContainer.h',
     'nsIRadioVisitor.h',
     'nsITextControlElement.h',

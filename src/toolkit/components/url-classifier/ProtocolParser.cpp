@@ -5,6 +5,7 @@
 
 #include "ProtocolParser.h"
 #include "LookupCache.h"
+#include "nsIKeyModule.h"
 #include "nsNetCID.h"
 #include "prlog.h"
 #include "prnetdb.h"
@@ -69,6 +70,7 @@ ProtocolParser::ProtocolParser()
   , mUpdateStatus(NS_OK)
   , mUpdateWait(0)
   , mResetRequested(false)
+  , mRekeyRequested(false)
 {
 }
 
@@ -84,6 +86,81 @@ ProtocolParser::Init(nsICryptoHash* aHasher)
   return NS_OK;
 }
 
+/**
+ * Initialize HMAC for the stream.
+ *
+ * If serverMAC is empty, the update stream will need to provide a
+ * server MAC.
+ */
+nsresult
+ProtocolParser::InitHMAC(const nsACString& aClientKey,
+                         const nsACString& aServerMAC)
+{
+  mServerMAC = aServerMAC;
+
+  nsresult rv;
+  nsCOMPtr<nsIKeyObjectFactory> keyObjectFactory(
+    do_GetService("@mozilla.org/security/keyobjectfactory;1", &rv));
+
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to get nsIKeyObjectFactory service");
+    mUpdateStatus = rv;
+    return mUpdateStatus;
+  }
+
+  nsCOMPtr<nsIKeyObject> keyObject;
+  rv = keyObjectFactory->KeyFromString(nsIKeyObject::HMAC, aClientKey,
+                                       getter_AddRefs(keyObject));
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to create key object, maybe not FIPS compliant?");
+    mUpdateStatus = rv;
+    return mUpdateStatus;
+  }
+
+  mHMAC = do_CreateInstance(NS_CRYPTO_HMAC_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to create nsICryptoHMAC instance");
+    mUpdateStatus = rv;
+    return mUpdateStatus;
+  }
+
+  rv = mHMAC->Init(nsICryptoHMAC::SHA1, keyObject);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to initialize nsICryptoHMAC instance");
+    mUpdateStatus = rv;
+    return mUpdateStatus;
+  }
+  return NS_OK;
+}
+
+nsresult
+ProtocolParser::FinishHMAC()
+{
+  if (NS_FAILED(mUpdateStatus)) {
+    return mUpdateStatus;
+  }
+
+  if (mRekeyRequested) {
+    mUpdateStatus = NS_ERROR_FAILURE;
+    return mUpdateStatus;
+  }
+
+  if (!mHMAC) {
+    return NS_OK;
+  }
+
+  nsAutoCString clientMAC;
+  mHMAC->Finish(true, clientMAC);
+
+  if (clientMAC != mServerMAC) {
+    NS_WARNING("Invalid update MAC!");
+    LOG(("Invalid update MAC: expected %s, got %s",
+         clientMAC.get(), mServerMAC.get()));
+    mUpdateStatus = NS_ERROR_FAILURE;
+  }
+  return mUpdateStatus;
+}
+
 void
 ProtocolParser::SetCurrentTable(const nsACString& aTable)
 {
@@ -97,6 +174,17 @@ ProtocolParser::AppendStream(const nsACString& aData)
     return mUpdateStatus;
 
   nsresult rv;
+
+  // Digest the data if we have a server MAC.
+  if (mHMAC && !mServerMAC.IsEmpty()) {
+    rv = mHMAC->Update(reinterpret_cast<const uint8_t*>(aData.BeginReading()),
+                       aData.Length());
+    if (NS_FAILED(rv)) {
+      mUpdateStatus = rv;
+      return rv;
+    }
+  }
+
   mPending.Append(aData);
 
   bool done = false;
@@ -127,8 +215,13 @@ ProtocolParser::ProcessControl(bool* aDone)
   while (NextLine(line)) {
     //LOG(("Processing %s\n", line.get()));
 
-    if (StringBeginsWith(line, NS_LITERAL_CSTRING("i:"))) {
-      // Set the table name from the table header line.
+    if (line.EqualsLiteral("e:pleaserekey")) {
+      mRekeyRequested = true;
+      return NS_OK;
+    } else if (mHMAC && mServerMAC.IsEmpty()) {
+      rv = ProcessMAC(line);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else if (StringBeginsWith(line, NS_LITERAL_CSTRING("i:"))) {
       SetCurrentTable(Substring(line, 2));
     } else if (StringBeginsWith(line, NS_LITERAL_CSTRING("n:"))) {
       if (PR_sscanf(line.get(), "n:%d", &mUpdateWait) != 1) {
@@ -155,6 +248,28 @@ ProtocolParser::ProcessControl(bool* aDone)
 
   *aDone = true;
   return NS_OK;
+}
+
+
+nsresult
+ProtocolParser::ProcessMAC(const nsCString& aLine)
+{
+  nsresult rv;
+
+  LOG(("line: %s", aLine.get()));
+
+  if (StringBeginsWith(aLine, NS_LITERAL_CSTRING("m:"))) {
+    mServerMAC = Substring(aLine, 2);
+    nsUrlClassifierUtils::UnUrlsafeBase64(mServerMAC);
+
+    // The remainder of the pending update wasn't digested, digest it now.
+    rv = mHMAC->Update(reinterpret_cast<const uint8_t*>(mPending.BeginReading()),
+                       mPending.Length());
+    return rv;
+  }
+
+  LOG(("No MAC specified!"));
+  return NS_ERROR_FAILURE;
 }
 
 nsresult
@@ -215,30 +330,12 @@ ProtocolParser::ProcessChunkControl(const nsCString& aLine)
     return NS_ERROR_FAILURE;
   }
 
-  if (StringEndsWith(mTableUpdate->TableName(),
-                     NS_LITERAL_CSTRING("-shavar")) ||
-      StringEndsWith(mTableUpdate->TableName(),
-                     NS_LITERAL_CSTRING("-simple"))) {
-    // Accommodate test tables ending in -simple for now.
-    mChunkState.type = (command == 'a') ? CHUNK_ADD : CHUNK_SUB;
-  } else if (StringEndsWith(mTableUpdate->TableName(),
-    NS_LITERAL_CSTRING("-digest256"))) {
-    LOG(("Processing digest256 data"));
-    mChunkState.type = (command == 'a') ? CHUNK_ADD_DIGEST : CHUNK_SUB_DIGEST;
-  }
-  switch (mChunkState.type) {
-    case CHUNK_ADD:
-      mTableUpdate->NewAddChunk(mChunkState.num);
-      break;
-    case CHUNK_SUB:
-      mTableUpdate->NewSubChunk(mChunkState.num);
-      break;
-    case CHUNK_ADD_DIGEST:
-      mTableUpdate->NewAddChunk(mChunkState.num);
-      break;
-    case CHUNK_SUB_DIGEST:
-      mTableUpdate->NewSubChunk(mChunkState.num);
-      break;
+  mChunkState.type = (command == 'a') ? CHUNK_ADD : CHUNK_SUB;
+
+  if (mChunkState.type == CHUNK_ADD) {
+    mTableUpdate->NewAddChunk(mChunkState.num);
+  } else {
+    mTableUpdate->NewSubChunk(mChunkState.num);
   }
 
   return NS_OK;
@@ -248,11 +345,29 @@ nsresult
 ProtocolParser::ProcessForward(const nsCString& aLine)
 {
   const nsCSubstring &forward = Substring(aLine, 2);
-  return AddForward(forward);
+  if (mHMAC) {
+    // We're expecting MACs alongside any url forwards.
+    nsCSubstring::const_iterator begin, end, sepBegin, sepEnd;
+    forward.BeginReading(begin);
+    sepBegin = begin;
+
+    forward.EndReading(end);
+    sepEnd = end;
+
+    if (!RFindInReadable(NS_LITERAL_CSTRING(","), sepBegin, sepEnd)) {
+      NS_WARNING("No MAC specified for a redirect in a request that expects a MAC");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCString serverMAC(Substring(sepEnd, end));
+    nsUrlClassifierUtils::UnUrlsafeBase64(serverMAC);
+    return AddForward(Substring(begin, sepBegin), serverMAC);
+  }
+  return AddForward(forward, mServerMAC);
 }
 
 nsresult
-ProtocolParser::AddForward(const nsACString& aUrl)
+ProtocolParser::AddForward(const nsACString& aUrl, const nsACString& aMac)
 {
   if (!mTableUpdate) {
     NS_WARNING("Forward without a table name.");
@@ -262,6 +377,7 @@ ProtocolParser::AddForward(const nsACString& aUrl)
   ForwardedUpdate *forward = mForwards.AppendElement();
   forward->table = mTableUpdate->TableName();
   forward->url.Assign(aUrl);
+  forward->mac.Assign(aMac);
 
   return NS_OK;
 }
@@ -290,15 +406,11 @@ ProtocolParser::ProcessChunk(bool* aDone)
   mState = PROTOCOL_STATE_CONTROL;
 
   //LOG(("Handling a %d-byte chunk", chunk.Length()));
-  if (StringEndsWith(mTableUpdate->TableName(),
-                     NS_LITERAL_CSTRING("-shavar"))) {
+  if (StringEndsWith(mTableUpdate->TableName(), NS_LITERAL_CSTRING("-shavar"))) {
     return ProcessShaChunk(chunk);
+  } else {
+    return ProcessPlaintextChunk(chunk);
   }
-  if (StringEndsWith(mTableUpdate->TableName(),
-             NS_LITERAL_CSTRING("-digest256"))) {
-    return ProcessDigestChunk(chunk);
-  }
-  return ProcessPlaintextChunk(chunk);
 }
 
 /**
@@ -396,61 +508,6 @@ ProtocolParser::ProcessShaChunk(const nsACString& aChunk)
 }
 
 nsresult
-ProtocolParser::ProcessDigestChunk(const nsACString& aChunk)
-{
-  if (mChunkState.type == CHUNK_ADD_DIGEST) {
-    return ProcessDigestAdd(aChunk);
-  }
-  if (mChunkState.type == CHUNK_SUB_DIGEST) {
-    return ProcessDigestSub(aChunk);
-  }
-  return NS_ERROR_UNEXPECTED;
-}
-
-nsresult
-ProtocolParser::ProcessDigestAdd(const nsACString& aChunk)
-{
-  // The ABNF format for add chunks is (HASH)+, where HASH is 32 bytes.
-  MOZ_ASSERT(aChunk.Length() % 32 == 0,
-             "Chunk length in bytes must be divisible by 4");
-  uint32_t start = 0;
-  while (start < aChunk.Length()) {
-    Completion hash;
-    hash.Assign(Substring(aChunk, start, COMPLETE_SIZE));
-    start += COMPLETE_SIZE;
-    mTableUpdate->NewAddComplete(mChunkState.num, hash);
-  }
-  return NS_OK;
-}
-
-nsresult
-ProtocolParser::ProcessDigestSub(const nsACString& aChunk)
-{
-  // The ABNF format for sub chunks is (ADDCHUNKNUM HASH)+, where ADDCHUNKNUM
-  // is a 4 byte chunk number, and HASH is 32 bytes.
-  MOZ_ASSERT(aChunk.Length() % 36 == 0,
-             "Chunk length in bytes must be divisible by 36");
-  uint32_t start = 0;
-  while (start < aChunk.Length()) {
-    // Read ADDCHUNKNUM
-    const nsCSubstring& addChunkStr = Substring(aChunk, start, 4);
-    start += 4;
-
-    uint32_t addChunk;
-    memcpy(&addChunk, addChunkStr.BeginReading(), 4);
-    addChunk = PR_ntohl(addChunk);
-
-    // Read the hash
-    Completion hash;
-    hash.Assign(Substring(aChunk, start, COMPLETE_SIZE));
-    start += COMPLETE_SIZE;
-
-    mTableUpdate->NewSubComplete(addChunk, hash, mChunkState.num);
-  }
-  return NS_OK;
-}
-
-nsresult
 ProtocolParser::ProcessHostAdd(const Prefix& aDomain, uint8_t aNumEntries,
                                const nsACString& aChunk, uint32_t* aStart)
 {
@@ -533,7 +590,6 @@ ProtocolParser::ProcessHostAddComplete(uint8_t aNumEntries,
 
   if (aNumEntries == 0) {
     // this is totally comprehensible.
-    // My sarcasm detector is going off!
     NS_WARNING("Expected > 0 entries for a 32-byte hash add.");
     return NS_OK;
   }
@@ -628,5 +684,5 @@ ProtocolParser::GetTableUpdate(const nsACString& aTable)
   return update;
 }
 
-} // namespace safebrowsing
-} // namespace mozilla
+}
+}

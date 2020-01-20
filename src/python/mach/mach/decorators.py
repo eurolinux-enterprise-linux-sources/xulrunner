@@ -4,7 +4,6 @@
 
 from __future__ import unicode_literals
 
-import collections
 import inspect
 import types
 
@@ -56,35 +55,17 @@ def CommandProvider(cls):
         if not isinstance(value, types.FunctionType):
             continue
 
-        command_name, category, description, allow_all, conditions, parser = getattr(
-            value, '_mach_command', (None, None, None, None, None, None))
+        command_name, category, description, allow_all = getattr(value,
+            '_mach_command', (None, None, None, None))
 
         if command_name is None:
             continue
-
-        if conditions is None and Registrar.require_conditions:
-            continue
-
-        msg = 'Mach command \'%s\' implemented incorrectly. ' + \
-              'Conditions argument must take a list ' + \
-              'of functions. Found %s instead.'
-
-        conditions = conditions or []
-        if not isinstance(conditions, collections.Iterable):
-            msg = msg % (command_name, type(conditions))
-            raise MachError(msg)
-
-        for c in conditions:
-            if not hasattr(c, '__call__'):
-                msg = msg % (command_name, type(c))
-                raise MachError(msg)
 
         arguments = getattr(value, '_mach_command_args', None)
 
         handler = MethodHandler(cls, attr, command_name, category=category,
             description=description, allow_all_arguments=allow_all,
-            conditions=conditions, parser=parser, arguments=arguments,
-            pass_context=pass_context)
+            arguments=arguments, pass_context=pass_context)
 
         Registrar.register_command_handler(handler)
 
@@ -105,9 +86,6 @@ class Command(object):
          allow_all_args -- Bool indicating whether to allow unknown arguments
              through to the command.
 
-         parser -- an optional argparse.ArgumentParser instance to use as
-             the basis for the command arguments.
-
     For example:
 
         @Command('foo', category='misc', description='Run the foo action')
@@ -115,17 +93,15 @@ class Command(object):
             pass
     """
     def __init__(self, name, category=None, description=None,
-                 allow_all_args=False, conditions=None, parser=None):
+        allow_all_args=False):
         self._name = name
         self._category = category
         self._description = description
         self._allow_all_args = allow_all_args
-        self._conditions = conditions
-        self._parser = parser
 
     def __call__(self, func):
         func._mach_command = (self._name, self._category, self._description,
-                              self._allow_all_args, self._conditions, self._parser)
+            self._allow_all_args)
 
         return func
 

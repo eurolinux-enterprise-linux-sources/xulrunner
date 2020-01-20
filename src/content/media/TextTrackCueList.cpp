@@ -10,20 +10,6 @@
 namespace mozilla {
 namespace dom {
 
-class CompareCuesByTime
-{
-public:
-  bool Equals(TextTrackCue* aOne, TextTrackCue* aTwo) const {
-    return aOne->StartTime() == aTwo->StartTime() &&
-           aOne->EndTime() == aTwo->EndTime();
-  }
-  bool LessThan(TextTrackCue* aOne, TextTrackCue* aTwo) const {
-    return aOne->StartTime() < aTwo->StartTime() ||
-           (aOne->StartTime() == aTwo->StartTime() &&
-            aOne->EndTime() < aTwo->EndTime());
-  }
-};
-
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(TextTrackCueList, mParent, mList)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TextTrackCueList)
@@ -38,10 +24,21 @@ TextTrackCueList::TextTrackCueList(nsISupports* aParent) : mParent(aParent)
   SetIsDOMBinding();
 }
 
-JSObject*
-TextTrackCueList::WrapObject(JSContext* aCx)
+void
+TextTrackCueList::Update(double aTime)
 {
-  return TextTrackCueListBinding::Wrap(aCx, this);
+  const uint32_t length = mList.Length();
+  for (uint32_t i = 0; i < length; i++) {
+    if (aTime > mList[i]->StartTime() && aTime < mList[i]->EndTime()) {
+      mList[i]->RenderCue();
+    }
+  }
+}
+
+JSObject*
+TextTrackCueList::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return TextTrackCueListBinding::Wrap(aCx, aScope, this);
 }
 
 TextTrackCue*
@@ -49,12 +46,6 @@ TextTrackCueList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   aFound = aIndex < mList.Length();
   return aFound ? mList[aIndex] : nullptr;
-}
-
-TextTrackCue*
-TextTrackCueList::operator[](uint32_t aIndex)
-{
-  return mList.SafeElementAt(aIndex, nullptr);
 }
 
 TextTrackCue*
@@ -73,44 +64,16 @@ TextTrackCueList::GetCueById(const nsAString& aId)
 }
 
 void
-TextTrackCueList::AddCue(TextTrackCue& aCue)
+TextTrackCueList::AddCue(TextTrackCue& cue)
 {
-  if (mList.Contains(&aCue)) {
-    return;
-  }
-  mList.InsertElementSorted(&aCue, CompareCuesByTime());
+  mList.AppendElement(&cue);
 }
 
 void
-TextTrackCueList::RemoveCue(TextTrackCue& aCue, ErrorResult& aRv)
+TextTrackCueList::RemoveCue(TextTrackCue& cue)
 {
-  if (!mList.Contains(&aCue)) {
-    aRv.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
-    return;
-  }
-  mList.RemoveElement(&aCue);
+  mList.RemoveElement(&cue);
 }
-
-void
-TextTrackCueList::RemoveCueAt(uint32_t aIndex)
-{
-  if (aIndex < mList.Length()) {
-    mList.RemoveElementAt(aIndex);
-  }
-}
-
-void
-TextTrackCueList::RemoveAll()
-{
-  mList.Clear();
-}
-
-void
-TextTrackCueList::GetArray(nsTArray<nsRefPtr<TextTrackCue> >& aCues)
-{
-  aCues = nsTArray<nsRefPtr<TextTrackCue> >(mList);
-}
-
 
 } // namespace dom
 } // namespace mozilla

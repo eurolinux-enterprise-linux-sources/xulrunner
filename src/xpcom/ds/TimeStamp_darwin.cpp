@@ -17,13 +17,14 @@
 // of storing the time value in nanoseconds.
 
 #include <mach/mach_time.h>
+#include <sys/param.h>
 #include <sys/time.h>
 #include <sys/sysctl.h>
 #include <time.h>
-#include <unistd.h>
 
 #include "mozilla/TimeStamp.h"
-#include "nsDebug.h"
+#include "nsCRT.h"
+#include "prprf.h"
 
 // Estimate of the smallest duration of time we can measure.
 static uint64_t sResolution;
@@ -31,6 +32,7 @@ static uint64_t sResolutionSigDigs;
 
 static const uint64_t kNsPerMs   =    1000000;
 static const uint64_t kUsPerSec  =    1000000;
+static const uint64_t kNsPerSec  = 1000000000;
 static const double kNsPerMsd    =    1000000.0;
 static const double kNsPerSecd   = 1000000000.0;
 
@@ -112,6 +114,18 @@ TimeDuration::Resolution()
   return TimeDuration::FromTicks(int64_t(sResolution));
 }
 
+struct TimeStampInitialization
+{
+  TimeStampInitialization() {
+    TimeStamp::Startup();
+  }
+  ~TimeStampInitialization() {
+    TimeStamp::Shutdown();
+  }
+};
+
+static TimeStampInitialization initOnce;
+
 nsresult
 TimeStamp::Startup()
 {
@@ -138,6 +152,8 @@ TimeStamp::Startup()
        sResolutionSigDigs *= 10);
 
   gInitialized = true;
+  sFirstTimeStamp = TimeStamp::Now();
+  sProcessCreation = TimeStamp();
 
   return NS_OK;
 }
@@ -160,7 +176,7 @@ uint64_t
 TimeStamp::ComputeProcessUptime()
 {
   struct timeval tv;
-  int rv = gettimeofday(&tv, nullptr);
+  int rv = gettimeofday(&tv, NULL);
 
   if (rv == -1) {
     return 0;
@@ -176,7 +192,7 @@ TimeStamp::ComputeProcessUptime()
 
   struct kinfo_proc proc;
   size_t bufferSize = sizeof(proc);
-  rv = sysctl(mib, mibLen, &proc, &bufferSize, nullptr, 0);
+  rv = sysctl(mib, mibLen, &proc, &bufferSize, NULL, 0);
 
   if (rv == -1)
     return 0;

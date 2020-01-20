@@ -10,18 +10,13 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_res'
 
-SOURCES += [
+XPIDL_FLAGS += [
+    '-I$(topsrcdir)/netwerk/base/public',
+]
+
+MODULE = 'necko'
+
+CPP_SOURCES += [
     'nsResProtocolHandler.cpp',
 ]
 
-FAIL_ON_WARNINGS = True
-
-MSVC_ENABLE_PGO = True
-
-include('/ipc/chromium/chromium-config.mozbuild')
-
-FINAL_LIBRARY = 'necko'
-
-LOCAL_INCLUDES += [
-    '/netwerk/base/src',
-]

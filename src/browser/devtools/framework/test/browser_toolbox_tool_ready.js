@@ -3,13 +3,7 @@
 
 function test() {
   addTab().then(function(data) {
-    data.target.makeRemote().then(performChecks.bind(null, data));
-  }).then(null, console.error);
-
-  function performChecks(data) {
-    let toolIds = gDevTools.getToolDefinitionArray()
-                    .filter(def => def.isTargetSupported(data.target))
-                    .map(def => def.id);
+    let toolIds = gDevTools.getToolDefinitionArray().map((def) => def.id);
 
     let open = function(index) {
       let toolId = toolIds[index];
@@ -24,10 +18,8 @@ function test() {
 
         let nextIndex = index + 1;
         if (nextIndex >= toolIds.length) {
-          toolbox.destroy().then(function() {
-            gBrowser.removeCurrentTab();
-            finish();
-          });
+          toolbox.destroy();
+          finish();
         }
         else {
           open(nextIndex);
@@ -36,5 +28,5 @@ function test() {
     };
 
     open(0);
-  }
+  }).then(null, console.error);
 }

@@ -38,8 +38,10 @@ function TestTabList(aConnection) {
 
 TestTabList.prototype = {
   constructor: TestTabList,
-  getList: function () {
-    return promise.resolve([tabActor for (tabActor of this._tabActors)]);
+  iterator: function() {
+    for (let actor of this._tabActors) {
+      yield actor;
+    }
   }
 };
 
@@ -55,48 +57,22 @@ function TestTabActor(aConnection, aGlobal)
 {
   this.conn = aConnection;
   this._global = aGlobal;
-  this._global.wrappedJSObject = aGlobal;
   this._threadActor = new ThreadActor(this, this._global);
   this.conn.addActor(this._threadActor);
   this._attached = false;
-  this._extraActors = {};
 }
 
 TestTabActor.prototype = {
   constructor: TestTabActor,
   actorPrefix: "TestTabActor",
 
-  get window() {
-    return { wrappedJSObject: this._global };
-  },
-
-  get url() {
-    return this._global.__name;
-  },
-
-  form: function() {
-    let response = { actor: this.actorID, title: this._global.__name };
-
-    // Walk over tab actors added by extensions and add them to a new ActorPool.
-    let actorPool = new ActorPool(this.conn);
-    this._createExtraActors(DebuggerServer.tabActorFactories, actorPool);
-    if (!actorPool.isEmpty()) {
-      this._tabActorPool = actorPool;
-      this.conn.addActorPool(this._tabActorPool);
-    }
-
-    this._appendExtraActors(response);
-
-    return response;
+  grip: function() {
+    return { actor: this.actorID, title: this._global.__name };
   },
 
   onAttach: function(aRequest) {
     this._attached = true;
-
-    let response = { type: "tabAttached", threadActor: this._threadActor.actorID };
-    this._appendExtraActors(response);
-
-    return response;
+    return { type: "tabAttached", threadActor: this._threadActor.actorID };
   },
 
   onDetach: function(aRequest) {
@@ -106,9 +82,14 @@ TestTabActor.prototype = {
     return { type: "detached" };
   },
 
-  /* Support for DebuggerServer.addTabActor. */
-  _createExtraActors: createExtraActors,
-  _appendExtraActors: appendExtraActors
+  // Hooks for use by TestTabActors.
+  addToParentPool: function(aActor) {
+    this.conn.addActor(aActor);
+  },
+
+  removeFromParentPool: function(aActor) {
+    this.conn.removeActor(aActor);
+  }
 };
 
 TestTabActor.prototype.requestTypes = {

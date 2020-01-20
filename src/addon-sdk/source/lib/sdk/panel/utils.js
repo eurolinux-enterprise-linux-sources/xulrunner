@@ -23,8 +23,6 @@ const events = require("../system/events");
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 function calculateRegion({ position, width, height, defaultWidth, defaultHeight }, rect) {
-  position = position || {};
-
   let x, y;
 
   let hasTop = !isNil(position.top);
@@ -83,10 +81,6 @@ function isOpen(panel) {
 }
 exports.isOpen = isOpen;
 
-function isOpening(panel) {
-  return panel.state === "showing"
-}
-exports.isOpening = isOpening
 
 function close(panel) {
   // Sometimes "TypeError: panel.hidePopup is not a function" is thrown
@@ -129,33 +123,13 @@ function display(panel, options, anchor) {
     ({x, y, width, height}) = calculateRegion(options, viewportRect);
   }
   else {
-    // The XUL Panel has an arrow, so the margin needs to be reset
-    // to the default value.
-    panel.style.margin = "";
-    let { CustomizableUI, window } = anchor.ownerDocument.defaultView;
-
-    // In Australis, widgets may be positioned in an overflow panel or the
-    // menu panel.
-    // In such cases clicking this widget will hide the overflow/menu panel,
-    // and the widget's panel will show instead.
-    // If `CustomizableUI` is not available, it means the anchor is not in a
-    // chrome browser window, and therefore there is no need for this check.
-    if (CustomizableUI) {
-      let node = anchor;
-      ({anchor}) = CustomizableUI.getWidget(anchor.id).forWindow(window);
-
-      // if `node` is not the `anchor` itself, it means the widget is
-      // positioned in a panel, therefore we have to hide it before show
-      // the widget's panel in the same anchor
-      if (node !== anchor)
-        CustomizableUI.hidePanelForNode(anchor);
-    }
-
     width = width || defaultWidth;
     height = height || defaultHeight;
 
     // Open the popup by the anchor.
     let rect = anchor.getBoundingClientRect();
+
+    let window = anchor.ownerDocument.defaultView;
 
     let zoom = getScreenPixelsPerCSSPixel(window);
     let screenX = rect.left + window.mozInnerScreenX * zoom;
@@ -223,12 +197,23 @@ exports.show = show
 function setupPanelFrame(frame) {
   frame.setAttribute("flex", 1);
   frame.setAttribute("transparent", "transparent");
+  frame.setAttribute("showcaret", true);
   frame.setAttribute("autocompleteenabled", true);
   if (platform === "darwin") {
     frame.style.borderRadius = "6px";
     frame.style.padding = "1px";
   }
 }
+
+let EVENT_NAMES = {
+  "popupshowing": "sdk-panel-show",
+  "popuphiding": "sdk-panel-hide",
+  "popupshown": "sdk-panel-shown",
+  "popuphidden": "sdk-panel-hidden",
+  "document-element-inserted": "sdk-panel-content-changed",
+  "DOMContentLoaded": "sdk-panel-content-loaded",
+  "load": "sdk-panel-document-loaded"
+};
 
 function make(document) {
   document = document || getMostRecentBrowserWindow().document;
@@ -269,29 +254,29 @@ function make(document) {
 
     try { swapFrameLoaders(backgroundFrame, viewFrame); }
     catch(error) { console.exception(error); }
-    events.emit(type, { subject: panel });
+    events.emit(EVENT_NAMES[type], { subject: panel });
   }
 
   function onContentReady({target, type}) {
     if (target === getContentDocument(panel)) {
       style(panel);
-      events.emit(type, { subject: panel });
+      events.emit(EVENT_NAMES[type], { subject: panel });
     }
   }
 
   function onContentLoad({target, type}) {
     if (target === getContentDocument(panel))
-      events.emit(type, { subject: panel });
+      events.emit(EVENT_NAMES[type], { subject: panel });
   }
 
   function onContentChange({subject, type}) {
     let document = subject;
     if (document === getContentDocument(panel) && document.defaultView)
-      events.emit(type, { subject: panel });
+      events.emit(EVENT_NAMES[type], { subject: panel });
   }
 
   function onPanelStateChange({type}) {
-    events.emit(type, { subject: panel })
+    events.emit(EVENT_NAMES[type], { subject: panel })
   }
 
   panel.addEventListener("popupshowing", onDisplayChange, false);
@@ -367,16 +352,11 @@ function style(panel) {
                 document.getAnonymousElementByAttribute(panel, "class",
                                                         "panel-inner-arrowcontent");
 
-    let { color, fontFamily, fontSize, fontWeight } = window.getComputedStyle(node);
+    let color = window.getComputedStyle(node).getPropertyValue("color");
 
     let style = contentDocument.createElement("style");
     style.id = "sdk-panel-style";
-    style.textContent = "body { " +
-      "color: " + color + ";" +
-      "font-family: " + fontFamily + ";" +
-      "font-weight: " + fontWeight + ";" +
-      "font-size: " + fontSize + ";" +
-    "}";
+    style.textContent = "body { color: " + color + "; }";
 
     let container = contentDocument.head ? contentDocument.head :
                     contentDocument.documentElement;
@@ -393,10 +373,8 @@ function style(panel) {
 }
 exports.style = style;
 
-let getContentFrame = panel =>
-    (isOpen(panel) || isOpening(panel)) ?
-    panel.firstChild :
-    panel.backgroundFrame
+function getContentFrame(panel) isOpen(panel) ? panel.firstChild :
+                                                panel.backgroundFrame
 exports.getContentFrame = getContentFrame;
 
 function getContentDocument(panel) getContentFrame(panel).contentDocument

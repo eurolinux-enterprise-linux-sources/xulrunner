@@ -7,14 +7,14 @@
 #define __nsstreamconverterservice__h___
 
 #include "nsIStreamConverterService.h"
-
+#include "nsIStreamListener.h"
 #include "nsHashtable.h"
-#include "nsTArrayForwardDeclare.h"
-
-class nsCString;
+#include "nsCOMArray.h"
+#include "nsTArray.h"
+#include "nsIAtom.h"
 
 class nsStreamConverterService : public nsIStreamConverterService {
-public:
+public:    
     /////////////////////////////////////////////////////
     // nsISupports methods
     NS_DECL_ISUPPORTS
@@ -29,6 +29,9 @@ public:
     nsStreamConverterService();
     virtual ~nsStreamConverterService();
 
+    // Initialization routine. Must be called after this object is constructed.
+    nsresult Init();
+
 private:
     // Responsible for finding a converter for the given MIME-type.
     nsresult FindConverter(const char *aContractID, nsTArray<nsCString> **aEdgeList);
@@ -37,7 +40,34 @@ private:
     nsresult ParseFromTo(const char *aContractID, nsCString &aFromRes, nsCString &aToRes);
 
     // member variables
-    nsObjectHashtable mAdjacencyList;
+    nsObjectHashtable              *mAdjacencyList;
 };
 
+///////////////////////////////////////////////////////////////////
+// Breadth-First-Search (BFS) algorithm state classes and types.
+
+// used  to establish discovered vertecies.
+enum BFScolors {white, gray, black};
+
+struct BFSState {
+    BFScolors   color;
+    int32_t     distance;
+    nsCStringKey  *predecessor;
+    ~BFSState() {
+        delete predecessor;
+    }
+};
+
+// adjacency list and BFS hashtable data class.
+struct SCTableData {
+    nsCStringKey *key;
+    union _data {
+        BFSState *state;
+        nsCOMArray<nsIAtom> *edges;
+    } data;
+
+    SCTableData(nsCStringKey* aKey) : key(aKey) {
+        data.state = nullptr;
+    }
+};
 #endif // __nsstreamconverterservice__h___

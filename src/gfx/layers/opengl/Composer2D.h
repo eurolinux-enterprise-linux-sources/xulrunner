@@ -26,12 +26,9 @@
  * layer manager fall back on full GPU composition.
  */
 
+class gfxMatrix;
+
 namespace mozilla {
-
-namespace gfx {
-struct Matrix;
-}
-
 namespace layers {
 
 class Layer;
@@ -39,11 +36,9 @@ class Layer;
 class Composer2D {
   NS_INLINE_DECL_REFCOUNTING(Composer2D)
 
-protected:
-  // Protected destructor, to discourage deletion outside of Release():
+public:
   virtual ~Composer2D() {}
 
-public:
   /**
    * Return true if |aRoot| met the implementation's criteria for fast
    * composition and the render was successful.  Return false to fall
@@ -58,8 +53,7 @@ public:
    * Currently, when TryRender() returns true, the entire framebuffer
    * must have been rendered.
    */
-  virtual bool TryRender(Layer* aRoot, const gfx::Matrix& aWorldTransform,
-                         bool aGeometryChanged) = 0;
+  virtual bool TryRender(Layer* aRoot, const gfxMatrix& aWorldTransform) = 0;
 };
 
 } // namespace layers

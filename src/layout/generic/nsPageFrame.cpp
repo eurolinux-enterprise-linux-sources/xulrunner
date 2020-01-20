@@ -5,16 +5,23 @@
 
 #include "nsPageFrame.h"
 #include "nsPresContext.h"
+#include "nsStyleContext.h"
 #include "nsRenderingContext.h"
 #include "nsGkAtoms.h"
 #include "nsIPresShell.h"
+#include "nsCSSFrameConstructor.h"
+#include "nsReadableUtils.h"
 #include "nsPageContentFrame.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h" // for function BinarySearchForPosition
-#include "nsSimplePageSequenceFrame.h" // for nsSharedPageData
+#include "nsCSSRendering.h"
+#include "nsSimplePageSequence.h" // for nsSharedPageData
 #include "nsTextFormatter.h" // for page number localization formatting
+#ifdef IBMBIDI
 #include "nsBidiUtils.h"
+#endif
 #include "nsIPrintSettings.h"
+#include "nsRegion.h"
 
 #include "prlog.h"
 #ifdef PR_LOGGING 
@@ -43,7 +50,7 @@ nsPageFrame::~nsPageFrame()
 {
 }
 
-nsresult nsPageFrame::Reflow(nsPresContext*           aPresContext,
+NS_IMETHODIMP nsPageFrame::Reflow(nsPresContext*           aPresContext,
                                   nsHTMLReflowMetrics&     aDesiredSize,
                                   const nsHTMLReflowState& aReflowState,
                                   nsReflowStatus&          aStatus)
@@ -81,8 +88,8 @@ nsresult nsPageFrame::Reflow(nsPresContext*           aPresContext,
     // XXX Shouldn't we do something more friendly when invalid margins
     //     are set?
     if (maxSize.width < onePixelInTwips || maxSize.height < onePixelInTwips) {
-      aDesiredSize.Width() = 0;
-      aDesiredSize.Height() = 0;
+      aDesiredSize.width  = 0;
+      aDesiredSize.height = 0;
       NS_WARNING("Reflow aborted; no space for content");
       return NS_OK;
     }
@@ -99,7 +106,7 @@ nsresult nsPageFrame::Reflow(nsPresContext*           aPresContext,
       if (marginStyle.GetUnit(side) == eStyleUnit_Auto) {
         pageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       } else {
-        pageContentMargin.Side(side) = kidReflowState.ComputedPhysicalMargin().Side(side);
+        pageContentMargin.Side(side) = kidReflowState.mComputedMargin.Side(side);
       }
     }
 
@@ -136,25 +143,25 @@ nsresult nsPageFrame::Reflow(nsPresContext*           aPresContext,
     ReflowChild(frame, aPresContext, aDesiredSize, kidReflowState, xc, yc, 0, aStatus);
 
     // Place and size the child
-    FinishReflowChild(frame, aPresContext, aDesiredSize, &kidReflowState, xc, yc, 0);
+    FinishReflowChild(frame, aPresContext, &kidReflowState, aDesiredSize, xc, yc, 0);
 
     NS_ASSERTION(!NS_FRAME_IS_FULLY_COMPLETE(aStatus) ||
                  !frame->GetNextInFlow(), "bad child flow list");
   }
   PR_PL(("PageFrame::Reflow %p ", this));
-  PR_PL(("[%d,%d][%d,%d]\n", aDesiredSize.Width(), aDesiredSize.Height(), aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+  PR_PL(("[%d,%d][%d,%d]\n", aDesiredSize.width, aDesiredSize.height, aReflowState.availableWidth, aReflowState.availableHeight));
 
   // Return our desired size
-  aDesiredSize.Width() = aReflowState.AvailableWidth();
-  if (aReflowState.AvailableHeight() != NS_UNCONSTRAINEDSIZE) {
-    aDesiredSize.Height() = aReflowState.AvailableHeight();
+  aDesiredSize.width = aReflowState.availableWidth;
+  if (aReflowState.availableHeight != NS_UNCONSTRAINEDSIZE) {
+    aDesiredSize.height = aReflowState.availableHeight;
   }
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aDesiredSize);
 
   PR_PL(("PageFrame::Reflow %p ", this));
-  PR_PL(("[%d,%d]\n", aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+  PR_PL(("[%d,%d]\n", aReflowState.availableWidth, aReflowState.availableHeight));
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
   return NS_OK;
@@ -166,8 +173,8 @@ nsPageFrame::GetType() const
   return nsGkAtoms::pageFrame; 
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsPageFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("Page"), aResult);
@@ -184,7 +191,11 @@ nsPageFrame::ProcessSpecialCodes(const nsString& aStr, nsString& aNewStr)
   // then subst in the current date/time
   NS_NAMED_LITERAL_STRING(kDate, "&D");
   if (aStr.Find(kDate) != kNotFound) {
-    aNewStr.ReplaceSubstring(kDate.get(), mPD->mDateTimeStr.get());
+    if (mPD->mDateTimeStr != nullptr) {
+      aNewStr.ReplaceSubstring(kDate.get(), mPD->mDateTimeStr);
+    } else {
+      aNewStr.ReplaceSubstring(kDate.get(), EmptyString().get());
+    }
   }
 
   // NOTE: Must search for &PT before searching for &P
@@ -194,7 +205,7 @@ nsPageFrame::ProcessSpecialCodes(const nsString& aStr, nsString& aNewStr)
   // values
   NS_NAMED_LITERAL_STRING(kPageAndTotal, "&PT");
   if (aStr.Find(kPageAndTotal) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumAndTotalsFormat.get(), mPageNum, mTotNumPages);
+    PRUnichar * uStr = nsTextFormatter::smprintf(mPD->mPageNumAndTotalsFormat, mPageNum, mTotNumPages);
     aNewStr.ReplaceSubstring(kPageAndTotal.get(), uStr);
     nsMemory::Free(uStr);
   }
@@ -203,24 +214,32 @@ nsPageFrame::ProcessSpecialCodes(const nsString& aStr, nsString& aNewStr)
   // and replace the page number code with the actual value
   NS_NAMED_LITERAL_STRING(kPage, "&P");
   if (aStr.Find(kPage) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat.get(), mPageNum);
+    PRUnichar * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat, mPageNum);
     aNewStr.ReplaceSubstring(kPage.get(), uStr);
     nsMemory::Free(uStr);
   }
 
   NS_NAMED_LITERAL_STRING(kTitle, "&T");
   if (aStr.Find(kTitle) != kNotFound) {
-    aNewStr.ReplaceSubstring(kTitle.get(), mPD->mDocTitle.get());
+    if (mPD->mDocTitle != nullptr) {
+      aNewStr.ReplaceSubstring(kTitle.get(), mPD->mDocTitle);
+    } else {
+      aNewStr.ReplaceSubstring(kTitle.get(), EmptyString().get());
+    }
   }
 
   NS_NAMED_LITERAL_STRING(kDocURL, "&U");
   if (aStr.Find(kDocURL) != kNotFound) {
-    aNewStr.ReplaceSubstring(kDocURL.get(), mPD->mDocURL.get());
+    if (mPD->mDocURL != nullptr) {
+      aNewStr.ReplaceSubstring(kDocURL.get(), mPD->mDocURL);
+    } else {
+      aNewStr.ReplaceSubstring(kDocURL.get(), EmptyString().get());
+    }
   }
 
   NS_NAMED_LITERAL_STRING(kPageTotal, "&L");
   if (aStr.Find(kPageTotal) != kNotFound) {
-    char16_t * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat.get(), mTotNumPages);
+    PRUnichar * uStr = nsTextFormatter::smprintf(mPD->mPageNumFormat, mTotNumPages);
     aNewStr.ReplaceSubstring(kPageTotal.get(), uStr);
     nsMemory::Free(uStr);
   }
@@ -327,7 +346,7 @@ nsPageFrame::DrawHeaderFooter(nsRenderingContext& aRenderingContext,
 
     int32_t indx;
     int32_t textWidth = 0;
-    const char16_t* text = str.get();
+    const PRUnichar* text = str.get();
 
     int32_t len = (int32_t)str.Length();
     if (len == 0) {
@@ -571,9 +590,8 @@ nsPageFrame::PaintHeaderFooter(nsRenderingContext& aRenderingContext,
 
   // Get the FontMetrics to determine width.height of strings
   nsRefPtr<nsFontMetrics> fontMet;
-  pc->DeviceContext()->GetMetricsFor(mPD->mHeadFootFont, nullptr,
+  pc->DeviceContext()->GetMetricsFor(*mPD->mHeadFootFont, nullptr,
                                      pc->GetUserFontSet(),
-                                     pc->GetTextPerfMetrics(),
                                      *getter_AddRefs(fontMet));
 
   aRenderingContext.SetFont(fontMet);
@@ -659,12 +677,12 @@ nsPageBreakFrame::Reflow(nsPresContext*           aPresContext,
 
   // Override reflow, since we don't want to deal with what our
   // computed values are.
-  aDesiredSize.Width() = GetIntrinsicWidth();
-  aDesiredSize.Height() = (aReflowState.AvailableHeight() == NS_UNCONSTRAINEDSIZE ?
-                         0 : aReflowState.AvailableHeight());
+  aDesiredSize.width = GetIntrinsicWidth();
+  aDesiredSize.height = (aReflowState.availableHeight == NS_UNCONSTRAINEDSIZE ?
+                         0 : aReflowState.availableHeight);
   // round the height down to the nearest pixel
-  aDesiredSize.Height() -=
-    aDesiredSize.Height() % nsPresContext::CSSPixelsToAppUnits(1);
+  aDesiredSize.height -=
+    aDesiredSize.height % nsPresContext::CSSPixelsToAppUnits(1);
 
   // Note: not using NS_FRAME_FIRST_REFLOW here, since it's not clear whether
   // DidReflow will always get called before the next Reflow() call.
@@ -679,8 +697,8 @@ nsPageBreakFrame::GetType() const
   return nsGkAtoms::pageBreakFrame; 
 }
 
-#ifdef DEBUG_FRAME_DUMP
-nsresult
+#ifdef DEBUG
+NS_IMETHODIMP
 nsPageBreakFrame::GetFrameName(nsAString& aResult) const
 {
   return MakeFrameName(NS_LITERAL_STRING("PageBreak"), aResult);

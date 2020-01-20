@@ -242,7 +242,7 @@ ROLE(COLUMN,
 
 ROLE(ROW,
      "row",
-     ATK_ROLE_TABLE_ROW,
+     ATK_ROLE_LIST_ITEM,
      NSAccessibilityRowRole,
      ROLE_SYSTEM_ROW,
      ROLE_SYSTEM_ROW,
@@ -619,7 +619,7 @@ ROLE(FONT_CHOOSER,
 ROLE(CHROME_WINDOW,
      "chrome window",
      ATK_ROLE_FRAME,
-     NSAccessibilityGroupRole,  //Contains the main Firefox UI
+     NSAccessibilityUnknownRole,  //Unused on OS X
      ROLE_SYSTEM_APPLICATION,
      IA2_ROLE_FRAME,
      eNoNameRule)
@@ -970,7 +970,7 @@ ROLE(RICH_OPTION,
 
 ROLE(LISTBOX,
      "listbox",
-     ATK_ROLE_LIST_BOX,
+     ATK_ROLE_LIST,
      NSAccessibilityListRole,
      ROLE_SYSTEM_LIST,
      ROLE_SYSTEM_LIST,

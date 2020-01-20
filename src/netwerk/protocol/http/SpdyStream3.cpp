@@ -7,14 +7,8 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
-// Log on level :5, instead of default :4.
-#undef LOG
-#define LOG(args) LOG5(args)
-#undef LOG_ENABLED
-#define LOG_ENABLED() LOG5_ENABLED()
-
-#include "mozilla/Endian.h"
 #include "mozilla/Telemetry.h"
+#include "nsAlgorithm.h"
 #include "nsHttp.h"
 #include "nsHttpHandler.h"
 #include "nsHttpRequestHead.h"
@@ -24,8 +18,6 @@
 #include "SpdyPush3.h"
 #include "SpdySession3.h"
 #include "SpdyStream3.h"
-#include "PSpdyPush.h"
-#include "SpdyZlibReporter.h"
 
 #include <algorithm>
 
@@ -290,19 +282,19 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
                     mOrigin, hashkey);
 
   // check the push cache for GET
-  if (mTransaction->RequestHead()->IsGet()) {
+  if (mTransaction->RequestHead()->Method() == nsHttp::Get) {
     // from :scheme, :host, :path
     nsILoadGroupConnectionInfo *loadGroupCI = mTransaction->LoadGroupConnectionInfo();
-    SpdyPushCache *cache = nullptr;
+    SpdyPushCache3 *cache = nullptr;
     if (loadGroupCI)
-      loadGroupCI->GetSpdyPushCache(&cache);
+      loadGroupCI->GetSpdyPushCache3(&cache);
 
     SpdyPushedStream3 *pushedStream = nullptr;
     // we remove the pushedstream from the push cache so that
     // it will not be used for another GET. This does not destroy the
     // stream itself - that is done when the transactionhash is done with it.
     if (cache)
-      pushedStream = cache->RemovePushedStreamSpdy3(hashkey);
+      pushedStream = cache->RemovePushedStream(hashkey);
 
     if (pushedStream) {
       LOG3(("Pushed Stream Match located id=0x%X key=%s\n",
@@ -310,12 +302,6 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
       pushedStream->SetConsumerStream(this);
       mPushSource = pushedStream;
       mSentFinOnData = 1;
-
-      // This stream has been activated (and thus counts against the concurrency
-      // limit intentionally), but will not be registered via
-      // RegisterStreamID (below) because of the push match. Therefore the
-      // concurrency sempahore needs to be balanced.
-      mSession->DecrementConcurrent(this);
 
       // There is probably pushed data buffered so trigger a read manually
       // as we can't rely on future network events to do it
@@ -352,11 +338,12 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
   mTxInlineFrame[3] = SpdySession3::CONTROL_TYPE_SYN_STREAM;
   // 4 to 7 are length and flags, we'll fill that in later
 
-  NetworkEndian::writeUint32(mTxInlineFrame + 8, mStreamID);
+  uint32_t networkOrderID = PR_htonl(mStreamID);
+  memcpy(mTxInlineFrame + 8, &networkOrderID, 4);
 
   // this is the associated-to field, which is not used sending
   // from the client in the http binding
-  memset(mTxInlineFrame + 12, 0, 4);
+  memset (mTxInlineFrame + 12, 0, 4);
 
   // Priority flags are the E0 mask of byte 16.
   // 0 is highest priority, 7 is lowest.
@@ -391,11 +378,12 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
   else
     versionHeader = NS_LITERAL_CSTRING("HTTP/1.0");
 
+  nsClassHashtable<nsCStringHashKey, nsCString> hdrHash;
+
   // use mRequestHead() to get a sense of how big to make the hash,
   // even though we are parsing the actual text stream because
   // it is legit to append headers.
-  nsClassHashtable<nsCStringHashKey, nsCString>
-    hdrHash(1 + (mTransaction->RequestHead()->Headers().Count() * 2));
+  hdrHash.Init(1 + (mTransaction->RequestHead()->Headers().Count() * 2));
 
   const char *beginBuffer = mFlatHttpRequestHeaders.BeginReading();
 
@@ -482,26 +470,26 @@ SpdyStream3::ParseHttpRequestHeaders(const char *buf,
   CompressFlushFrame();
 
   // 4 to 7 are length and flags, which we can now fill in
-  NetworkEndian::writeUint32(mTxInlineFrame + 1 * sizeof(uint32_t),
-                             mTxInlineFrameUsed - 8);
+  (reinterpret_cast<uint32_t *>(mTxInlineFrame.get()))[1] =
+    PR_htonl(mTxInlineFrameUsed - 8);
 
   MOZ_ASSERT(!mTxInlineFrame[4], "Size greater than 24 bits");
 
   // Determine whether to put the fin bit on the syn stream frame or whether
   // to wait for a data packet to put it on.
 
-  if (mTransaction->RequestHead()->IsGet() ||
-      mTransaction->RequestHead()->IsConnect() ||
-      mTransaction->RequestHead()->IsHead()) {
+  if (mTransaction->RequestHead()->Method() == nsHttp::Get ||
+      mTransaction->RequestHead()->Method() == nsHttp::Connect ||
+      mTransaction->RequestHead()->Method() == nsHttp::Head) {
     // for GET, CONNECT, and HEAD place the fin bit right on the
     // syn stream packet
 
     mSentFinOnData = 1;
     mTxInlineFrame[4] = SpdySession3::kFlag_Data_FIN;
   }
-  else if (mTransaction->RequestHead()->IsPost() ||
-           mTransaction->RequestHead()->IsPut() ||
-           mTransaction->RequestHead()->IsOptions()) {
+  else if (mTransaction->RequestHead()->Method() == nsHttp::Post ||
+           mTransaction->RequestHead()->Method() == nsHttp::Put ||
+           mTransaction->RequestHead()->Method() == nsHttp::Options) {
     // place fin in a data frame even for 0 length messages, I've seen
     // the google gateway be unhappy with fin-on-syn for 0 length POST
   }
@@ -781,8 +769,9 @@ SpdyStream3::GenerateDataFrameHeader(uint32_t dataLength, bool lastFrame)
   MOZ_ASSERT(!mTxStreamFrameSize, "stream frame not empty");
   MOZ_ASSERT(!(dataLength & 0xff000000), "datalength > 24 bits");
 
-  NetworkEndian::writeUint32(mTxInlineFrame, mStreamID);
-  NetworkEndian::writeUint32(mTxInlineFrame + 1 * sizeof(uint32_t), dataLength);
+  (reinterpret_cast<uint32_t *>(mTxInlineFrame.get()))[0] = PR_htonl(mStreamID);
+  (reinterpret_cast<uint32_t *>(mTxInlineFrame.get()))[1] =
+    PR_htonl(dataLength);
 
   MOZ_ASSERT(!(mTxInlineFrame[0] & 0x80), "control bit set unexpectedly");
   MOZ_ASSERT(!mTxInlineFrame[4], "flag bits set unexpectedly");
@@ -993,6 +982,20 @@ const unsigned char SpdyStream3::kDictionary[] = {
 	0x2c, 0x65, 0x6e, 0x71, 0x3d, 0x30, 0x2e          // - e n q - 0 -
 };
 
+// use for zlib data types
+void *
+SpdyStream3::zlib_allocator(void *opaque, uInt items, uInt size)
+{
+  return moz_xmalloc(items * size);
+}
+
+// use for zlib data types
+void
+SpdyStream3::zlib_destructor(void *opaque, void *addr)
+{
+  moz_free(addr);
+}
+
 // This can be called N times.. 1 for syn_reply and 0->N for headers
 nsresult
 SpdyStream3::Uncompress(z_stream *context,
@@ -1015,17 +1018,14 @@ SpdyStream3::Uncompress(z_stream *context,
     if (zlib_rv == Z_NEED_DICT) {
       if (triedDictionary) {
         LOG3(("SpdySession3::Uncompress %p Dictionary Error\n", this));
-        return NS_ERROR_ILLEGAL_VALUE;
+        return NS_ERROR_FAILURE;
       }
 
       triedDictionary = true;
       inflateSetDictionary(context, kDictionary, sizeof(kDictionary));
     }
 
-    if (zlib_rv == Z_DATA_ERROR)
-      return NS_ERROR_ILLEGAL_VALUE;
-
-    if (zlib_rv == Z_MEM_ERROR)
+    if (zlib_rv == Z_DATA_ERROR || zlib_rv == Z_MEM_ERROR)
       return NS_ERROR_FAILURE;
 
     // zlib's inflate() decreases context->avail_out by the amount it places
@@ -1063,7 +1063,7 @@ SpdyStream3::FindHeader(nsCString name,
     return NS_ERROR_ILLEGAL_VALUE;
 
   do {
-    uint32_t numPairs = NetworkEndian::readUint32(nvpair - 1 * sizeof(uint32_t));
+    uint32_t numPairs = PR_ntohl(reinterpret_cast<const uint32_t *>(nvpair)[-1]);
 
     for (uint32_t index = 0; index < numPairs; ++index) {
       if (lastHeaderByte < nvpair + 4)
@@ -1145,7 +1145,7 @@ SpdyStream3::ConvertHeaders(nsACString &aHeadersOut)
     return NS_ERROR_ILLEGAL_VALUE;
 
   do {
-    uint32_t numPairs = NetworkEndian::readUint32(nvpair - 1 * sizeof(uint32_t));
+    uint32_t numPairs = PR_ntohl(reinterpret_cast<const uint32_t *>(nvpair)[-1]);
 
     for (uint32_t index = 0; index < numPairs; ++index) {
       if (lastHeaderByte < nvpair + 4)
@@ -1216,7 +1216,7 @@ SpdyStream3::ConvertHeaders(nsACString &aHeadersOut)
         aHeadersOut.Append(nameString);
         aHeadersOut.Append(NS_LITERAL_CSTRING(": "));
 
-        // expand nullptr bytes in the value string
+        // expand NULL bytes in the value string
         for (char *cPtr = valueString.BeginWriting();
              cPtr && cPtr < valueString.EndWriting();
              ++cPtr) {
@@ -1283,11 +1283,10 @@ SpdyStream3::CompressToFrame(uint32_t data)
 {
   // convert the data to 4 byte network byte order and write that
   // to the compressed stream
-  unsigned char databuf[sizeof(data)];
-  NetworkEndian::writeUint32(databuf, data);
+  data = PR_htonl(data);
 
-  mZlib->next_in = databuf;
-  mZlib->avail_in = sizeof(databuf);
+  mZlib->next_in = reinterpret_cast<unsigned char *> (&data);
+  mZlib->avail_in = 4;
   ExecuteCompress(Z_NO_FLUSH);
 }
 
@@ -1298,12 +1297,11 @@ SpdyStream3::CompressToFrame(const char *data, uint32_t len)
   // Format calls for a network ordered 32 bit length
   // followed by the utf8 string
 
-  unsigned char lenbuf[sizeof(len)];
-  NetworkEndian::writeUint32(lenbuf, len);
+  uint32_t networkLen = PR_htonl(len);
 
   // write out the length
-  mZlib->next_in = lenbuf;
-  mZlib->avail_in = sizeof(lenbuf);
+  mZlib->next_in = reinterpret_cast<unsigned char *> (&networkLen);
+  mZlib->avail_in = 4;
   ExecuteCompress(Z_NO_FLUSH);
 
   // write out the data
@@ -1324,17 +1322,6 @@ void
 SpdyStream3::Close(nsresult reason)
 {
   mTransaction->Close(reason);
-}
-
-void
-SpdyStream3::UpdateRemoteWindow(int32_t delta)
-{
-  int64_t oldRemoteWindow = mRemoteWindow;
-  mRemoteWindow += delta;
-  if (oldRemoteWindow <= 0 && mRemoteWindow > 0) {
-    // the window has been opened :)
-    mSession->TransactionHasDataToWrite(this);
-  }
 }
 
 //-----------------------------------------------------------------------------

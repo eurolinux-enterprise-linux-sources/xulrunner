@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Util.h"
+
 #include "mozilla/dom/HTMLTableCellElement.h"
 #include "mozilla/dom/HTMLTableElement.h"
 #include "mozilla/dom/HTMLTableRowElement.h"
@@ -23,13 +25,22 @@ HTMLTableCellElement::~HTMLTableCellElement()
 }
 
 JSObject*
-HTMLTableCellElement::WrapNode(JSContext *aCx)
+HTMLTableCellElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
-  return HTMLTableCellElementBinding::Wrap(aCx, this);
+  return HTMLTableCellElementBinding::Wrap(aCx, aScope, this);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED(HTMLTableCellElement, nsGenericHTMLElement,
-                            nsIDOMHTMLTableCellElement)
+NS_IMPL_ADDREF_INHERITED(HTMLTableCellElement, Element)
+NS_IMPL_RELEASE_INHERITED(HTMLTableCellElement, Element)
+
+// QueryInterface implementation for HTMLTableCellElement
+NS_INTERFACE_TABLE_HEAD(HTMLTableCellElement)
+  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
+  NS_INTERFACE_TABLE_INHERITED1(HTMLTableCellElement,
+                                nsIDOMHTMLTableCellElement)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE
+NS_ELEMENT_INTERFACE_MAP_END
+
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableCellElement)
 
@@ -433,9 +444,9 @@ HTMLTableCellElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-void
-HTMLTableCellElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                            nsRuleData* aData)
+static 
+void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                           nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Position)) {
     // width: value

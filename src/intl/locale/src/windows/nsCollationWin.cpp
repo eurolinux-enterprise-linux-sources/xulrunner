@@ -7,6 +7,7 @@
 #include "nsCollationWin.h"
 #include "nsIServiceManager.h"
 #include "nsIComponentManager.h"
+#include "nsLocaleCID.h"
 #include "nsILocaleService.h"
 #include "nsIPlatformCharset.h"
 #include "nsWin32Locale.h"
@@ -17,7 +18,7 @@
 
 #undef CompareString
 
-NS_IMPL_ISUPPORTS(nsCollationWin, nsICollation)
+NS_IMPL_ISUPPORTS1(nsCollationWin, nsICollation)
 
 
 nsCollationWin::nsCollationWin() : mCollation(nullptr)
@@ -124,7 +125,7 @@ nsresult nsCollationWin::AllocateRawSortKey(int32_t strength,
 
   byteLen = LCMapStringW(mLCID, dwMapFlags, 
                          (LPCWSTR) PromiseFlatString(stringIn).get(),
-                         -1, nullptr, 0);
+                         -1, NULL, 0);
   buffer = PR_Malloc(byteLen);
   if (!buffer) {
     res = NS_ERROR_OUT_OF_MEMORY;

@@ -12,7 +12,6 @@
 #include "nsIDOMFile.h"
 #include "nsIFile.h"
 
-#include "mozilla/dom/quota/PersistenceType.h"
 #include "mozilla/dom/quota/StoragePrivilege.h"
 #include "nsDataHashtable.h"
 
@@ -22,33 +21,23 @@ BEGIN_INDEXEDDB_NAMESPACE
 
 class FileInfo;
 
-class FileManager MOZ_FINAL
+class FileManager
 {
   friend class FileInfo;
 
-  typedef mozilla::dom::quota::PersistenceType PersistenceType;
   typedef mozilla::dom::quota::StoragePrivilege StoragePrivilege;
 
 public:
-  FileManager(PersistenceType aPersistenceType, const nsACString& aGroup,
-              const nsACString& aOrigin, StoragePrivilege aPrivilege,
+  FileManager(const nsACString& aOrigin, StoragePrivilege aPrivilege,
               const nsAString& aDatabaseName)
-  : mPersistenceType(aPersistenceType), mGroup(aGroup), mOrigin(aOrigin),
-    mPrivilege(aPrivilege), mDatabaseName(aDatabaseName), mLastFileId(0),
-    mInvalidated(false)
+  : mOrigin(aOrigin), mPrivilege(aPrivilege), mDatabaseName(aDatabaseName),
+    mLastFileId(0), mInvalidated(false)
+  { }
+
+  ~FileManager()
   { }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FileManager)
-
-  PersistenceType Type()
-  {
-    return mPersistenceType;
-  }
-
-  const nsACString& Group() const
-  {
-    return mGroup;
-  }
 
   const nsACString& Origin() const
   {
@@ -90,20 +79,11 @@ public:
 
   static nsresult InitDirectory(nsIFile* aDirectory,
                                 nsIFile* aDatabaseFile,
-                                PersistenceType aPersistenceType,
-                                const nsACString& aGroup,
                                 const nsACString& aOrigin);
 
   static nsresult GetUsage(nsIFile* aDirectory, uint64_t* aUsage);
 
 private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~FileManager()
-  {
-  }
-
-  PersistenceType mPersistenceType;
-  nsCString mGroup;
   nsCString mOrigin;
   StoragePrivilege mPrivilege;
   nsString mDatabaseName;

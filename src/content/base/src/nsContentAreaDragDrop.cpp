@@ -21,6 +21,7 @@
 #include "nsIDOMEvent.h"
 #include "nsIDOMDragEvent.h"
 #include "nsPIDOMWindow.h"
+#include "nsIDOMDocument.h"
 #include "nsIDOMRange.h"
 #include "nsIFormControl.h"
 #include "nsIDOMHTMLAreaElement.h"
@@ -49,13 +50,8 @@
 #include "nsIMIMEService.h"
 #include "imgIContainer.h"
 #include "imgIRequest.h"
-#include "mozilla/dom/DataTransfer.h"
-#include "nsIMIMEInfo.h"
-#include "nsRange.h"
+#include "nsDOMDataTransfer.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/HTMLAreaElement.h"
-
-using namespace mozilla::dom;
 
 class MOZ_STACK_CLASS DragDataProducer
 {
@@ -64,18 +60,18 @@ public:
                    nsIContent* aTarget,
                    nsIContent* aSelectionTargetNode,
                    bool aIsAltKeyPressed);
-  nsresult Produce(DataTransfer* aDataTransfer,
+  nsresult Produce(nsDOMDataTransfer* aDataTransfer,
                    bool* aCanDrag,
                    nsISelection** aSelection,
                    nsIContent** aDragNode);
 
 private:
-  void AddString(DataTransfer* aDataTransfer,
+  void AddString(nsDOMDataTransfer* aDataTransfer,
                  const nsAString& aFlavor,
                  const nsAString& aData,
                  nsIPrincipal* aPrincipal);
   nsresult AddStringsToDataTransfer(nsIContent* aDragNode,
-                                    DataTransfer* aDataTransfer);
+                                    nsDOMDataTransfer* aDataTransfer);
   static nsresult GetDraggableSelectionData(nsISelection* inSelection,
                                             nsIContent* inRealTargetNode,
                                             nsIContent **outImageOrLinkNode,
@@ -112,7 +108,7 @@ nsContentAreaDragDrop::GetDragData(nsPIDOMWindow* aWindow,
                                    nsIContent* aTarget,
                                    nsIContent* aSelectionTargetNode,
                                    bool aIsAltKeyPressed,
-                                   DataTransfer* aDataTransfer,
+                                   nsDOMDataTransfer* aDataTransfer,
                                    bool* aCanDrag,
                                    nsISelection** aSelection,
                                    nsIContent** aDragNode)
@@ -127,7 +123,7 @@ nsContentAreaDragDrop::GetDragData(nsPIDOMWindow* aWindow,
 }
 
 
-NS_IMPL_ISUPPORTS(nsContentAreaDragDropDataProvider, nsIFlavorDataProvider)
+NS_IMPL_ISUPPORTS1(nsContentAreaDragDropDataProvider, nsIFlavorDataProvider)
 
 // SaveURIToFile
 // used on platforms where it's possible to drag items (e.g. images)
@@ -339,22 +335,25 @@ void
 DragDataProducer::GetNodeString(nsIContent* inNode,
                                 nsAString & outNodeString)
 {
-  nsCOMPtr<nsINode> node = inNode;
+  nsCOMPtr<nsIDOMNode> node = do_QueryInterface(inNode);
 
   outNodeString.Truncate();
 
   // use a range to get the text-equivalent of the node
-  nsCOMPtr<nsIDocument> doc = node->OwnerDoc();
-  mozilla::ErrorResult rv;
-  nsRefPtr<nsRange> range = doc->CreateRange(rv);
-  if (range) {
-    range->SelectNode(*node, rv);
-    range->ToString(outNodeString);
+  nsCOMPtr<nsIDOMDocument> doc;
+  node->GetOwnerDocument(getter_AddRefs(doc));
+  if (doc) {
+    nsCOMPtr<nsIDOMRange> range;
+    doc->CreateRange(getter_AddRefs(range));
+    if (range) {
+      range->SelectNode(node);
+      range->ToString(outNodeString);
+    }
   }
 }
 
 nsresult
-DragDataProducer::Produce(DataTransfer* aDataTransfer,
+DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
                           bool* aCanDrag,
                           nsISelection** aSelection,
                           nsIContent** aDragNode)
@@ -408,10 +407,16 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
   // if set, serialize the content under this node
   nsCOMPtr<nsIContent> nodeToSerialize;
 
+  bool isChromeShell = false;
   nsCOMPtr<nsIWebNavigation> webnav = do_GetInterface(mWindow);
   nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(webnav);
-  const bool isChromeShell =
-    dsti && dsti->ItemType() == nsIDocShellTreeItem::typeChrome;
+  if (dsti) {
+    int32_t type = -1;
+    if (NS_SUCCEEDED(dsti->GetItemType(&type)) &&
+        type == nsIDocShellTreeItem::typeChrome) {
+      isChromeShell = true;
+    }
+  }
 
   // In chrome shells, only allow dragging inside editable areas.
   if (isChromeShell && !editingElement)
@@ -500,11 +505,10 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
 
       if (area) {
         // use the alt text (or, if missing, the href) as the title
-        HTMLAreaElement* areaElem = static_cast<HTMLAreaElement*>(area.get());
-        areaElem->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
+        area->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
         if (mTitleString.IsEmpty()) {
           // this can be a relative link
-          areaElem->GetAttribute(NS_LITERAL_STRING("href"), mTitleString);
+          area->GetAttribute(NS_LITERAL_STRING("href"), mTitleString);
         }
 
         // we'll generate HTML like <a href="absurl">alt text</a>
@@ -664,30 +668,21 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
     }
     NS_ENSURE_SUCCESS(rv, rv);
 
-    nsCOMPtr<nsISupports> supports;
     nsCOMPtr<nsISupportsString> data;
     uint32_t dataSize;
-    rv = transferable->GetTransferData(kHTMLMime, getter_AddRefs(supports),
-                                       &dataSize);
-    data = do_QueryInterface(supports);
+    rv = transferable->GetTransferData(kHTMLMime, getter_AddRefs(data), &dataSize);
     if (NS_SUCCEEDED(rv)) {
       data->GetData(mHtmlString);
     }
-    rv = transferable->GetTransferData(kHTMLContext, getter_AddRefs(supports),
-                                       &dataSize);
-    data = do_QueryInterface(supports);
+    rv = transferable->GetTransferData(kHTMLContext, getter_AddRefs(data), &dataSize);
     if (NS_SUCCEEDED(rv)) {
       data->GetData(mContextString);
     }
-    rv = transferable->GetTransferData(kHTMLInfo, getter_AddRefs(supports),
-                                       &dataSize);
-    data = do_QueryInterface(supports);
+    rv = transferable->GetTransferData(kHTMLInfo, getter_AddRefs(data), &dataSize);
     if (NS_SUCCEEDED(rv)) {
       data->GetData(mInfoString);
     }
-    rv = transferable->GetTransferData(kUnicodeMime, getter_AddRefs(supports),
-                                       &dataSize);
-    data = do_QueryInterface(supports);
+    rv = transferable->GetTransferData(kUnicodeMime, getter_AddRefs(data), &dataSize);
     NS_ENSURE_SUCCESS(rv, rv); // require plain text at a minimum
     data->GetData(mTitleString);
   }
@@ -712,7 +707,7 @@ DragDataProducer::Produce(DataTransfer* aDataTransfer,
 }
 
 void
-DragDataProducer::AddString(DataTransfer* aDataTransfer,
+DragDataProducer::AddString(nsDOMDataTransfer* aDataTransfer,
                             const nsAString& aFlavor,
                             const nsAString& aData,
                             nsIPrincipal* aPrincipal)
@@ -726,7 +721,7 @@ DragDataProducer::AddString(DataTransfer* aDataTransfer,
 
 nsresult
 DragDataProducer::AddStringsToDataTransfer(nsIContent* aDragNode,
-                                           DataTransfer* aDataTransfer)
+                                           nsDOMDataTransfer* aDataTransfer)
 {
   NS_ASSERTION(aDragNode, "adding strings for null node");
 
@@ -738,13 +733,7 @@ DragDataProducer::AddStringsToDataTransfer(nsIContent* aDragNode,
   if (!mUrlString.IsEmpty() && mIsAnchor) {
     nsAutoString dragData(mUrlString);
     dragData.AppendLiteral("\n");
-    // Remove leading and trailing newlines in the title and replace them with
-    // space in remaining positions - they confuse PlacesUtils::unwrapNodes
-    // that expects url\ntitle formatted data for x-moz-url.
-    nsAutoString title(mTitleString);
-    title.Trim("\r\n");
-    title.ReplaceChar("\r\n", ' ');
-    dragData += title;
+    dragData += mTitleString;
 
     AddString(aDataTransfer, NS_LITERAL_STRING(kURLMime), dragData, principal);
     AddString(aDataTransfer, NS_LITERAL_STRING(kURLDataMime), mUrlString, principal);

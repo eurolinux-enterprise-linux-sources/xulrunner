@@ -18,17 +18,29 @@ namespace dom {
 
 class TableRowsCollection;
 
-class HTMLTableElement MOZ_FINAL : public nsGenericHTMLElement,
-                                   public nsIDOMHTMLTableElement
+class HTMLTableElement : public nsGenericHTMLElement,
+                         public nsIDOMHTMLTableElement
 {
 public:
-  HTMLTableElement(already_AddRefed<nsINodeInfo>& aNodeInfo);
+  HTMLTableElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~HTMLTableElement();
 
   NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLTableElement, table)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
+
+  // nsIDOMNode
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
+
+  // nsIDOMElement
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLElement
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
+  // nsIDOMHTMLTableElement
+  NS_DECL_NSIDOMHTMLTABLEELEMENT
 
   HTMLTableCaptionElement* GetCaption() const
   {
@@ -42,12 +54,7 @@ public:
       nsINode::AppendChild(*aCaption, rv);
     }
   }
-
-  void DeleteTFoot();
-
   already_AddRefed<nsGenericHTMLElement> CreateCaption();
-
-  void DeleteCaption();
 
   HTMLTableSectionElement* GetTHead() const
   {
@@ -66,8 +73,6 @@ public:
     }
   }
   already_AddRefed<nsGenericHTMLElement> CreateTHead();
-
-  void DeleteTHead();
 
   HTMLTableSectionElement* GetTFoot() const
   {
@@ -88,9 +93,6 @@ public:
   already_AddRefed<nsGenericHTMLElement> CreateTFoot();
 
   nsIHTMLCollection* TBodies();
-
-  already_AddRefed<nsGenericHTMLElement> CreateTBody();
-
   nsIHTMLCollection* Rows();
 
   already_AddRefed<nsGenericHTMLElement> InsertRow(int32_t aIndex,
@@ -179,6 +181,7 @@ public:
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
                               bool aCompileEventHandlers) MOZ_OVERRIDE;
@@ -201,7 +204,8 @@ public:
   nsMappedAttributes* GetAttributesMappedForCell();
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   nsIContent* GetChild(nsIAtom *aTag) const
   {
@@ -221,10 +225,6 @@ protected:
   nsMappedAttributes *mTableInheritedAttributes;
   void BuildInheritedAttributes();
   void ReleaseInheritedAttributes();
-
-private:
-  static void MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                                    nsRuleData* aData);
 };
 
 } // namespace dom

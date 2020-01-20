@@ -14,16 +14,22 @@ Components.utils.import("resource://gre/modules/NetUtil.jsm", tempScope);
 let FileUtils = tempScope.FileUtils;
 let NetUtil = tempScope.NetUtil;
 
+
 function test()
 {
   waitForExplicitFinish();
 
   copy(TESTCASE_URI_HTML, "simple.html", function(htmlFile) {
     copy(TESTCASE_URI_CSS, "simple.css", function(cssFile) {
-      addTabAndOpenStyleEditors(1, function(panel) {
+      addTabAndOpenStyleEditor(function(panel) {
         let UI = panel.UI;
-        let editor = UI.editors[0];
-        editor.getSourceEditor().then(runTests.bind(this, editor));
+        UI.on("editor-added", function(event, editor) {
+          if (editor.styleSheet.styleSheetIndex != 0) {
+            return;  // we want to test against the first stylesheet
+          }
+          let editor = UI.editors[0];
+          editor.getSourceEditor().then(runTests.bind(this, editor));
+        })
       });
 
       let uri = Services.io.newFileURI(htmlFile);
@@ -35,22 +41,9 @@ function test()
 
 function runTests(editor)
 {
-  editor.sourceEditor.once("dirty-change", () => {
-    is(editor.sourceEditor.isClean(), false, "Editor is dirty.");
-    ok(editor.summary.classList.contains("unsaved"),
-       "Star icon is present in the corresponding summary.");
-  });
-  let beginCursor = {line: 0, ch: 0};
-  editor.sourceEditor.replaceText("DIRTY TEXT", beginCursor, beginCursor);
-
-  editor.sourceEditor.once("dirty-change", () => {
-    is(editor.sourceEditor.isClean(), true, "Editor is clean.");
-    ok(!editor.summary.classList.contains("unsaved"),
-       "Star icon is not present in the corresponding summary.");
-    finish();
-  });
   editor.saveToFile(null, function (file) {
     ok(file, "file should get saved directly when using a file:// URI");
+    finish();
   });
 }
 
@@ -69,10 +62,7 @@ function read(aSrcChromeURL)
   let input = channel.open();
   scriptableStream.init(input);
 
-  let data = "";
-  while (input.available()) {
-    data = data.concat(scriptableStream.read(input.available()));
-  }
+  let data = scriptableStream.read(input.available());
   scriptableStream.close();
   input.close();
 

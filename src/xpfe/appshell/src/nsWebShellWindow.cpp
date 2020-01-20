@@ -26,7 +26,7 @@
 
 #include "nsIDOMXULElement.h"
 
-#include "nsWidgetInitData.h"
+#include "nsGUIEvent.h"
 #include "nsWidgetsCID.h"
 #include "nsIWidget.h"
 #include "nsIWidgetListener.h"
@@ -65,11 +65,10 @@
 
 #include "nsIBaseWindow.h"
 #include "nsIDocShellTreeItem.h"
+#include "nsIDocShellTreeNode.h"
 
 #include "nsIMarkupDocumentViewer.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/DebugOnly.h"
-#include "mozilla/MouseEvents.h"
 
 #ifdef XP_MACOSX
 #include "nsINativeMenuService.h"
@@ -89,6 +88,7 @@ nsWebShellWindow::nsWebShellWindow(uint32_t aChromeFlags)
   , mSPTimerLock("nsWebShellWindow.mSPTimerLock")
 {
 }
+
 
 nsWebShellWindow::~nsWebShellWindow()
 {
@@ -270,6 +270,12 @@ nsWebShellWindow::WindowMoved(nsIWidget* aWidget, int32_t x, int32_t y)
 bool
 nsWebShellWindow::WindowResized(nsIWidget* aWidget, int32_t aWidth, int32_t aHeight)
 {
+  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
+  if (pm) {
+    nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(mDocShell);
+    pm->AdjustPopupsOnWindowChange(window);
+  }
+
   nsCOMPtr<nsIBaseWindow> shellAsWin(do_QueryInterface(mDocShell));
   if (shellAsWin) {
     shellAsWin->SetPositionAndSize(0, 0, aWidth, aHeight, false);
@@ -293,15 +299,14 @@ nsWebShellWindow::RequestWindowClose(nsIWidget* aWidget)
   nsCOMPtr<nsIPresShell> presShell = mDocShell->GetPresShell();
 
   if (!presShell) {
-    mozilla::DebugOnly<bool> dying;
+    bool dying;
     MOZ_ASSERT(NS_SUCCEEDED(mDocShell->IsBeingDestroyed(&dying)) && dying,
                "No presShell, but window is not being destroyed");
   } else if (eventTarget) {
     nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    WidgetMouseEvent event(true, NS_XUL_CLOSE, nullptr,
-                           WidgetMouseEvent::eReal);
+    nsMouseEvent event(true, NS_XUL_CLOSE, nullptr, nsMouseEvent::eReal);
     if (NS_SUCCEEDED(eventTarget->DispatchDOMEvent(&event, nullptr, presContext, &status)) &&
         status == nsEventStatus_eConsumeNoDefault)
       return false;
@@ -448,7 +453,7 @@ public:
     : mWindow(aWindow)
   {}
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS
 
   NS_IMETHOD Notify(nsITimer* aTimer)
   {
@@ -464,7 +469,10 @@ private:
   nsRefPtr<nsWebShellWindow> mWindow;
 };
 
-NS_IMPL_ISUPPORTS(WebShellWindowTimerCallback, nsITimerCallback)
+NS_IMPL_THREADSAFE_ADDREF(WebShellWindowTimerCallback)
+NS_IMPL_THREADSAFE_RELEASE(WebShellWindowTimerCallback)
+NS_IMPL_THREADSAFE_QUERY_INTERFACE1(WebShellWindowTimerCallback,
+                                    nsITimerCallback)
 
 } // namespace mozilla
 
@@ -573,7 +581,7 @@ NS_IMETHODIMP
 nsWebShellWindow::OnStatusChange(nsIWebProgress* aWebProgress,
                                  nsIRequest* aRequest,
                                  nsresult aStatus,
-                                 const char16_t* aMessage)
+                                 const PRUnichar* aMessage)
 {
   NS_NOTREACHED("notification excluded in AddProgressListener(...)");
   return NS_OK;
@@ -688,8 +696,8 @@ bool nsWebShellWindow::ExecuteCloseHandler()
       contentViewer->GetPresContext(getter_AddRefs(presContext));
 
       nsEventStatus status = nsEventStatus_eIgnore;
-      WidgetMouseEvent event(true, NS_XUL_CLOSE, nullptr,
-                             WidgetMouseEvent::eReal);
+      nsMouseEvent event(true, NS_XUL_CLOSE, nullptr,
+                         nsMouseEvent::eReal);
 
       nsresult rv =
         eventTarget->DispatchDOMEvent(&event, nullptr, presContext, &status);
