@@ -1,0 +1,11 @@
+diff -up mozilla-esr31/browser/confvars.sh.webm-fix mozilla-esr31/browser/confvars.sh
+--- mozilla-esr31/browser/confvars.sh.webm-fix	2014-07-21 13:56:53.522253529 +0200
++++ mozilla-esr31/browser/confvars.sh	2014-07-21 13:57:49.983533186 +0200
+@@ -65,6 +65,6 @@ MOZ_PAY=1
+ # Enable activities. These are used for FxOS developers currently.
+ MOZ_ACTIVITIES=1
+ MOZ_JSDOWNLOADS=1
+-MOZ_WEBM_ENCODER=1
++#MOZ_WEBM_ENCODER=1
+ # Enable exact rooting on desktop.
+ JSGC_USE_EXACT_ROOTING=1

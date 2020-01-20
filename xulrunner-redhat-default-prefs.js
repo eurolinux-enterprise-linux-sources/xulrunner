@@ -13,3 +13,8 @@ pref("toolkit.storage.synchronous", 0);
 pref("browser.startup.homepage", "http://www.redhat.com");
 pref("startup.homepage_override_url", "http://www.redhat.com");
 pref("startup.homepage_welcome_url", "http://www.redhat.com");
+pref("javascript.options.baselinejit.content", false);
+pref("javascript.options.baselinejit.chrome", false);
+pref("extensions.shownSelectionUI",         true);
+pref("network.negotiate-auth.allow-insecure-ntlm-v1", true);
+pref("security.use_mozillapkix_verification", false);
